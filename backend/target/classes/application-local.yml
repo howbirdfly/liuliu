@@ -1,0 +1,52 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/liuliu_citywalk?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+  mail:
+    host: smtp.qq.com
+    port: 465
+    username: 1132768287@qq.com
+    password: eppiaocacxayiffa
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+
+amap:
+  web-key: a223365a46ab6b6a5a697598db9b392d
+  base-url: https://restapi.amap.com
+
+deepseek:
+  api-key: sk-43d7e59bc1474affa4bf4f63b44ed727
+  model: deepseek-chat
+  base-url: https://api.deepseek.com
+
+gemini:
+  api-key: ""
+  model: gemini-2.5-flash
+  base-url: https://generativelanguage.googleapis.com
+
+mission-verify-ai:
+  api-key: ""
+  model: qwen-vl-plus
+  base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  request-timeout-ms: 2200
+
+wechat:
+  open:
+    app-id: replace-with-your-app-id
+    app-secret: replace-with-your-app-secret
+    callback-url: http://localhost:8080/api/v1/auth/wechat/callback
+    frontend-base-url: http://localhost:3000
+
+jwt:
+  secret: liuliu-citywalk-miniapp-backend-secret-key-please-change
+  issuer: liuliu-backend
+  access-expire-seconds: 7200
+  refresh-expire-seconds: 2592000
