@@ -9,6 +9,17 @@ spring:
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:123456}
     driver-class-name: com.mysql.cj.jdbc.Driver
+  mail:
+    host: ${SMTP_HOST:smtp.qq.com}
+    port: ${SMTP_PORT:465}
+    username: ${SMTP_USERNAME:1132768287@qq.com}
+    password: ${SMTP_PASSWORD:eppiaocacxayiffa}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
 
 amap:
   web-key: ${AMAP_WEB_KEY:a223365a46ab6b6a5a697598db9b392d}

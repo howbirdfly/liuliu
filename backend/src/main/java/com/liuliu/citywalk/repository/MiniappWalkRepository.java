@@ -56,6 +56,7 @@ public class MiniappWalkRepository {
     }
 
     public MiniappWalkRecordResponse create(Long userId, MiniappCreateWalkRequest request) {
+        ensureUserExists(userId);
         List<String> photoList = normalizeStoredPhotoList(request.photoList());
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
@@ -258,6 +259,31 @@ public class MiniappWalkRepository {
         } catch (JsonProcessingException error) {
             throw new IllegalStateException("json_write_failed", error);
         }
+    }
+
+    private void ensureUserExists(Long userId) {
+        if (userId == null || userId <= 0) {
+            return;
+        }
+        Integer count = jdbcTemplate.queryForObject(
+                "select count(1) from users where id = ?",
+                Integer.class,
+                userId
+        );
+        if (count != null && count > 0) {
+            return;
+        }
+        jdbcTemplate.update(
+                """
+                insert into users (
+                  id, openid, nickname, avatar_url, role, status, source, created_at, updated_at, last_login_at
+                ) values (?, ?, ?, ?, 'user', 'active', 'miniapp', now(), now(), now())
+                """,
+                userId,
+                "debug_" + userId,
+                "Debug User",
+                ""
+        );
     }
 
     private <T> T parseJson(String json, TypeReference<T> typeReference, T fallback) {

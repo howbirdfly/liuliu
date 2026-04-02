@@ -1,6 +1,9 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.model.dto.request.EmailCodeRequest;
+import com.liuliu.citywalk.model.dto.request.EmailLoginRequest;
+import com.liuliu.citywalk.model.dto.request.EmailRegisterRequest;
 import com.liuliu.citywalk.model.dto.request.LoginRequest;
 import com.liuliu.citywalk.model.dto.request.WebSyncUserRequest;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
@@ -8,6 +11,7 @@ import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
 import com.liuliu.citywalk.model.dto.response.WechatLoginUrlResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
+import com.liuliu.citywalk.service.EmailAuthService;
 import com.liuliu.citywalk.service.MiniappSessionService;
 import com.liuliu.citywalk.service.WechatAuthService;
 import jakarta.validation.Valid;
@@ -28,15 +32,18 @@ public class AuthController {
     private final WechatAuthService wechatAuthService;
     private final AuthTokenService authTokenService;
     private final MiniappSessionService miniappSessionService;
+    private final EmailAuthService emailAuthService;
 
     public AuthController(
             WechatAuthService wechatAuthService,
             AuthTokenService authTokenService,
-            MiniappSessionService miniappSessionService
+            MiniappSessionService miniappSessionService,
+            EmailAuthService emailAuthService
     ) {
         this.wechatAuthService = wechatAuthService;
         this.authTokenService = authTokenService;
         this.miniappSessionService = miniappSessionService;
+        this.emailAuthService = emailAuthService;
     }
 
     @PostMapping("/login")
@@ -63,6 +70,36 @@ public class AuthController {
                 user
         );
         return ApiResponse.success(response);
+    }
+
+    @PostMapping("/email/send-code")
+    public ApiResponse<Boolean> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
+        try {
+            emailAuthService.sendVerificationCode(request.email());
+            return ApiResponse.success(Boolean.TRUE);
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        } catch (RuntimeException error) {
+            return ApiResponse.fail(500, "email_send_failed");
+        }
+    }
+
+    @PostMapping("/email/register")
+    public ApiResponse<LoginResponse> emailRegister(@Valid @RequestBody EmailRegisterRequest request) {
+        try {
+            return ApiResponse.success(emailAuthService.register(request.email(), request.password(), request.code()));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        }
+    }
+
+    @PostMapping("/email/login")
+    public ApiResponse<LoginResponse> emailLogin(@Valid @RequestBody EmailLoginRequest request) {
+        try {
+            return ApiResponse.success(emailAuthService.login(request.email(), request.password()));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        }
     }
 
     @PostMapping("/sync-user")

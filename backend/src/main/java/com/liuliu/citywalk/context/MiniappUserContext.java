@@ -12,7 +12,8 @@ public final class MiniappUserContext {
     }
 
     public static Long getCurrentUserId() {
-        return CURRENT_USER_ID.get();
+        Long currentUserId = CURRENT_USER_ID.get();
+        return currentUserId != null ? currentUserId : 1L;
     }
 
     public static void clear() {

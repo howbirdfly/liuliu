@@ -81,6 +81,41 @@ export async function mockLogin(): Promise<void> {
   saveToken(response.token);
 }
 
+export async function sendEmailCode(email: string): Promise<void> {
+  await apiRequest('/api/v1/auth/email/send-code', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function registerWithEmail(email: string, password: string, code: string): Promise<void> {
+  const response = await apiRequest<{
+    token: string;
+    refreshToken: string;
+    expiresIn: number;
+    user: AppUser;
+  }>('/api/v1/auth/email/register', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, code }),
+  });
+
+  saveToken(response.token);
+}
+
+export async function loginWithEmail(email: string, password: string): Promise<void> {
+  const response = await apiRequest<{
+    token: string;
+    refreshToken: string;
+    expiresIn: number;
+    user: AppUser;
+  }>('/api/v1/auth/email/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+
+  saveToken(response.token);
+}
+
 export async function redirectToWechatLogin(): Promise<void> {
   if (MOCK_LOGIN_FLAG) {
     await mockLogin();

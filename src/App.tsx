@@ -17,7 +17,10 @@ import {
   getStoredToken,
   loadCurrentUser,
   logoutFromServer,
+  loginWithEmail,
+  registerWithEmail,
   redirectToWechatLogin,
+  sendEmailCode,
 } from './services/authApi';
 import {
   PRESET_THEMES,
@@ -324,6 +327,15 @@ function AmapScene(props: {
 
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const [emailLoginMode, setEmailLoginMode] = useState<'login' | 'register'>('login');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [emailCodeInput, setEmailCodeInput] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isSendingCode, setIsSendingCode] = useState(false);
+  const [sendCodeCooldown, setSendCodeCooldown] = useState(0);
   const [activeTab, setActiveTab] = useState<'explore' | 'community'>('explore');
   const [currentTheme, setCurrentTheme] = useState<WalkTheme | null>(PRESET_THEMES[0]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
@@ -380,6 +392,16 @@ export default function App() {
         setIsLoadingCommunity(false);
       });
   }, [activeTab]);
+
+  useEffect(() => {
+    if (sendCodeCooldown <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setSendCodeCooldown((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [sendCodeCooldown]);
 
   useEffect(() => {
     if (!isTracking || !navigator.geolocation) {
@@ -673,12 +695,78 @@ export default function App() {
     }
   };
 
-  const handleSignIn = async () => {
+  const handleWechatLogin = async () => {
     try {
       await redirectToWechatLogin();
     } catch (error) {
       console.error('Auth error:', error);
       alert('登录失败，请稍后重试。');
+    }
+  };
+
+  const handleSignIn = () => {
+    setAuthError('');
+    setEmailLoginMode('login');
+    setShowEmailLogin(true);
+  };
+
+  const handleEmailAuthSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedEmail = emailInput.trim().toLowerCase();
+    if (!trimmedEmail || !trimmedEmail.endsWith('@qq.com')) {
+      setAuthError('请使用 QQ 邮箱登录（例如：name@qq.com）。');
+      return;
+    }
+    if (!passwordInput || passwordInput.length < 6) {
+      setAuthError('密码至少 6 位。');
+      return;
+    }
+
+    setIsAuthLoading(true);
+    setAuthError('');
+    try {
+      if (emailLoginMode === 'register') {
+        if (!emailCodeInput.trim()) {
+          setAuthError('请输入邮箱验证码。');
+          setIsAuthLoading(false);
+          return;
+        }
+        await registerWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
+      } else {
+        await loginWithEmail(trimmedEmail, passwordInput);
+      }
+      const profile = await loadCurrentUser();
+      setUser(profile);
+      setShowEmailLogin(false);
+      setPasswordInput('');
+      setEmailCodeInput('');
+    } catch (error) {
+      console.error('Email auth error:', error);
+      setAuthError(emailLoginMode === 'register' ? '注册失败，请检查验证码或邮箱。' : '登录失败，请检查邮箱或密码。');
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const handleSendEmailCode = async () => {
+    const trimmedEmail = emailInput.trim().toLowerCase();
+    if (!trimmedEmail || !trimmedEmail.endsWith('@qq.com')) {
+      setAuthError('请先填写正确的 QQ 邮箱。');
+      return;
+    }
+    if (sendCodeCooldown > 0 || isSendingCode) {
+      return;
+    }
+    setIsSendingCode(true);
+    setAuthError('');
+    try {
+      await sendEmailCode(trimmedEmail);
+      setSendCodeCooldown(60);
+    } catch (error) {
+      console.error('Send email code error:', error);
+      setAuthError('验证码发送失败，请稍后重试。');
+    } finally {
+      setIsSendingCode(false);
     }
   };
 
@@ -800,11 +888,102 @@ export default function App() {
                 className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
               >
                 <LogIn className="h-4 w-4" />
-                游客登录
+                QQ 邮箱登录
               </button>
             )}
           </div>
         </header>
+
+        {showEmailLogin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+            <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-900">QQ 邮箱登录</h2>
+                  <p className="text-sm text-slate-500">
+                    {emailLoginMode === 'register' ? '创建账号并绑定邮箱' : '使用邮箱 + 密码登录'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEmailLogin(false)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
+                >
+                  关闭
+                </button>
+              </div>
+
+              <form onSubmit={handleEmailAuthSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">QQ 邮箱</label>
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(event) => setEmailInput(event.target.value)}
+                    placeholder="name@qq.com"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">密码</label>
+                  <input
+                    type="password"
+                    value={passwordInput}
+                    onChange={(event) => setPasswordInput(event.target.value)}
+                    placeholder="至少 6 位"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                  />
+                </div>
+                {emailLoginMode === 'register' ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">邮箱验证码</label>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        value={emailCodeInput}
+                        onChange={(event) => setEmailCodeInput(event.target.value)}
+                        placeholder="6 位验证码"
+                        className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendEmailCode}
+                        disabled={isSendingCode || sendCodeCooldown > 0}
+                        className="rounded-2xl border border-slate-200 px-3 text-sm text-slate-600 disabled:opacity-60"
+                      >
+                        {sendCodeCooldown > 0 ? `${sendCodeCooldown}s` : isSendingCode ? '发送中' : '发送验证码'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {authError ? <div className="text-sm text-rose-500">{authError}</div> : null}
+                <button
+                  type="submit"
+                  disabled={isAuthLoading}
+                  className="flex w-full items-center justify-center rounded-2xl bg-slate-900 py-3 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {isAuthLoading ? '处理中...' : emailLoginMode === 'register' ? '创建账号' : '登录'}
+                </button>
+              </form>
+
+              <div className="mt-4 flex items-center justify-between text-sm">
+                <span className="text-slate-500">
+                  {emailLoginMode === 'register' ? '已有账号？' : '没有账号？'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmailLoginMode(emailLoginMode === 'register' ? 'login' : 'register');
+                    setAuthError('');
+                  }}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-slate-600"
+                >
+                  {emailLoginMode === 'register' ? '去登录' : '去注册'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {activeTab === 'explore' ? (
           <main className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">

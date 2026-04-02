@@ -38,6 +38,12 @@ public class MiniappJwtInterceptor implements HandlerInterceptor {
             return true;
         }
 
+        String requestUri = request.getRequestURI();
+        if (requestUri != null && requestUri.startsWith("/api/v1/miniapp/walks")) {
+            // Temporary: allow miniapp walks endpoints without token.
+            return true;
+        }
+
         String token = extractBearerToken(request.getHeader(HttpHeaders.AUTHORIZATION));
         if (token == null) {
             writeUnauthorized(response, "login_required");
