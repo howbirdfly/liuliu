@@ -5,15 +5,15 @@ spring:
   application:
     name: citywalk-backend
   datasource:
-    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/liuliu_citywalk?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
-    username: ${MYSQL_USERNAME:root}
-    password: ${MYSQL_PASSWORD:123456}
+    url: ${MYSQL_URL:}
+    username: ${MYSQL_USERNAME:}
+    password: ${MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
   mail:
-    host: ${SMTP_HOST:smtp.qq.com}
-    port: ${SMTP_PORT:465}
-    username: ${SMTP_USERNAME:1132768287@qq.com}
-    password: ${SMTP_PASSWORD:eppiaocacxayiffa}
+    host: ${SMTP_HOST:}
+    port: ${SMTP_PORT:}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
     properties:
       mail:
         smtp:
@@ -22,34 +22,34 @@ spring:
             enable: true
 
 amap:
-  web-key: ${AMAP_WEB_KEY:a223365a46ab6b6a5a697598db9b392d}
-  base-url: ${AMAP_BASE_URL:https://restapi.amap.com}
+  web-key: ${AMAP_WEB_KEY:}
+  base-url: ${AMAP_BASE_URL:}
 
 deepseek:
-  api-key: ${DEEPSEEK_API_KEY:sk-43d7e59bc1474affa4bf4f63b44ed727}
-  model: ${DEEPSEEK_MODEL:deepseek-chat}
-  base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  api-key: ${DEEPSEEK_API_KEY:}
+  model: ${DEEPSEEK_MODEL:}
+  base-url: ${DEEPSEEK_BASE_URL:}
 
 gemini:
   api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-2.5-flash}
-  base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
+  model: ${GEMINI_MODEL:}
+  base-url: ${GEMINI_BASE_URL:}
 
 mission-verify-ai:
   api-key: ${MISSION_VERIFY_AI_API_KEY:${AI_API_KEY:}}
-  model: ${MISSION_VERIFY_AI_MODEL:${AI_VISION_MODEL:qwen-vl-plus}}
-  base-url: ${MISSION_VERIFY_AI_BASE_URL:${AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
+  model: ${MISSION_VERIFY_AI_MODEL:${AI_VISION_MODEL:}}
+  base-url: ${MISSION_VERIFY_AI_BASE_URL:${AI_BASE_URL:}}
   request-timeout-ms: ${MISSION_VERIFY_AI_REQUEST_TIMEOUT_MS:${AI_REQUEST_TIMEOUT_MS:2200}}
 
 wechat:
   open:
-    app-id: ${WECHAT_OPEN_APP_ID:replace-with-your-app-id}
-    app-secret: ${WECHAT_OPEN_APP_SECRET:replace-with-your-app-secret}
-    callback-url: ${WECHAT_OPEN_CALLBACK_URL:http://localhost:8080/api/v1/auth/wechat/callback}
-    frontend-base-url: ${WECHAT_OPEN_FRONTEND_BASE_URL:http://localhost:3000}
+    app-id: ${WECHAT_OPEN_APP_ID:}
+    app-secret: ${WECHAT_OPEN_APP_SECRET:}
+    callback-url: ${WECHAT_OPEN_CALLBACK_URL:}
+    frontend-base-url: ${WECHAT_OPEN_FRONTEND_BASE_URL:}
 
 jwt:
-  secret: ${JWT_SECRET:liuliu-citywalk-miniapp-backend-secret-key-please-change}
-  issuer: ${JWT_ISSUER:liuliu-backend}
-  access-expire-seconds: ${JWT_ACCESS_EXPIRE_SECONDS:7200}
-  refresh-expire-seconds: ${JWT_REFRESH_EXPIRE_SECONDS:2592000}
+  secret: ${JWT_SECRET:}
+  issuer: ${JWT_ISSUER:}
+  access-expire-seconds: ${JWT_ACCESS_EXPIRE_SECONDS:}
+  refresh-expire-seconds: ${JWT_REFRESH_EXPIRE_SECONDS:}
