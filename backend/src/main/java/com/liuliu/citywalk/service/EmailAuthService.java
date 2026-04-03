@@ -3,7 +3,6 @@ package com.liuliu.citywalk.service;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
 import com.liuliu.citywalk.repository.EmailVerificationRepository;
-import com.liuliu.citywalk.repository.MiniappSessionRepository;
 import com.liuliu.citywalk.repository.UserCredentialRepository;
 import org.springframework.stereotype.Service;
 
@@ -20,20 +19,17 @@ public class EmailAuthService {
     private static final int SALT_LENGTH = 16;
 
     private final AuthTokenService authTokenService;
-    private final MiniappSessionRepository miniappSessionRepository;
     private final UserCredentialRepository userCredentialRepository;
     private final EmailVerificationRepository emailVerificationRepository;
     private final EmailSender emailSender;
 
     public EmailAuthService(
             AuthTokenService authTokenService,
-            MiniappSessionRepository miniappSessionRepository,
             UserCredentialRepository userCredentialRepository,
             EmailVerificationRepository emailVerificationRepository,
             EmailSender emailSender
     ) {
         this.authTokenService = authTokenService;
-        this.miniappSessionRepository = miniappSessionRepository;
         this.userCredentialRepository = userCredentialRepository;
         this.emailVerificationRepository = emailVerificationRepository;
         this.emailSender = emailSender;
@@ -99,13 +95,6 @@ public class EmailAuthService {
     private LoginResponse buildLoginResponse(Long userId, String nickname, String avatar) {
         String token = authTokenService.createAccessToken(userId);
         String refreshToken = authTokenService.createRefreshToken(userId);
-        miniappSessionRepository.createSession(
-                userId,
-                token,
-                refreshToken,
-                authTokenService.getAccessExpireSeconds(),
-                "web"
-        );
         return new LoginResponse(
                 token,
                 refreshToken,

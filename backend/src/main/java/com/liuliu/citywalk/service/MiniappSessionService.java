@@ -3,7 +3,6 @@ package com.liuliu.citywalk.service;
 import com.liuliu.citywalk.context.MiniappUserContext;
 import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappUserResponse;
-import com.liuliu.citywalk.repository.MiniappSessionRepository;
 import com.liuliu.citywalk.repository.MiniappUserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,17 +12,14 @@ public class MiniappSessionService {
 
     private final AuthTokenService authTokenService;
     private final MiniappUserRepository miniappUserRepository;
-    private final MiniappSessionRepository miniappSessionRepository;
     private final StoredMiniappUser guestUser = new StoredMiniappUser(0L, "guest", "游客", "", "guest", 0L, 0L);
 
     public MiniappSessionService(
             AuthTokenService authTokenService,
-            MiniappUserRepository miniappUserRepository,
-            MiniappSessionRepository miniappSessionRepository
+            MiniappUserRepository miniappUserRepository
     ) {
         this.authTokenService = authTokenService;
         this.miniappUserRepository = miniappUserRepository;
-        this.miniappSessionRepository = miniappSessionRepository;
     }
 
     @Transactional
@@ -45,13 +41,6 @@ public class MiniappSessionService {
 
         String token = authTokenService.createAccessToken(user.id());
         String refreshToken = authTokenService.createRefreshToken(user.id());
-        miniappSessionRepository.createSession(
-                user.id(),
-                token,
-                refreshToken,
-                authTokenService.getAccessExpireSeconds(),
-                normalizeClientType(clientType)
-        );
 
         return new MiniappSyncUserResponse(token, refreshToken, authTokenService.getAccessExpireSeconds(), toResponse(user), user.openid());
     }
@@ -75,9 +64,7 @@ public class MiniappSessionService {
 
         try {
             AuthTokenService.TokenClaims claims = authTokenService.parseAccessToken(token);
-            return miniappSessionRepository.findValidByAccessToken(token)
-                    .filter(session -> claims.userId().equals(session.userId()))
-                    .flatMap(session -> miniappUserRepository.findById(session.userId()))
+            return miniappUserRepository.findById(claims.userId())
                     .map(this::toStoredUser)
                     .orElse(guestUser);
         } catch (Exception error) {

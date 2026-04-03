@@ -35,6 +35,7 @@ import {
 import { createWalk, fetchPublicWalks, WalkItem } from './services/walkApi';
 import { submitTheme } from './services/themeCommunityApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
+import { getAuthRequiredEventName } from './services/apiClient';
 
 type SearchLocation = {
   name: string;
@@ -375,6 +376,17 @@ export default function App() {
         console.error('Error loading current user:', error);
         setUser(null);
       });
+  }, []);
+
+  useEffect(() => {
+    const eventName = getAuthRequiredEventName();
+    const handleAuthRequired = () => {
+      setAuthError('');
+      setEmailLoginMode('login');
+      setShowEmailLogin(true);
+    };
+    window.addEventListener(eventName, handleAuthRequired);
+    return () => window.removeEventListener(eventName, handleAuthRequired);
   }, []);
 
   useEffect(() => {
