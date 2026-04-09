@@ -3,8 +3,11 @@ package com.liuliu.citywalk.controller;
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
+import com.liuliu.citywalk.service.AuthTokenService;
 import com.liuliu.citywalk.service.WalkService;
 import jakarta.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,30 +17,32 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/walks")
 public class WalkController {
 
-    private static final Long WEB_DEBUG_USER_ID = 1001L;
-
     private final WalkService walkService;
+    private final AuthTokenService authTokenService;
 
-    public WalkController(WalkService walkService) {
+    public WalkController(WalkService walkService, AuthTokenService authTokenService) {
         this.walkService = walkService;
+        this.authTokenService = authTokenService;
     }
 
     @PostMapping
-    public ApiResponse<WalkResponse> create(@Valid @RequestBody CreateWalkRequest request) {
-        WalkResponse record = walkService.create(WEB_DEBUG_USER_ID, request);
+    public ApiResponse<WalkResponse> create(HttpServletRequest request, @Valid @RequestBody CreateWalkRequest body) {
+        Long userId = resolveUserId(request);
+        WalkResponse record = walkService.create(userId, body);
         return ApiResponse.success(record);
     }
 
     @GetMapping("/me")
-    public ApiResponse<List<WalkResponse>> myWalks(@RequestParam(defaultValue = "1") Integer page,
+    public ApiResponse<List<WalkResponse>> myWalks(HttpServletRequest request,
+                                                   @RequestParam(defaultValue = "1") Integer page,
                                                    @RequestParam(defaultValue = "20") Integer pageSize) {
-        return ApiResponse.success(walkService.listMyWalks(WEB_DEBUG_USER_ID, pageSize));
+        Long userId = resolveUserId(request);
+        return ApiResponse.success(walkService.listMyWalks(userId, pageSize));
     }
 
     @GetMapping("/public")
@@ -49,5 +54,24 @@ public class WalkController {
     @GetMapping("/{walkId}")
     public ApiResponse<WalkResponse> detail(@PathVariable Long walkId) {
         return ApiResponse.success(walkService.getDetail(walkId));
+    }
+
+    private Long resolveUserId(HttpServletRequest request) {
+        String token = extractBearerToken(request.getHeader(HttpHeaders.AUTHORIZATION));
+        if (token == null) {
+            throw new IllegalStateException("login_required");
+        }
+        return authTokenService.parseAccessToken(token).userId();
+    }
+
+    private String extractBearerToken(String authorizationHeader) {
+        if (authorizationHeader == null || authorizationHeader.isBlank()) {
+            return null;
+        }
+        if (!authorizationHeader.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return null;
+        }
+        String token = authorizationHeader.substring(7).trim();
+        return token.isBlank() ? null : token;
     }
 }

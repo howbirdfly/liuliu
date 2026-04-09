@@ -177,7 +177,8 @@ public class GeminiThemeService {
                 payload.category(),
                 payload.missions(),
                 payload.vibeColor(),
-                PROVIDER
+                PROVIDER,
+                null
         );
     }
 

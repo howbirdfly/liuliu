@@ -4,6 +4,7 @@ import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.response.FileUploadResponse;
 import com.liuliu.citywalk.repository.UploadedFileRepository;
 import com.liuliu.citywalk.service.MiniappSessionService;
+import com.liuliu.citywalk.util.AliOssUtil;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,28 +14,24 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/files")
 public class FileController {
 
-    private static final Path UPLOAD_ROOT = Paths.get("uploads");
-
     private final UploadedFileRepository uploadedFileRepository;
     private final MiniappSessionService miniappSessionService;
+    private final AliOssUtil aliOssUtil;
 
-    public FileController(UploadedFileRepository uploadedFileRepository, MiniappSessionService miniappSessionService) {
+    public FileController(UploadedFileRepository uploadedFileRepository,
+                          MiniappSessionService miniappSessionService,
+                          AliOssUtil aliOssUtil) {
         this.uploadedFileRepository = uploadedFileRepository;
         this.miniappSessionService = miniappSessionService;
+        this.aliOssUtil = aliOssUtil;
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -46,26 +43,16 @@ public class FileController {
         String extension = extractExtension(originalName);
         String fileId = "f_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().replace("-", "");
         String fileName = fileId + extension;
-        Path targetDirectory = UPLOAD_ROOT.resolve(safeBizType);
-        Files.createDirectories(targetDirectory);
-
-        Path targetPath = targetDirectory.resolve(fileName).normalize();
-        try (InputStream inputStream = file.getInputStream()) {
-            Files.copy(inputStream, targetPath, StandardCopyOption.REPLACE_EXISTING);
-        }
-
-        String relativePath = "/uploads/" + safeBizType + "/" + fileName;
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(relativePath)
-                .toUriString();
+        String objectName = safeBizType + "/" + fileName;
+        String url = aliOssUtil.upload(file.getBytes(), objectName);
 
         MiniappSessionService.StoredMiniappUser user = miniappSessionService.resolveUser(authorizationHeader);
         uploadedFileRepository.save(
                 user == null || user.isGuest() ? null : user.id(),
                 safeBizType,
-                fileId,
+                objectName,
                 originalName,
-                relativePath,
+                url,
                 file.getContentType(),
                 file.getSize()
         );

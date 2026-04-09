@@ -7,6 +7,7 @@ export interface WalkTheme {
   missions: string[];
   vibeColor: string;
   provider?: string;
+  coverImageUrl?: string;
 }
 
 export interface MapPOI {
@@ -23,6 +24,7 @@ interface ThemeApiResponse {
   missions: string[];
   vibeColor: string;
   provider?: string;
+  coverImageUrl?: string;
 }
 
 interface LocationContextApiResponse {
@@ -71,6 +73,7 @@ function normalizeTheme(data?: Partial<ThemeApiResponse> | null, fallback?: Walk
     missions: Array.isArray(data?.missions) && data!.missions!.length > 0 ? data!.missions! : base.missions,
     vibeColor: data?.vibeColor || base.vibeColor,
     provider: data?.provider,
+    coverImageUrl: data?.coverImageUrl,
   };
 }
 

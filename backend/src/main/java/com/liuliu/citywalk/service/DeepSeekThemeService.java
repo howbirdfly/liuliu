@@ -211,7 +211,8 @@ public class DeepSeekThemeService {
                 payload.category(),
                 payload.missions(),
                 payload.vibeColor(),
-                PROVIDER
+                PROVIDER,
+                null
         );
     }
 

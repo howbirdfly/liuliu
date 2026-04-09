@@ -48,6 +48,10 @@ export async function createWalk(payload: CreateWalkPayload): Promise<WalkItem> 
   });
 }
 
+export async function fetchMyWalks(page = 1, pageSize = 10): Promise<WalkItem[]> {
+  return apiRequest<WalkItem[]>(`/api/v1/walks/me?page=${page}&pageSize=${pageSize}`);
+}
+
 export async function fetchPublicWalks(page = 1, pageSize = 20): Promise<WalkItem[]> {
   return apiRequest<WalkItem[]>(`/api/v1/walks/public?page=${page}&pageSize=${pageSize}`);
 }

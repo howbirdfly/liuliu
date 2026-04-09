@@ -27,7 +27,8 @@ public class ThemeController {
                 request.category(),
                 request.missions(),
                 "#14b8a6",
-                "user"
+                "user",
+                request.coverImageUrl()
         );
         return ApiResponse.success(response);
     }
@@ -37,8 +38,16 @@ public class ThemeController {
                                                  @RequestParam(defaultValue = "20") Integer pageSize,
                                                  @RequestParam(defaultValue = "approved") String status) {
         List<ThemeResponse> response = List.of(
-                new ThemeResponse(101L, "夜色霓虹", "观察夜色如何改变街道气质", "视觉",
-                        List.of("寻找一处霓虹倒影", "观察一段灯光变化", "记录一条适合慢走的街"), "#ec4899", "community")
+                new ThemeResponse(
+                        101L,
+                        "夜色霓虹",
+                        "观察夜色如何改变街道气质",
+                        "视觉",
+                        List.of("寻找一处霓虹倒影", "观察一段灯光变化", "记录一条适合慢走的街"),
+                        "#ec4899",
+                        "community",
+                        null
+                )
         );
         return ApiResponse.success(response);
     }
@@ -52,7 +61,8 @@ public class ThemeController {
                 "视觉",
                 List.of("寻找一处霓虹倒影", "观察一段灯光变化", "记录一条适合慢走的街"),
                 "#ec4899",
-                "community"
+                "community",
+                null
         );
         return ApiResponse.success(response);
     }

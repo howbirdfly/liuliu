@@ -63,7 +63,8 @@ public class MiniappAiService {
                     "组合",
                     List.of("选择两个方向后再试一次"),
                     "#7c6a94",
-                    "backend"
+                    "backend",
+                    null
             );
             return new MiniappThemeResultResponse(fallback, "combined-fallback");
         }

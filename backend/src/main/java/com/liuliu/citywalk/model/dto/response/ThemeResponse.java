@@ -9,6 +9,7 @@ public record ThemeResponse(
         String category,
         List<String> missions,
         String vibeColor,
-        String provider
+        String provider,
+        String coverImageUrl
 ) {
 }

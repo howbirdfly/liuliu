@@ -1,4 +1,4 @@
-import { getApiBaseUrlForDebug } from './apiClient';
+import { getApiBaseUrlForDebug, getAuthTokenStorageKey } from './apiClient';
 
 export interface UploadFileResult {
   fileId: string;
@@ -29,9 +29,13 @@ export async function uploadDataUrl(
   const formData = new FormData();
   formData.append('file', dataUrlToFile(dataUrl, fileName));
   formData.append('bizType', bizType);
+  const token = typeof window !== 'undefined' ? window.localStorage.getItem(getAuthTokenStorageKey()) : null;
 
   const response = await fetch(`${getApiBaseUrlForDebug()}/api/v1/files/upload`, {
     method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: formData,
   });
 

@@ -16,7 +16,7 @@ public class UploadedFileRepository {
         jdbcTemplate.update(
                 """
                 insert into uploaded_files (user_id, biz_type, file_key, file_name, file_url, content_type, file_size, storage_type, created_at)
-                values (?, ?, ?, ?, ?, ?, ?, 'local', now())
+                values (?, ?, ?, ?, ?, ?, ?, 'oss', now())
                 """,
                 userId,
                 bizType,

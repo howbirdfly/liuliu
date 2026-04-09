@@ -32,9 +32,9 @@ import {
   getLocationContext,
   searchLocationContext,
 } from './services/themeService';
-import { createWalk, fetchPublicWalks, WalkItem } from './services/walkApi';
-import { submitTheme } from './services/themeCommunityApi';
+import { createWalk, fetchMyWalks, fetchPublicWalks, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
+import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
 
 type SearchLocation = {
@@ -52,6 +52,10 @@ type PathPoint = {
 const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '质感漫步'];
 const COMBINE_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步'];
 const DEFAULT_CENTER: [number, number] = [31.2304, 121.4737];
+const DEFAULT_MAP_ZOOM = 16;
+const TRACKING_MAP_ZOOM = 19;
+const MIN_TRACKING_DISTANCE_METERS = 8;
+const MAX_ACCEPTABLE_POSITION_ACCURACY_METERS = 60;
 
 declare global {
   interface Window {
@@ -151,37 +155,115 @@ function calculatePathDistance(points: PathPoint[]) {
 
   let totalMeters = 0;
   for (let index = 1; index < points.length; index += 1) {
-    const previousPoint = points[index - 1];
-    const currentPoint = points[index];
-    const earthRadius = 6371000;
-    const dLat = ((currentPoint.lat - previousPoint.lat) * Math.PI) / 180;
-    const dLng = ((currentPoint.lng - previousPoint.lng) * Math.PI) / 180;
-    const lat1 = (previousPoint.lat * Math.PI) / 180;
-    const lat2 = (currentPoint.lat * Math.PI) / 180;
-    const haversine =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    totalMeters += 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+    totalMeters += calculateDistanceMeters(points[index - 1], points[index]);
   }
 
   return totalMeters;
 }
 
+function calculateDistanceMeters(
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number },
+) {
+  const earthRadius = 6371000;
+  const dLat = ((end.lat - start.lat) * Math.PI) / 180;
+  const dLng = ((end.lng - start.lng) * Math.PI) / 180;
+  const lat1 = (start.lat * Math.PI) / 180;
+  const lat2 = (end.lat * Math.PI) / 180;
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+  return 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function convertWgs84ToGcj02(lat: number, lng: number) {
+  if (isOutOfChina(lat, lng)) {
+    return { lat, lng };
+  }
+
+  const a = 6378245.0;
+  const ee = 0.00669342162296594323;
+  let dLat = transformLat(lng - 105.0, lat - 35.0);
+  let dLng = transformLng(lng - 105.0, lat - 35.0);
+  const radLat = (lat / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - ee * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+  dLng = (dLng * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+
+  return {
+    lat: lat + dLat,
+    lng: lng + dLng,
+  };
+}
+
+function isOutOfChina(lat: number, lng: number) {
+  return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271;
+}
+
+function transformLat(x: number, y: number) {
+  let result =
+    -100.0 +
+    2.0 * x +
+    3.0 * y +
+    0.2 * y * y +
+    0.1 * x * y +
+    0.2 * Math.sqrt(Math.abs(x));
+  result +=
+    ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  result +=
+    ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+  result +=
+    ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+  return result;
+}
+
+function transformLng(x: number, y: number) {
+  let result =
+    300.0 +
+    x +
+    2.0 * y +
+    0.1 * x * x +
+    0.1 * x * y +
+    0.1 * Math.sqrt(Math.abs(x));
+  result +=
+    ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  result +=
+    ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+  result +=
+    ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+  return result;
+}
+
 function AmapScene(props: {
   center: [number, number];
   selectedLocation: SearchLocation | null;
+  currentPosition: SearchLocation | null;
+  followCurrentPosition: boolean;
   pathCoordinates: [number, number][];
   nearbyPois: MapPOI[];
   selectedPoiKey: string | null;
   onSelectMapPoint: (lat: number, lng: number) => void;
   onSelectPoi: (poi: MapPOI) => void;
 }) {
-  const { center, selectedLocation, pathCoordinates, nearbyPois, selectedPoiKey, onSelectMapPoint, onSelectPoi } = props;
+  const { center, selectedLocation, currentPosition, followCurrentPosition, pathCoordinates, nearbyPois, selectedPoiKey, onSelectMapPoint, onSelectPoi } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
+  const onSelectMapPointRef = useRef(onSelectMapPoint);
   const [mapReadyVersion, setMapReadyVersion] = useState(0);
+  const isSameCoordinate =
+    selectedLocation &&
+    currentPosition &&
+    Math.abs(selectedLocation.lat - currentPosition.lat) < 0.000001 &&
+    Math.abs(selectedLocation.lng - currentPosition.lng) < 0.000001;
+
+  useEffect(() => {
+    onSelectMapPointRef.current = onSelectMapPoint;
+  }, [onSelectMapPoint]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -193,7 +275,7 @@ function AmapScene(props: {
         }
 
         const map = new AMap.Map(containerRef.current, {
-          zoom: 13,
+          zoom: DEFAULT_MAP_ZOOM,
           center: [center[1], center[0]],
           resizeEnable: true,
           viewMode: '2D',
@@ -202,7 +284,7 @@ function AmapScene(props: {
         map.addControl(new AMap.Scale());
         map.addControl(new AMap.ToolBar());
         map.on('click', (event: any) => {
-          onSelectMapPoint(event.lnglat.getLat(), event.lnglat.getLng());
+          onSelectMapPointRef.current(event.lnglat.getLat(), event.lnglat.getLng());
         });
 
         mapRef.current = map;
@@ -223,15 +305,15 @@ function AmapScene(props: {
       }
       setMapReadyVersion(0);
     };
-  }, [center, onSelectMapPoint]);
+  }, []);
 
   useEffect(() => {
     if (!mapRef.current) {
       return;
     }
 
-    mapRef.current.setCenter([center[1], center[0]]);
-  }, [center]);
+    mapRef.current.setZoomAndCenter(followCurrentPosition ? TRACKING_MAP_ZOOM : DEFAULT_MAP_ZOOM, [center[1], center[0]]);
+  }, [center, followCurrentPosition]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -247,25 +329,36 @@ function AmapScene(props: {
 
     const overlays: any[] = [];
 
-    if (selectedLocation) {
+    if (selectedLocation && !followCurrentPosition && !isSameCoordinate) {
       overlays.push(
         new AMap.Marker({
           position: [selectedLocation.lng, selectedLocation.lat],
           anchor: 'center',
-          offset: new AMap.Pixel(-10, -10),
-          content: createMarkerContent('#0f172a', 20),
+          offset: new AMap.Pixel(-50, -36),
+          content: createMarkerContent('#0f172a', 20, selectedLocation.name),
           title: selectedLocation.name,
         }),
       );
-    } else if (pathCoordinates.length > 0) {
-      const [lastLat, lastLng] = pathCoordinates[pathCoordinates.length - 1];
+    }
+
+    if (currentPosition) {
       overlays.push(
         new AMap.Marker({
-          position: [lastLng, lastLat],
+          position: [currentPosition.lng, currentPosition.lat],
           anchor: 'center',
-          offset: new AMap.Pixel(-10, -10),
-          content: createMarkerContent('#0f172a', 20),
-          title: 'Current path point',
+          offset: new AMap.Pixel(-50, -36),
+          content: createMarkerContent('#f97316', 20, currentPosition.name),
+          title: currentPosition.name,
+        }),
+      );
+    } else if (selectedLocation && !followCurrentPosition && isSameCoordinate) {
+      overlays.push(
+        new AMap.Marker({
+          position: [selectedLocation.lng, selectedLocation.lat],
+          anchor: 'center',
+          offset: new AMap.Pixel(-50, -36),
+          content: createMarkerContent('#0f172a', 20, selectedLocation.name),
+          title: selectedLocation.name,
         }),
       );
     }
@@ -321,7 +414,7 @@ function AmapScene(props: {
     }
 
     overlaysRef.current = overlays;
-  }, [mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, selectedLocation, selectedPoiKey]);
+  }, [currentPosition, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, selectedLocation, selectedPoiKey]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -337,6 +430,11 @@ export default function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [sendCodeCooldown, setSendCodeCooldown] = useState(0);
+  const [walkUploadPreview, setWalkUploadPreview] = useState<string | null>(null);
+  const [walkUploadName, setWalkUploadName] = useState<string>('');
+  const [isWalkUploading, setIsWalkUploading] = useState(false);
+  const [showCheckinModal, setShowCheckinModal] = useState(false);
+  const [checkinPhotoUrl, setCheckinPhotoUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'explore' | 'community'>('explore');
   const [currentTheme, setCurrentTheme] = useState<WalkTheme | null>(PRESET_THEMES[0]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
@@ -360,8 +458,9 @@ export default function App() {
   const [isPublic, setIsPublic] = useState(true);
   const [path, setPath] = useState<PathPoint[]>([]);
   const [isTracking, setIsTracking] = useState(false);
-  const [showCreateTheme, setShowCreateTheme] = useState(false);
+  const [livePosition, setLivePosition] = useState<SearchLocation | null>(null);
   const searchTimeoutRef = useRef<number | null>(null);
+  const hasAutoLocatedRef = useRef(false);
 
   useEffect(() => {
     const callbackPayload = consumeLoginCallback();
@@ -377,6 +476,25 @@ export default function App() {
         setUser(null);
       });
   }, []);
+
+  useEffect(() => {
+    void refreshRecentWalks();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      hasAutoLocatedRef.current = false;
+      return;
+    }
+    if (hasAutoLocatedRef.current || selectedLocation || isTracking) {
+      return;
+    }
+
+    hasAutoLocatedRef.current = true;
+    resolveBrowserLocation().catch((error) => {
+      console.error('Auto locate after login error:', error);
+    });
+  }, [isTracking, selectedLocation, user]);
 
   useEffect(() => {
     const eventName = getAuthRequiredEventName();
@@ -420,21 +538,54 @@ export default function App() {
       return;
     }
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        setPath((prev) => [
-          ...prev,
-          {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            timestamp: Date.now(),
-          },
-        ]);
+    const applyPosition = (position: GeolocationPosition) => {
+      const accuracy = position.coords.accuracy;
+      const gcjPosition = convertWgs84ToGcj02(position.coords.latitude, position.coords.longitude);
+      const nextPoint = {
+        lat: gcjPosition.lat,
+        lng: gcjPosition.lng,
+        timestamp: Date.now(),
+      };
+
+      setLivePosition({
+        name: '当前位置',
+        lat: nextPoint.lat,
+        lng: nextPoint.lng,
+      });
+
+      if (Number.isFinite(accuracy) && accuracy > MAX_ACCEPTABLE_POSITION_ACCURACY_METERS) {
+        return;
+      }
+
+      let shouldUpdatePosition = false;
+      setPath((prev) => {
+        if (prev.length > 0) {
+          const lastPoint = prev[prev.length - 1];
+          const distance = calculateDistanceMeters(lastPoint, nextPoint);
+          if (distance < MIN_TRACKING_DISTANCE_METERS) {
+            return prev;
+          }
+        }
+
+        shouldUpdatePosition = true;
+        return [...prev, nextPoint];
+      });
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      applyPosition,
+      (error) => {
+        console.error('Initial track location error:', error);
       },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+
+    const watchId = navigator.geolocation.watchPosition(
+      applyPosition,
       (error) => {
         console.error('Track location error:', error);
       },
-      { enableHighAccuracy: true },
+      { enableHighAccuracy: true, maximumAge: 0 },
     );
 
     return () => {
@@ -462,7 +613,17 @@ export default function App() {
     [searchLocation, selectedLocation],
   );
 
+  const currentPosition = useMemo<SearchLocation | null>(() => livePosition, [livePosition]);
+
+  const visibleCurrentPosition = useMemo(
+    () => (isTracking ? currentPosition : null),
+    [currentPosition, isTracking],
+  );
+
   const mapCenter = useMemo<[number, number]>(() => {
+    if (isTracking && currentPosition) {
+      return [currentPosition.lat, currentPosition.lng];
+    }
     if (selectedLocation) {
       return [selectedLocation.lat, selectedLocation.lng];
     }
@@ -471,14 +632,59 @@ export default function App() {
       return [lastPoint.lat, lastPoint.lng];
     }
     return DEFAULT_CENTER;
-  }, [path, selectedLocation]);
+  }, [currentPosition, isTracking, path, selectedLocation]);
 
   const pathCoordinates = useMemo(() => path.map((point) => [point.lat, point.lng] as [number, number]), [path]);
+  const visiblePathCoordinates = useMemo(
+    () => (isTracking ? pathCoordinates : []),
+    [isTracking, pathCoordinates],
+  );
   const pathDistanceKm = useMemo(() => calculatePathDistance(path) / 1000, [path]);
+
+  const toThemeFromWalk = (walk: WalkItem): WalkTheme => {
+    const missions = Array.isArray(walk.completedMissions)
+      ? walk.completedMissions
+          .map((item) => {
+            if (typeof item === 'string') {
+              return item;
+            }
+            if (item && typeof item === 'object' && 'mission' in item) {
+              const missionValue = (item as { mission?: string }).mission;
+              return missionValue ? String(missionValue) : '';
+            }
+            return '';
+          })
+          .filter((item) => item.length > 0)
+      : [];
+
+    return {
+      title: walk.themeTitle || '城市漫步',
+      description: walk.noteText || '这次漫步没有填写备注。',
+      category: walk.themeCategory || '城市',
+      missions,
+      vibeColor: '#5a5a40',
+    };
+  };
 
   const pushThemeHistory = (theme: WalkTheme) => {
     setCurrentTheme(theme);
-    setHistory((prev) => [theme, ...prev].slice(0, 10));
+  };
+
+  const refreshRecentWalks = async (overrideUser?: AppUser | null) => {
+    const currentUser = overrideUser ?? user;
+    if (!currentUser) {
+      setHistory([]);
+      return;
+    }
+    try {
+      const data = await fetchMyWalks(1, 10);
+      setHistory(data.map((item) => toThemeFromWalk(item)));
+      if (data.length === 0) {
+        return;
+      }
+    } catch (error) {
+      console.error('Fetch recent walks error:', error);
+    }
   };
 
   const resolveBrowserLocation = async () => {
@@ -495,13 +701,14 @@ export default function App() {
 
     const lat = coords.coords.latitude;
     const lng = coords.coords.longitude;
-    const context = await getLocationContext(lat, lng);
+    const gcjPosition = convertWgs84ToGcj02(lat, lng);
+    const context = await getLocationContext(gcjPosition.lat, gcjPosition.lng);
 
     setLocationContext(context);
     setSelectedLocation({
       name: '当前位置',
-      lat,
-      lng,
+      lat: gcjPosition.lat,
+      lng: gcjPosition.lng,
     });
     setSearchLocation('当前位置');
     setSearchResults([]);
@@ -749,6 +956,7 @@ export default function App() {
       }
       const profile = await loadCurrentUser();
       setUser(profile);
+      await refreshRecentWalks(profile);
       setShowEmailLogin(false);
       setPasswordInput('');
       setEmailCodeInput('');
@@ -805,50 +1013,75 @@ export default function App() {
 
     setIsSaving(true);
     try {
+      let photoUrl: string | undefined;
+      if (walkUploadPreview) {
+        setIsWalkUploading(true);
+        const uploadName = walkUploadName || `walk-${Date.now()}.png`;
+        const uploadResult = await uploadDataUrl(walkUploadPreview, 'walk_cover', uploadName);
+        photoUrl = uploadResult.url;
+        setCheckinPhotoUrl(uploadResult.url);
+        setShowCheckinModal(true);
+        setIsWalkUploading(false);
+      }
+
+      const recordUnit: 'location' | 'event' | 'image' = photoUrl
+        ? 'image'
+        : path.length > 0
+          ? 'location'
+          : 'event';
+
       await createWalk({
         themeTitle: currentTheme.title,
         themeCategory: currentTheme.category,
         locationName: currentLocationName,
-        recordUnit: 'location',
+        recordUnit,
         isPublic,
         noteText,
         path,
         completedMissions: [],
+        photoUrl,
       });
+      await refreshRecentWalks();
       alert('漫步记录已保存。');
       setNoteText('');
       setPath([]);
       setIsTracking(false);
+      setLivePosition(null);
+      setWalkUploadPreview(null);
+      setWalkUploadName('');
     } catch (error) {
       console.error('Save walk error:', error);
       alert('保存漫步记录失败，请稍后重试。');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSubmitTheme = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const title = String(formData.get('title') || '').trim();
-    const description = String(formData.get('description') || '').trim();
-    const category = String(formData.get('category') || '').trim();
-    const missions = ['m1', 'm2', 'm3']
-      .map((key) => String(formData.get(key) || '').trim())
-      .filter(Boolean);
-
-    try {
-      await submitTheme({ title, description, category, missions });
-      alert('主题已提交，等待审核。');
-      setShowCreateTheme(false);
-    } catch (error) {
-      console.error('Submit theme error:', error);
-      alert('提交主题失败，请稍后重试。');
+      setIsWalkUploading(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#fff7ed,white_42%,#f8fafc)] text-slate-900">
+      {showCheckinModal && checkinPhotoUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-[28px] bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Check-in</p>
+                <h3 className="mt-1 text-lg font-semibold">打卡照片已生成</h3>
+              </div>
+              <button
+                onClick={() => setShowCheckinModal(false)}
+                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <img src={checkinPhotoUrl} alt="打卡照片" className="h-64 w-full rounded-2xl object-cover" />
+              <p className="mt-3 text-sm text-slate-500">照片已上传成功，你可以继续保存漫步记录。</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-4 py-6 md:px-8">
         <header className="flex flex-col gap-4 rounded-[32px] border border-amber-100 bg-white/80 p-5 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -1018,12 +1251,6 @@ export default function App() {
                       </button>
                     </div>
                     <button
-                      onClick={() => setShowCreateTheme((prev) => !prev)}
-                      className="rounded-full border border-slate-200 px-4 py-2 text-sm"
-                    >
-                      提交自定义主题
-                    </button>
-                    <button
                       onClick={handleUseCurrentLocation}
                       className="rounded-full border border-slate-200 px-4 py-2 text-sm"
                     >
@@ -1095,7 +1322,9 @@ export default function App() {
                   <AmapScene
                     center={mapCenter}
                     selectedLocation={selectedLocation}
-                    pathCoordinates={pathCoordinates}
+                    currentPosition={visibleCurrentPosition}
+                    followCurrentPosition={isTracking}
+                    pathCoordinates={visiblePathCoordinates}
                     nearbyPois={nearbyPois}
                     selectedPoiKey={selectedPoiKey}
                     onSelectMapPoint={(lat, lng) => void handleSelectMapPoint(lat, lng)}
@@ -1115,6 +1344,7 @@ export default function App() {
                       onClick={() => {
                         setPath([]);
                         setIsTracking(false);
+                        setLivePosition(null);
                       }}
                       className="rounded-full border border-slate-200 px-4 py-2 text-sm"
                     >
@@ -1202,7 +1432,16 @@ export default function App() {
                     AI 生成
                   </button>
                   <button
-                    onClick={() => setIsTracking((prev) => !prev)}
+                    onClick={() => {
+                      if (isTracking) {
+                        setIsTracking(false);
+                        setLivePosition(null);
+                        return;
+                      }
+                      setPath([]);
+                      setLivePosition(null);
+                      setIsTracking(true);
+                    }}
                     className="rounded-full border border-slate-200 px-4 py-2 text-sm"
                   >
                     {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
@@ -1259,6 +1498,41 @@ export default function App() {
                   className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none"
                 />
 
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-slate-700">上传本次漫步照片</span>
+                    <label className="cursor-pointer rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
+                      选择照片
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) {
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            if (typeof reader.result === 'string') {
+                              setWalkUploadPreview(reader.result);
+                              setWalkUploadName(file.name);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {walkUploadPreview ? (
+                    <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                      <img src={walkUploadPreview} alt="漫步照片预览" className="h-40 w-full object-cover" />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-slate-500">可选，保存时会自动上传到 OSS。</p>
+                  )}
+                </div>
+
                 <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
                   <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
                   同时发布到社区
@@ -1268,11 +1542,11 @@ export default function App() {
 
                 <button
                   onClick={handleSaveWalk}
-                  disabled={isSaving}
+                  disabled={isSaving || isWalkUploading}
                   className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
                 >
-                  {isSaving && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                  保存漫步记录
+                  {(isSaving || isWalkUploading) && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                  {isWalkUploading ? '上传中...' : '保存漫步记录'}
                 </button>
               </div>
 
@@ -1296,33 +1570,6 @@ export default function App() {
                 </div>
               </div>
 
-              {showCreateTheme && (
-                <div className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="text-lg font-semibold">提交自定义主题</h3>
-                  {!user ? (
-                    <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">
-                      请先登录后再提交主题。
-                    </div>
-                  ) : (
-                    <form className="mt-4 space-y-3" onSubmit={handleSubmitTheme}>
-                      <input name="title" required placeholder="主题名称" className="w-full rounded-2xl border border-slate-200 px-4 py-3" />
-                      <textarea name="description" required placeholder="主题描述" className="min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3" />
-                      <select name="category" className="w-full rounded-2xl border border-slate-200 px-4 py-3">
-                        <option>视觉</option>
-                        <option>感官</option>
-                        <option>城市</option>
-                        <option>自然</option>
-                      </select>
-                      <input name="m1" required placeholder="任务 1" className="w-full rounded-2xl border border-slate-200 px-4 py-3" />
-                      <input name="m2" required placeholder="任务 2" className="w-full rounded-2xl border border-slate-200 px-4 py-3" />
-                      <input name="m3" required placeholder="任务 3" className="w-full rounded-2xl border border-slate-200 px-4 py-3" />
-                      <button type="submit" className="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-medium text-white">
-                        提交主题
-                      </button>
-                    </form>
-                  )}
-                </div>
-              )}
             </aside>
           </main>
         ) : (

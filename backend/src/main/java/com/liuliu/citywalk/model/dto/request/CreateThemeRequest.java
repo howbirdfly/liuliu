@@ -13,6 +13,7 @@ public record CreateThemeRequest(
         @NotBlank(message = "主题分类不能为空")
         String category,
         @NotEmpty(message = "任务列表不能为空")
-        List<String> missions
+        List<String> missions,
+        String coverImageUrl
 ) {
 }

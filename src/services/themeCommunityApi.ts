@@ -6,11 +6,13 @@ interface CreateThemePayload {
   description: string;
   category: string;
   missions: string[];
+  coverImageUrl?: string;
 }
 
 interface ThemeApiResponse extends WalkTheme {
   id?: number;
   provider?: string;
+  coverImageUrl?: string;
 }
 
 export async function submitTheme(payload: CreateThemePayload): Promise<ThemeApiResponse> {
