@@ -4,10 +4,12 @@ import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.request.CombineThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GeneratePresetThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GenerateThemeRequest;
+import com.liuliu.citywalk.model.dto.request.GenerateWalkRecordCardRequest;
 import com.liuliu.citywalk.model.dto.request.MiniappMissionVerifyRequest;
 import com.liuliu.citywalk.model.dto.response.LocationContextResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappMissionVerifyResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeResponse;
+import com.liuliu.citywalk.model.dto.response.WalkRecordCardTextResponse;
 import com.liuliu.citywalk.service.DeepSeekThemeService;
 import com.liuliu.citywalk.service.MissionVerifyAiService;
 import jakarta.validation.Valid;
@@ -43,6 +45,11 @@ public class AiThemeController {
     @PostMapping("/themes/combine")
     public ApiResponse<ThemeResponse> combine(@Valid @RequestBody CombineThemeRequest request) {
         return ApiResponse.success(deepSeekThemeService.combineTheme(request));
+    }
+
+    @PostMapping("/walk-record-card")
+    public ApiResponse<WalkRecordCardTextResponse> generateWalkRecordCard(@Valid @RequestBody GenerateWalkRecordCardRequest request) {
+        return ApiResponse.success(deepSeekThemeService.generateWalkRecordCardText(request));
     }
 
     @GetMapping("/location/context")

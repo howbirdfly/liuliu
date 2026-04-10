@@ -28,6 +28,7 @@ import {
   generateAITheme,
   generateCombinedTheme,
   generateDynamicPreset,
+  generateWalkRecordCardText,
   MapPOI,
   getLocationContext,
   searchLocationContext,
@@ -49,13 +50,25 @@ type PathPoint = {
   timestamp: number;
 };
 
+type WalkRecordCard = {
+  title: string;
+  missionText: string;
+  shortNote: string;
+  story: string;
+  locationLabel: string;
+  dateLabel: string;
+  photoUrl?: string;
+  serialNumber: string;
+};
+
 const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '质感漫步'];
 const COMBINE_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步'];
 const DEFAULT_CENTER: [number, number] = [31.2304, 121.4737];
 const DEFAULT_MAP_ZOOM = 16;
 const TRACKING_MAP_ZOOM = 19;
-const MIN_TRACKING_DISTANCE_METERS = 8;
-const MAX_ACCEPTABLE_POSITION_ACCURACY_METERS = 60;
+const MIN_TRACKING_DISTANCE_METERS = 2.5;
+const MAX_ACCEPTABLE_POSITION_ACCURACY_METERS = 150;
+const MAX_TIMED_TRACK_POINT_INTERVAL_MS = 5000;
 
 declare global {
   interface Window {
@@ -107,11 +120,14 @@ function loadAmapJsApi(): Promise<any> {
 function createMarkerContent(color: string, size = 18, label?: string) {
   const safeLabel = label ? escapeHtml(label) : '';
   return `
-    <div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-6px);">
+    <div style="position:relative;width:0;height:0;">
       ${
         safeLabel
           ? `<div style="
-              margin-bottom:6px;
+              position:absolute;
+              left:50%;
+              bottom:${size / 2 + 12}px;
+              transform:translateX(-50%);
               max-width:140px;
               padding:4px 8px;
               border-radius:9999px;
@@ -128,6 +144,10 @@ function createMarkerContent(color: string, size = 18, label?: string) {
           : ''
       }
       <div style="
+        position:absolute;
+        left:50%;
+        top:50%;
+        transform:translate(-50%,-50%);
         width:${size}px;
         height:${size}px;
         border-radius:9999px;
@@ -175,6 +195,240 @@ function calculateDistanceMeters(
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
 
   return 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function sanitizeCardText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function escapeXml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+function formatCardDate(timestamp = Date.now()) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}.${month}.${day}`;
+}
+
+function splitCardTitle(title: string) {
+  const cleanTitle = sanitizeCardText(title) || '漫步记录卡';
+  const parts = cleanTitle.split(/[：:]/);
+  if (parts.length === 1) {
+    return cleanTitle;
+  }
+  return sanitizeCardText(parts.slice(1).join(' ')) || cleanTitle;
+}
+
+function wrapCardText(text: string, maxCharsPerLine: number, maxLines?: number) {
+  const cleanText = sanitizeCardText(text);
+  if (!cleanText) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  let current = '';
+  for (const char of cleanText) {
+    current += char;
+    if (current.length >= maxCharsPerLine) {
+      lines.push(current);
+      current = '';
+      if (maxLines && lines.length >= maxLines) {
+        break;
+      }
+    }
+  }
+
+  if ((!maxLines || lines.length < maxLines) && current) {
+    lines.push(current);
+  }
+
+  if (maxLines && lines.length > maxLines) {
+    return lines.slice(0, maxLines);
+  }
+
+  if (maxLines && cleanText.length > maxCharsPerLine * maxLines && lines.length > 0) {
+    const visibleLines = lines.slice(0, maxLines);
+    const lastLine = visibleLines[visibleLines.length - 1];
+    visibleLines[visibleLines.length - 1] = `${lastLine.slice(0, Math.max(0, lastLine.length - 1))}…`;
+    return visibleLines;
+  }
+
+  return lines;
+}
+
+function renderSvgLines(lines: string[], x: number, y: number, lineHeight: number) {
+  return lines
+    .map((line, index) => `<tspan x="${x}" y="${y + index * lineHeight}">${escapeXml(line)}</tspan>`)
+    .join('');
+}
+
+function generateWalkRecordCard(params: {
+  theme: WalkTheme;
+  locationName: string;
+  locationContext: string;
+  noteText: string;
+  photoUrl?: string;
+  completedMissions?: string[];
+  timestamp?: number;
+}) {
+  const { theme, locationName, locationContext, noteText, photoUrl, completedMissions = [], timestamp = Date.now() } = params;
+  const title = splitCardTitle(theme.title);
+  const taskList = completedMissions.length > 0 ? completedMissions : theme.missions;
+  const missionText =
+    taskList[0] ||
+    theme.description ||
+    '找到这一段散步里最想留下来的细节，并轻轻说出它像什么。';
+  const shortNote =
+    sanitizeCardText(noteText) ||
+    `今天在${locationName}，先把这一刻静静地留给自己。`;
+  const storySeed = sanitizeCardText(locationContext || theme.description);
+  const story =
+    sanitizeCardText(noteText)
+      ? `小猫66在${locationName}跟着你轻轻晃了一圈喵，${storySeed}慢慢把这段路铺成了软乎乎的节奏。你留意到的细节也被我叼进了怀里，最后一起变成今天这张有点暖、有点黏人的城市切片。`
+      : `小猫66跟着你在${locationName}慢慢散步喵，${storySeed}像替这次${title}补上了会发光的旁白。那些被风、树影和路口悄悄拎出来的小细节，最后都落进了今天这张陪伴记录卡里。`;
+
+  return {
+    title,
+    missionText,
+    shortNote,
+    story,
+    locationLabel: locationName,
+    dateLabel: formatCardDate(timestamp),
+    photoUrl,
+    serialNumber: String(new Date(timestamp).getDate()).padStart(2, '0'),
+  } satisfies WalkRecordCard;
+}
+
+async function generateWalkRecordCardWithAi(params: {
+  theme: WalkTheme;
+  locationName: string;
+  locationContext: string;
+  noteText: string;
+  photoUrl?: string;
+  completedMissions?: string[];
+  timestamp?: number;
+}) {
+  const fallbackCard = generateWalkRecordCard(params);
+  const taskList = params.completedMissions?.length ? params.completedMissions : params.theme.missions;
+  const missionText =
+    taskList?.[0] ||
+    params.theme.description ||
+    '找到这一段散步里最想留下来的细节，并轻轻说出它像什么。';
+
+  try {
+    const aiText = await generateWalkRecordCardText({
+      themeTitle: params.theme.title,
+      themeDescription: params.theme.description,
+      missionText,
+      locationName: params.locationName,
+      locationContext: params.locationContext,
+      noteText: params.noteText,
+      hasPhoto: Boolean(params.photoUrl),
+    });
+
+    return {
+      ...fallbackCard,
+      story: sanitizeCardText(aiText.story) || fallbackCard.story,
+    } satisfies WalkRecordCard;
+  } catch (error) {
+    console.error('Generate walk record card text error:', error);
+    return fallbackCard;
+  }
+}
+
+function buildWalkRecordCardSvg(card: WalkRecordCard) {
+  const titleLines = wrapCardText(card.title, 12, 2);
+  const missionLines = wrapCardText(`任务：${card.missionText}`, 18, 3);
+  const shortNoteLines = wrapCardText(card.shortNote, 14, 2);
+  const storyLines = wrapCardText(card.story, 14, 9);
+  const locationLines = wrapCardText(card.locationLabel, 12, 1);
+  const storyStartY = 748;
+  const storyLineHeight = 46;
+  const storyContentBottom = storyStartY + Math.max(storyLines.length - 1, 0) * storyLineHeight;
+  const storyPanelBottom = Math.max(1130, storyContentBottom + 120);
+  const photoSectionTop = storyPanelBottom + 116;
+  const photoFrameY = photoSectionTop + 32;
+  const footerY = photoFrameY + 458;
+  const photoBlock = card.photoUrl
+    ? `
+      <clipPath id="photoClip">
+        <rect x="44" y="${photoFrameY}" width="552" height="420" rx="28" ry="28" />
+      </clipPath>
+      <image href="${escapeXml(card.photoUrl)}" x="44" y="${photoFrameY}" width="552" height="420" preserveAspectRatio="xMidYMid slice" clip-path="url(#photoClip)" />
+    `
+    : `
+      <rect x="44" y="${photoFrameY}" width="552" height="420" rx="28" ry="28" fill="#f8efe4" stroke="#d8c5ab" stroke-width="2" />
+      <text x="320" y="${photoFrameY + 220}" text-anchor="middle" font-size="28" fill="#aa8c6d" font-family="'Noto Serif SC','STSong',serif">等你把这一刻拍下来</text>
+    `;
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="${footerY + 110}" viewBox="0 0 640 ${footerY + 110}">
+      <rect width="640" height="${footerY + 110}" rx="34" fill="#f9edd8" />
+      <rect x="52" y="58" width="92" height="146" rx="14" fill="#cfe3f4" />
+      <rect x="70" y="76" width="78" height="110" rx="10" fill="#c76c49" />
+      <text x="109" y="118" text-anchor="middle" font-size="18" font-weight="700" fill="#fffaf2" font-family="'Trebuchet MS',sans-serif">POST</text>
+      <text x="109" y="160" text-anchor="middle" font-size="46" font-weight="700" fill="#fffaf2" font-family="'Trebuchet MS',sans-serif">${escapeXml(card.serialNumber)}</text>
+      <text x="109" y="188" text-anchor="middle" font-size="16" font-weight="700" fill="#fffaf2" font-family="'Trebuchet MS',sans-serif">84</text>
+
+      <circle cx="228" cy="90" r="42" fill="none" stroke="#c97b5d" stroke-width="5" />
+      <circle cx="228" cy="90" r="29" fill="none" stroke="#c97b5d" stroke-width="3" stroke-dasharray="4 6" />
+      <text x="228" y="97" text-anchor="middle" font-size="18" fill="#8d5e43" font-family="'Noto Serif SC','STSong',serif">记录</text>
+
+      <rect x="378" y="70" width="190" height="68" rx="18" fill="#f7f1e7" stroke="#d8c8b6" stroke-width="2" />
+      <text x="473" y="114" text-anchor="middle" font-size="20" fill="#b59b7f" letter-spacing="4" font-family="'Courier New',monospace">AIR MAIL NOTE</text>
+
+      <g transform="rotate(-8 392 104)">
+        <rect x="312" y="74" width="150" height="52" rx="12" fill="none" stroke="#7d6caa" stroke-width="4" />
+        <text x="387" y="108" text-anchor="middle" font-size="20" font-weight="700" fill="#5e4e92" font-family="'Trebuchet MS',sans-serif">AIR</text>
+      </g>
+      <g transform="rotate(35 530 160)">
+        <rect x="468" y="120" width="116" height="150" rx="12" fill="none" stroke="#4f79b4" stroke-width="5" />
+        <text x="526" y="202" text-anchor="middle" font-size="18" font-weight="700" fill="#4f79b4" font-family="'Trebuchet MS',sans-serif">LIVELY</text>
+      </g>
+
+      <text x="56" y="126" font-size="20" fill="#9d8b78" font-family="'Noto Serif SC','STSong',serif">陪你记录这一站</text>
+      <text x="184" y="150" font-size="34" font-weight="800" fill="#201b18" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif">${renderSvgLines(titleLines, 184, 150, 42)}</text>
+
+      <text x="58" y="236" font-size="24" fill="#aa8c6d">三</text>
+      <text x="186" y="264" font-size="22" fill="#665142" font-family="'Noto Serif SC','STSong',serif">${renderSvgLines(missionLines, 186, 264, 32)}</text>
+
+      <path d="M42 315 C72 328 102 302 132 315 S192 328 222 315 S282 302 312 315 S372 328 402 315 S462 302 492 315 S552 328 582 315" fill="none" stroke="#dc8a73" stroke-width="4" />
+      <path d="M42 323 C72 336 102 310 132 323 S192 336 222 323 S282 310 312 323 S372 336 402 323 S462 310 492 323 S552 336 582 323" fill="none" stroke="#7da0d9" stroke-width="4" />
+
+      <text x="42" y="388" font-size="22" font-weight="700" fill="#9d6a3d" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif">我 / 我的记录</text>
+      <path d="M46 442 H432 Q472 442 472 482 V532 Q472 572 432 572 H72 Q42 572 42 542 V482 Q42 442 82 442 Z" fill="#fffaf4" stroke="#e2bb91" stroke-width="2" />
+      <path d="M88 572 L70 610 L114 572" fill="#fffaf4" stroke="#e2bb91" stroke-width="2" />
+      <text x="84" y="496" font-size="22" fill="#503729" font-family="'Noto Serif SC','STSong',serif">${renderSvgLines(shortNoteLines, 84, 496, 34)}</text>
+
+      <text x="462" y="644" font-size="20" font-weight="700" fill="#cc6f46" font-family="'Trebuchet MS',sans-serif">66 的记录 66</text>
+      <path d="M160 674 H550 Q590 674 590 714 V${storyPanelBottom - 40} Q590 ${storyPanelBottom} 550 ${storyPanelBottom} H190 Q160 ${storyPanelBottom} 160 ${storyPanelBottom - 30} V714 Q160 674 200 674 Z" fill="#fff0e3" stroke="#e8a37e" stroke-width="2" />
+      <path d="M546 ${storyPanelBottom} L584 ${storyPanelBottom + 28} L548 ${storyPanelBottom - 42}" fill="#fff0e3" stroke="#e8a37e" stroke-width="2" />
+      <text x="194" y="${storyStartY}" font-size="18" fill="#5b4337" font-family="'Noto Serif SC','STSong',serif">${renderSvgLines(storyLines, 194, storyStartY, storyLineHeight)}</text>
+
+      <text x="44" y="${photoSectionTop}" font-size="20" font-weight="700" fill="#8b673e" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif">我拍下的样子</text>
+      ${photoBlock}
+      <rect x="44" y="${footerY}" width="172" height="44" rx="18" fill="#fff8f0" stroke="#d8c5ab" stroke-width="2" />
+      <text x="130" y="${footerY + 29}" text-anchor="middle" font-size="16" fill="#7f644f" font-family="'Courier New',monospace">${escapeXml(card.dateLabel)}</text>
+      <text x="268" y="${footerY + 29}" font-size="16" fill="#8c755c" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif">${renderSvgLines(locationLines, 268, footerY + 29, 24)}</text>
+
+      <g transform="rotate(-12 542 ${footerY + 12})">
+        <rect x="468" y="${footerY - 18}" width="110" height="54" rx="12" fill="none" stroke="#4f79b4" stroke-width="5" />
+        <text x="523" y="${footerY + 18}" text-anchor="middle" font-size="18" font-weight="700" fill="#4f79b4" font-family="'Trebuchet MS',sans-serif">SORT</text>
+      </g>
+    </svg>
+  `;
+}
+
+function svgToDataUrl(svg: string) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function convertWgs84ToGcj02(lat: number, lng: number) {
@@ -334,7 +588,7 @@ function AmapScene(props: {
         new AMap.Marker({
           position: [selectedLocation.lng, selectedLocation.lat],
           anchor: 'center',
-          offset: new AMap.Pixel(-50, -36),
+          offset: new AMap.Pixel(0, 0),
           content: createMarkerContent('#0f172a', 20, selectedLocation.name),
           title: selectedLocation.name,
         }),
@@ -346,7 +600,7 @@ function AmapScene(props: {
         new AMap.Marker({
           position: [currentPosition.lng, currentPosition.lat],
           anchor: 'center',
-          offset: new AMap.Pixel(-50, -36),
+          offset: new AMap.Pixel(0, 0),
           content: createMarkerContent('#f97316', 20, currentPosition.name),
           title: currentPosition.name,
         }),
@@ -356,7 +610,7 @@ function AmapScene(props: {
         new AMap.Marker({
           position: [selectedLocation.lng, selectedLocation.lat],
           anchor: 'center',
-          offset: new AMap.Pixel(-50, -36),
+          offset: new AMap.Pixel(0, 0),
           content: createMarkerContent('#0f172a', 20, selectedLocation.name),
           title: selectedLocation.name,
         }),
@@ -370,7 +624,7 @@ function AmapScene(props: {
         const marker = new AMap.Marker({
           position: [poi.lng as number, poi.lat as number],
           anchor: 'center',
-          offset: new AMap.Pixel(-50, -36),
+          offset: new AMap.Pixel(0, 0),
           content: createMarkerContent(selectedPoiKey === poiKey ? '#f59e0b' : '#2563eb', 18, poi.title),
           title: poi.title,
         });
@@ -433,8 +687,9 @@ export default function App() {
   const [walkUploadPreview, setWalkUploadPreview] = useState<string | null>(null);
   const [walkUploadName, setWalkUploadName] = useState<string>('');
   const [isWalkUploading, setIsWalkUploading] = useState(false);
-  const [showCheckinModal, setShowCheckinModal] = useState(false);
-  const [checkinPhotoUrl, setCheckinPhotoUrl] = useState<string | null>(null);
+  const [showRecordCardModal, setShowRecordCardModal] = useState(false);
+  const [recordCardPreviewUrl, setRecordCardPreviewUrl] = useState<string | null>(null);
+  const [recordCardFilename, setRecordCardFilename] = useState('walk-record-card.svg');
   const [activeTab, setActiveTab] = useState<'explore' | 'community'>('explore');
   const [currentTheme, setCurrentTheme] = useState<WalkTheme | null>(PRESET_THEMES[0]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
@@ -553,22 +808,33 @@ export default function App() {
         lng: nextPoint.lng,
       });
 
-      if (Number.isFinite(accuracy) && accuracy > MAX_ACCEPTABLE_POSITION_ACCURACY_METERS) {
-        return;
-      }
-
-      let shouldUpdatePosition = false;
       setPath((prev) => {
-        if (prev.length > 0) {
-          const lastPoint = prev[prev.length - 1];
-          const distance = calculateDistanceMeters(lastPoint, nextPoint);
-          if (distance < MIN_TRACKING_DISTANCE_METERS) {
-            return prev;
-          }
+        if (prev.length === 0) {
+          return [nextPoint];
         }
 
-        shouldUpdatePosition = true;
-        return [...prev, nextPoint];
+        const lastPoint = prev[prev.length - 1];
+        const distance = calculateDistanceMeters(lastPoint, nextPoint);
+        const elapsed = nextPoint.timestamp - lastPoint.timestamp;
+        const accuracyValue = Number.isFinite(accuracy) ? accuracy : 999;
+        const minDistance =
+          accuracyValue <= 25
+            ? MIN_TRACKING_DISTANCE_METERS
+            : accuracyValue <= 60
+              ? 4
+              : accuracyValue <= MAX_ACCEPTABLE_POSITION_ACCURACY_METERS
+                ? 7
+                : Number.POSITIVE_INFINITY;
+
+        if (distance >= minDistance) {
+          return [...prev, nextPoint];
+        }
+
+        if (accuracyValue <= 45 && elapsed >= MAX_TIMED_TRACK_POINT_INTERVAL_MS && distance >= 1) {
+          return [...prev, nextPoint];
+        }
+
+        return prev;
       });
     };
 
@@ -577,7 +843,7 @@ export default function App() {
       (error) => {
         console.error('Initial track location error:', error);
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 },
     );
 
     const watchId = navigator.geolocation.watchPosition(
@@ -585,7 +851,7 @@ export default function App() {
       (error) => {
         console.error('Track location error:', error);
       },
-      { enableHighAccuracy: true, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 },
     );
 
     return () => {
@@ -635,10 +901,32 @@ export default function App() {
   }, [currentPosition, isTracking, path, selectedLocation]);
 
   const pathCoordinates = useMemo(() => path.map((point) => [point.lat, point.lng] as [number, number]), [path]);
-  const visiblePathCoordinates = useMemo(
-    () => (isTracking ? pathCoordinates : []),
-    [isTracking, pathCoordinates],
-  );
+  const visiblePathCoordinates = useMemo(() => {
+    if (!isTracking) {
+      return [];
+    }
+
+    if (!currentPosition) {
+      return pathCoordinates;
+    }
+
+    const currentCoordinate: [number, number] = [currentPosition.lat, currentPosition.lng];
+    if (pathCoordinates.length === 0) {
+      return [currentCoordinate];
+    }
+
+    const lastCoordinate = pathCoordinates[pathCoordinates.length - 1];
+    const tailDistance = calculateDistanceMeters(
+      { lat: lastCoordinate[0], lng: lastCoordinate[1] },
+      { lat: currentCoordinate[0], lng: currentCoordinate[1] },
+    );
+
+    if (tailDistance < 0.8) {
+      return pathCoordinates;
+    }
+
+    return [...pathCoordinates, currentCoordinate];
+  }, [currentPosition, isTracking, pathCoordinates]);
   const pathDistanceKm = useMemo(() => calculatePathDistance(path) / 1000, [path]);
 
   const toThemeFromWalk = (walk: WalkItem): WalkTheme => {
@@ -1014,13 +1302,12 @@ export default function App() {
     setIsSaving(true);
     try {
       let photoUrl: string | undefined;
+      const cardPhotoSource = walkUploadPreview || undefined;
       if (walkUploadPreview) {
         setIsWalkUploading(true);
         const uploadName = walkUploadName || `walk-${Date.now()}.png`;
         const uploadResult = await uploadDataUrl(walkUploadPreview, 'walk_cover', uploadName);
         photoUrl = uploadResult.url;
-        setCheckinPhotoUrl(uploadResult.url);
-        setShowCheckinModal(true);
         setIsWalkUploading(false);
       }
 
@@ -1041,8 +1328,18 @@ export default function App() {
         completedMissions: [],
         photoUrl,
       });
+      const card = await generateWalkRecordCardWithAi({
+        theme: currentTheme,
+        locationName: currentLocationName,
+        locationContext,
+        noteText,
+        photoUrl: cardPhotoSource || photoUrl,
+      });
+      const cardSvg = buildWalkRecordCardSvg(card);
+      setRecordCardPreviewUrl(svgToDataUrl(cardSvg));
+      setRecordCardFilename(`walk-record-${card.dateLabel.replaceAll('.', '-')}.svg`);
+      setShowRecordCardModal(true);
       await refreshRecentWalks();
-      alert('漫步记录已保存。');
       setNoteText('');
       setPath([]);
       setIsTracking(false);
@@ -1058,26 +1355,53 @@ export default function App() {
     }
   };
 
+  const handleDownloadRecordCard = () => {
+    if (!recordCardPreviewUrl) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = recordCardPreviewUrl;
+    link.download = recordCardFilename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,#fff7ed,white_42%,#f8fafc)] text-slate-900">
-      {showCheckinModal && checkinPhotoUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-lg overflow-hidden rounded-[28px] bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Check-in</p>
-                <h3 className="mt-1 text-lg font-semibold">打卡照片已生成</h3>
-              </div>
-              <button
-                onClick={() => setShowCheckinModal(false)}
-                className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600"
-              >
-                关闭
-              </button>
+      {showRecordCardModal && recordCardPreviewUrl && (
+        <div className="fixed inset-0 z-50 bg-black/55 px-4 py-5 md:px-6 md:py-6">
+          <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-[36px] bg-[#fff7ec] shadow-2xl lg:flex-row">
+            <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-4 md:p-6">
+              <img
+                src={recordCardPreviewUrl}
+                alt="漫步记录卡预览"
+                className="self-start w-full max-w-[460px] rounded-[28px] border border-[#e8d1b6] bg-white shadow-sm"
+              />
             </div>
-            <div className="px-5 py-4">
-              <img src={checkinPhotoUrl} alt="打卡照片" className="h-64 w-full rounded-2xl object-cover" />
-              <p className="mt-3 text-sm text-slate-500">照片已上传成功，你可以继续保存漫步记录。</p>
+            <div className="flex w-full flex-col justify-between border-t border-[#ecdcc7] bg-white/70 p-6 lg:w-[340px] lg:border-l lg:border-t-0">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-[#bb8d62]">Record Card</p>
+                <h3 className="mt-2 text-2xl font-semibold text-[#5b402d]">记录卡已经生成</h3>
+                <p className="mt-3 text-sm leading-7 text-[#7c6351]">
+                  这次漫步的主题、地点、任务和你的照片都已经整理成一张完整卡片，你可以先在这里看完整效果，再决定是否下载。
+                </p>
+              </div>
+              <div className="mt-6 flex flex-col gap-3">
+                <button
+                  onClick={handleDownloadRecordCard}
+                  className="rounded-2xl bg-[#c96f4a] px-4 py-3 text-sm font-medium text-white"
+                >
+                  下载记录卡
+                </button>
+                <button
+                  onClick={() => setShowRecordCardModal(false)}
+                  className="rounded-2xl border border-[#d7bea0] bg-white px-4 py-3 text-sm font-medium text-[#6f5846]"
+                >
+                  关闭
+                </button>
+              </div>
             </div>
           </div>
         </div>

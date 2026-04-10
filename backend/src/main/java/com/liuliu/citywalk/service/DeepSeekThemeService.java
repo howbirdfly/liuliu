@@ -7,9 +7,11 @@ import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.model.dto.request.CombineThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GeneratePresetThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GenerateThemeRequest;
+import com.liuliu.citywalk.model.dto.request.GenerateWalkRecordCardRequest;
 import com.liuliu.citywalk.model.dto.response.LocationContextResponse;
 import com.liuliu.citywalk.model.dto.response.PoiResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeResponse;
+import com.liuliu.citywalk.model.dto.response.WalkRecordCardTextResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -160,6 +162,57 @@ public class DeepSeekThemeService {
         return toThemeResponse(callThemePrompt(prompt, fallback), 3L);
     }
 
+    public WalkRecordCardTextResponse generateWalkRecordCardText(GenerateWalkRecordCardRequest request) {
+        WalkRecordCardPayload fallback = new WalkRecordCardPayload(
+                "今天先把这一刻留给自己。",
+                "小猫66跟着你在%s慢慢晃悠喵，把这段路上的风、树影和人间烟火都悄悄记在了胡须尖上。我觉得你今天的任务像一次轻轻踩点的巡游，于是就把这份陪伴叼回卡片里，存成一小片软乎乎的城市日记啦。".formatted(
+                        request.locationName())
+        );
+
+        String prompt = """
+                你是城市漫步吉祥物“小猫66”，正在帮用户写一张陪伴记录卡里的“66 的日志”。
+                请根据下面信息，输出适合放进卡片的中文 JSON：
+                主题：%s
+                主题描述：%s
+                漫步任务：%s
+                地点：%s
+                地点环境：%s
+                用户备注：%s
+                是否上传照片：%s
+
+                写作要求：
+                1. 必须使用“小猫66”的第一视角，像它一路陪着用户散步。
+                2. story 只能把“用户备注”当作参考线索，不能直接照抄、不能把用户原话放在开头，也不要出现“我听到……”“我写了……”这类直接复述用户记录的句式。
+                3. 文风要温柔、灵动、天真一点，像小猫在认真碎碎念；可以自然加入少量“喵”“呀”“蹭蹭”“尾巴”“胡须”这类小猫语气，但不要每句都堆。
+                4. 不要编造夸张剧情，不要出现“AI”“模型”“生成”等词。
+                5. shortNote 写成 1 句短短的话，10 到 24 个中文字符。
+                6. story 写成 1 段 70 到 120 个中文字符，适合放进卡片“66 的记录”区域，并且要像小猫66在现场边走边记下来的观察。
+                7. 优先结合主题、任务、地点环境和用户备注；如果没有备注，也要自然成文。
+                8. 严格输出 JSON，不要输出额外解释。
+
+                JSON 结构：
+                {
+                  "shortNote": "一句短句",
+                  "story": "一段小猫66视角的日志"
+                }
+                """.formatted(
+                request.themeTitle(),
+                safeText(request.themeDescription(), "今天的城市漫步"),
+                request.missionText(),
+                request.locationName(),
+                request.locationContext(),
+                safeText(request.noteText(), "无"),
+                request.hasPhoto() ? "是" : "否"
+        );
+
+        WalkRecordCardPayload payload = callWalkRecordCardPrompt(prompt, fallback);
+        return new WalkRecordCardTextResponse(
+                payload.shortNote(),
+                payload.story(),
+                PROVIDER
+        );
+    }
+
     public LocationContextResponse locationContext(Double lat, Double lng) {
         String fallback = "城市街区与生活化场景混合环境";
         String poiSummary = buildPoiSummary(lat, lng);
@@ -201,6 +254,23 @@ public class DeepSeekThemeService {
             return "暂无明显 POI，可按普通城市街区理解";
         }
         return String.join("、", poiTitles);
+    }
+
+    private WalkRecordCardPayload callWalkRecordCardPrompt(String prompt, WalkRecordCardPayload fallback) {
+        if (!isConfigured()) {
+            log.info("DeepSeek skipped: api key not configured, using fallback walk card text");
+            return fallback;
+        }
+
+        try {
+            String raw = callDeepSeek(prompt, true);
+            WalkRecordCardPayload parsed = objectMapper.readValue(extractJsonObject(raw), WalkRecordCardPayload.class);
+            log.info("DeepSeek walk card text generated successfully with model {}", properties.getModel());
+            return sanitizeWalkRecordCardPayload(parsed, fallback);
+        } catch (Exception error) {
+            log.warn("DeepSeek walk card text generation failed, using fallback: {}", error.getMessage());
+            return fallback;
+        }
     }
 
     private ThemeResponse toThemeResponse(ThemePayload payload, Long id) {
@@ -311,6 +381,21 @@ public class DeepSeekThemeService {
         return value == null || value.isBlank();
     }
 
+    private String safeText(String value, String fallback) {
+        return isBlank(value) ? fallback : value.trim();
+    }
+
+    private WalkRecordCardPayload sanitizeWalkRecordCardPayload(WalkRecordCardPayload payload, WalkRecordCardPayload fallback) {
+        if (payload == null) {
+            return fallback;
+        }
+
+        return new WalkRecordCardPayload(
+                safeText(payload.shortNote(), fallback.shortNote()),
+                safeText(payload.story(), fallback.story())
+        );
+    }
+
     private String extractJsonObject(String raw) {
         String trimmed = raw == null ? "" : raw.trim();
         int start = trimmed.indexOf('{');
@@ -328,6 +413,13 @@ public class DeepSeekThemeService {
             String category,
             List<String> missions,
             String vibeColor
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record WalkRecordCardPayload(
+            String shortNote,
+            String story
     ) {
     }
 }

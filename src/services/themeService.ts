@@ -31,6 +31,12 @@ interface LocationContextApiResponse {
   locationContext: string;
 }
 
+interface WalkRecordCardTextApiResponse {
+  shortNote: string;
+  story: string;
+  provider?: string;
+}
+
 const LOCATION_FALLBACK = '城市街道';
 
 export const PRESET_THEMES: WalkTheme[] = [
@@ -192,6 +198,21 @@ export async function generateCombinedTheme(
       PRESET_THEMES[1],
     );
   }
+}
+
+export async function generateWalkRecordCardText(params: {
+  themeTitle: string;
+  themeDescription: string;
+  missionText: string;
+  locationName: string;
+  locationContext: string;
+  noteText: string;
+  hasPhoto: boolean;
+}): Promise<WalkRecordCardTextApiResponse> {
+  return apiRequest<WalkRecordCardTextApiResponse>('/api/v1/ai/walk-record-card', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 }
 
 export async function fetchNearbyPOIs(lat: number, lng: number): Promise<MapPOI[]> {
