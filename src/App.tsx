@@ -184,6 +184,20 @@ function calculatePathDistance(points: PathPoint[]) {
   return totalMeters;
 }
 
+function getWalkDistanceToReference(
+  walk: WalkItem,
+  referencePoint: { lat: number; lng: number } | null,
+) {
+  if (!referencePoint || !Array.isArray(walk.path) || walk.path.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return walk.path.reduce((closestDistance, point) => {
+    const distance = calculateDistanceMeters(referencePoint, point);
+    return Math.min(closestDistance, distance);
+  }, Number.POSITIVE_INFINITY);
+}
+
 function calculateDistanceMeters(
   start: { lat: number; lng: number },
   end: { lat: number; lng: number },
@@ -943,7 +957,7 @@ export default function App() {
     }
 
     setIsLoadingCommunity(true);
-    fetchPublicWalks()
+    fetchPublicWalks(1, 50)
       .then(setCommunityWalks)
       .catch((error) => {
         console.error('Error fetching community walks:', error);
@@ -1109,6 +1123,30 @@ export default function App() {
     return [...pathCoordinates, currentCoordinate];
   }, [currentPosition, isTracking, pathCoordinates]);
   const pathDistanceKm = useMemo(() => calculatePathDistance(path) / 1000, [path]);
+  const communityReferencePoint = useMemo(() => {
+    if (selectedLocation) {
+      return { lat: selectedLocation.lat, lng: selectedLocation.lng };
+    }
+    if (currentPosition) {
+      return { lat: currentPosition.lat, lng: currentPosition.lng };
+    }
+    return null;
+  }, [currentPosition, selectedLocation]);
+  const visibleCommunityWalks = useMemo(() => {
+    return [...communityWalks]
+      .sort((left, right) => {
+        const leftDistance = getWalkDistanceToReference(left, communityReferencePoint);
+        const rightDistance = getWalkDistanceToReference(right, communityReferencePoint);
+        if (leftDistance !== rightDistance) {
+          return leftDistance - rightDistance;
+        }
+
+        const leftCreatedAt = left.createdAt || 0;
+        const rightCreatedAt = right.createdAt || 0;
+        return rightCreatedAt - leftCreatedAt;
+      })
+      .slice(0, 10);
+  }, [communityReferencePoint, communityWalks]);
 
   const toThemeFromWalk = (walk: WalkItem): WalkTheme => {
     const missions = Array.isArray(walk.completedMissions)
@@ -2163,12 +2201,12 @@ export default function App() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              {communityWalks.length === 0 ? (
+              {visibleCommunityWalks.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
                   暂时还没有社区内容，等你来发布第一条记录。
                 </div>
               ) : (
-                communityWalks.map((walk) => (
+                visibleCommunityWalks.map((walk) => (
                   <article key={walk.id} className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
                     <div className="text-xs uppercase tracking-[0.2em] text-slate-400">{walk.themeCategory || '城市'}</div>
                     <h3 className="mt-2 text-lg font-semibold">{walk.themeTitle}</h3>

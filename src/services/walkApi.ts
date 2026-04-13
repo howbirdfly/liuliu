@@ -39,6 +39,7 @@ export interface WalkItem {
   audioUrl?: string;
   path?: PathPoint[];
   completedMissions?: CompletedMissionPayload[];
+  createdAt?: number;
 }
 
 export async function createWalk(payload: CreateWalkPayload): Promise<WalkItem> {

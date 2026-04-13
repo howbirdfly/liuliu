@@ -14,6 +14,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +80,7 @@ public class WalkRepository {
                 """
                 select id, theme_title, theme_snapshot, location_name,
                        route_points, missions_completed, photo_list, cover_image,
-                       note_text, is_public
+                       note_text, is_public, created_at
                 from walk_records
                 where user_id = ? and status = 'active'
                 order by created_at desc
@@ -95,7 +96,8 @@ public class WalkRepository {
                         rs.getString("photo_list"),
                         rs.getString("cover_image"),
                         rs.getString("note_text"),
-                        rs.getBoolean("is_public")
+                        rs.getBoolean("is_public"),
+                        rs.getTimestamp("created_at")
                 ),
                 userId,
                 limit
@@ -107,7 +109,7 @@ public class WalkRepository {
                 """
                 select id, theme_title, theme_snapshot, location_name,
                        route_points, missions_completed, photo_list, cover_image,
-                       note_text, is_public
+                       note_text, is_public, created_at
                 from walk_records
                 where is_public = 1 and status = 'active'
                 order by created_at desc
@@ -123,7 +125,8 @@ public class WalkRepository {
                         rs.getString("photo_list"),
                         rs.getString("cover_image"),
                         rs.getString("note_text"),
-                        rs.getBoolean("is_public")
+                        rs.getBoolean("is_public"),
+                        rs.getTimestamp("created_at")
                 ),
                 limit
         );
@@ -134,7 +137,7 @@ public class WalkRepository {
                 """
                 select id, theme_title, theme_snapshot, location_name,
                        route_points, missions_completed, photo_list, cover_image,
-                       note_text, is_public
+                       note_text, is_public, created_at
                 from walk_records
                 where id = ? and status = 'active'
                 limit 1
@@ -149,7 +152,8 @@ public class WalkRepository {
                         rs.getString("photo_list"),
                         rs.getString("cover_image"),
                         rs.getString("note_text"),
-                        rs.getBoolean("is_public")
+                        rs.getBoolean("is_public"),
+                        rs.getTimestamp("created_at")
                 ),
                 Long.parseLong(id)
         );
@@ -165,7 +169,8 @@ public class WalkRepository {
                                         String photoListJson,
                                         String coverImage,
                                         String noteText,
-                                        boolean isPublic) {
+                                        boolean isPublic,
+                                        Timestamp createdAt) {
         Map<String, Object> snapshot = parseJson(themeSnapshotJson, new TypeReference<Map<String, Object>>() { }, Map.of());
         String themeCategory = snapshot.get("category") instanceof String value ? value : null;
         List<Map<String, Object>> routePoints = parseJson(routePointsJson, new TypeReference<List<Map<String, Object>>>() { }, List.of());
@@ -189,8 +194,13 @@ public class WalkRepository {
                 null,
                 null,
                 routePoints,
-                completedMissions
+                completedMissions,
+                toEpochMilli(createdAt)
         );
+    }
+
+    private Long toEpochMilli(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant().toEpochMilli();
     }
 
     private Map<String, Object> buildThemeSnapshot(CreateWalkRequest request, List<String> missions) {

@@ -14,6 +14,7 @@ public record WalkResponse(
         String videoUrl,
         String audioUrl,
         List<?> path,
-        List<?> completedMissions
+        List<?> completedMissions,
+        Long createdAt
 ) {
 }
