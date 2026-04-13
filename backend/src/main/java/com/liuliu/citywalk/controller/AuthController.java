@@ -5,6 +5,7 @@ import com.liuliu.citywalk.model.dto.request.EmailCodeRequest;
 import com.liuliu.citywalk.model.dto.request.EmailLoginRequest;
 import com.liuliu.citywalk.model.dto.request.EmailRegisterRequest;
 import com.liuliu.citywalk.model.dto.request.LoginRequest;
+import com.liuliu.citywalk.model.dto.request.UpdateUserProfileRequest;
 import com.liuliu.citywalk.model.dto.request.WebSyncUserRequest;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
@@ -12,13 +13,14 @@ import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
 import com.liuliu.citywalk.model.dto.response.WechatLoginUrlResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
 import com.liuliu.citywalk.service.EmailAuthService;
-import com.liuliu.citywalk.service.MiniappSessionService;
+import com.liuliu.citywalk.service.UserSessionService;
 import com.liuliu.citywalk.service.WechatAuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,18 +33,18 @@ public class AuthController {
 
     private final WechatAuthService wechatAuthService;
     private final AuthTokenService authTokenService;
-    private final MiniappSessionService miniappSessionService;
+    private final UserSessionService userSessionService;
     private final EmailAuthService emailAuthService;
 
     public AuthController(
             WechatAuthService wechatAuthService,
             AuthTokenService authTokenService,
-            MiniappSessionService miniappSessionService,
+            UserSessionService userSessionService,
             EmailAuthService emailAuthService
     ) {
         this.wechatAuthService = wechatAuthService;
         this.authTokenService = authTokenService;
-        this.miniappSessionService = miniappSessionService;
+        this.userSessionService = userSessionService;
         this.emailAuthService = emailAuthService;
     }
 
@@ -108,7 +110,7 @@ public class AuthController {
                 ? new WebSyncUserRequest(null, null, null, null)
                 : request;
         return ApiResponse.success(
-                miniappSessionService.syncWebUser(
+                userSessionService.syncWebUser(
                         finalRequest.resolvedCode(),
                         finalRequest.resolvedNickName(),
                         finalRequest.resolvedAvatarUrl()
@@ -133,7 +135,7 @@ public class AuthController {
     public ApiResponse<UserProfileResponse> currentUser(
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
     ) {
-        MiniappSessionService.StoredMiniappUser currentUser = miniappSessionService.resolveUser(authorizationHeader);
+        UserSessionService.StoredUser currentUser = userSessionService.resolveUser(authorizationHeader);
         if (currentUser != null && !currentUser.isGuest()) {
             return ApiResponse.success(new UserProfileResponse(
                     currentUser.id(),
@@ -142,6 +144,23 @@ public class AuthController {
             ));
         }
         return ApiResponse.success(wechatAuthService.loadCurrentUser(authorizationHeader));
+    }
+
+    @PutMapping("/profile")
+    public ApiResponse<UserProfileResponse> updateProfile(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
+            @Valid @RequestBody UpdateUserProfileRequest request
+    ) {
+        try {
+            UserProfileResponse response = userSessionService.updateProfile(
+                    authorizationHeader,
+                    request.nickname(),
+                    request.avatar()
+            );
+            return ApiResponse.success(response);
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        }
     }
 
     @PostMapping("/logout")

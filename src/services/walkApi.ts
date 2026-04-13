@@ -55,3 +55,7 @@ export async function fetchMyWalks(page = 1, pageSize = 10): Promise<WalkItem[]>
 export async function fetchPublicWalks(page = 1, pageSize = 20): Promise<WalkItem[]> {
   return apiRequest<WalkItem[]>(`/api/v1/walks/public?page=${page}&pageSize=${pageSize}`);
 }
+
+export async function fetchWalkDetail(walkId: number): Promise<WalkItem> {
+  return apiRequest<WalkItem>(`/api/v1/walks/${walkId}`);
+}

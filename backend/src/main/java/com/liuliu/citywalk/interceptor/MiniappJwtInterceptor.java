@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.context.MiniappUserContext;
 import com.liuliu.citywalk.service.AuthTokenService;
-import com.liuliu.citywalk.service.MiniappSessionService;
+import com.liuliu.citywalk.service.UserSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -19,16 +19,16 @@ import java.nio.charset.StandardCharsets;
 public class MiniappJwtInterceptor implements HandlerInterceptor {
 
     private final AuthTokenService authTokenService;
-    private final MiniappSessionService miniappSessionService;
+    private final UserSessionService userSessionService;
     private final ObjectMapper objectMapper;
 
     public MiniappJwtInterceptor(
             AuthTokenService authTokenService,
-            MiniappSessionService miniappSessionService,
+            UserSessionService userSessionService,
             ObjectMapper objectMapper
     ) {
         this.authTokenService = authTokenService;
-        this.miniappSessionService = miniappSessionService;
+        this.userSessionService = userSessionService;
         this.objectMapper = objectMapper;
     }
 
@@ -52,7 +52,7 @@ public class MiniappJwtInterceptor implements HandlerInterceptor {
 
         try {
             AuthTokenService.TokenClaims claims = authTokenService.parseAccessToken(token);
-            MiniappSessionService.StoredMiniappUser user = miniappSessionService.resolveUserByToken(token);
+            UserSessionService.StoredUser user = userSessionService.resolveUserByToken(token);
             if (user == null || user.isGuest() || !claims.userId().equals(user.id())) {
                 writeUnauthorized(response, "invalid_token");
                 return false;

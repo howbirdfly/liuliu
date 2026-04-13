@@ -7,7 +7,7 @@ import com.liuliu.citywalk.model.dto.response.MiniappCreateWalkResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappWalkDetailResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappWalkListResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappWalkRecordResponse;
-import com.liuliu.citywalk.service.MiniappSessionService;
+import com.liuliu.citywalk.service.UserSessionService;
 import com.liuliu.citywalk.service.MiniappWalkService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,11 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class MiniappWalkController {
 
     private final MiniappWalkService miniappWalkService;
-    private final MiniappSessionService miniappSessionService;
+    private final UserSessionService userSessionService;
 
-    public MiniappWalkController(MiniappWalkService miniappWalkService, MiniappSessionService miniappSessionService) {
+    public MiniappWalkController(MiniappWalkService miniappWalkService, UserSessionService userSessionService) {
         this.miniappWalkService = miniappWalkService;
-        this.miniappSessionService = miniappSessionService;
+        this.userSessionService = userSessionService;
     }
 
     @PostMapping
@@ -59,7 +59,7 @@ public class MiniappWalkController {
             @PathVariable String id,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
     ) {
-        MiniappSessionService.StoredMiniappUser user = miniappSessionService.resolveUser(authorizationHeader);
+        UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
         return ApiResponse.success(new MiniappWalkDetailResponse(miniappWalkService.getDetail(id, user.id())));
     }
 }

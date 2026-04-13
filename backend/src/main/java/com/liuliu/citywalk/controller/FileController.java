@@ -3,7 +3,7 @@ package com.liuliu.citywalk.controller;
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.response.FileUploadResponse;
 import com.liuliu.citywalk.repository.UploadedFileRepository;
-import com.liuliu.citywalk.service.MiniappSessionService;
+import com.liuliu.citywalk.service.UserSessionService;
 import com.liuliu.citywalk.util.AliOssUtil;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -23,14 +23,14 @@ import java.util.UUID;
 public class FileController {
 
     private final UploadedFileRepository uploadedFileRepository;
-    private final MiniappSessionService miniappSessionService;
+    private final UserSessionService userSessionService;
     private final AliOssUtil aliOssUtil;
 
     public FileController(UploadedFileRepository uploadedFileRepository,
-                          MiniappSessionService miniappSessionService,
+                          UserSessionService userSessionService,
                           AliOssUtil aliOssUtil) {
         this.uploadedFileRepository = uploadedFileRepository;
-        this.miniappSessionService = miniappSessionService;
+        this.userSessionService = userSessionService;
         this.aliOssUtil = aliOssUtil;
     }
 
@@ -46,7 +46,7 @@ public class FileController {
         String objectName = safeBizType + "/" + fileName;
         String url = aliOssUtil.upload(file.getBytes(), objectName);
 
-        MiniappSessionService.StoredMiniappUser user = miniappSessionService.resolveUser(authorizationHeader);
+        UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
         uploadedFileRepository.save(
                 user == null || user.isGuest() ? null : user.id(),
                 safeBizType,

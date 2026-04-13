@@ -23,7 +23,7 @@ function dataUrlToFile(dataUrl: string, fileName: string): File {
 
 export async function uploadDataUrl(
   dataUrl: string,
-  bizType: 'walk_cover' | 'mission_media' | 'audio' | 'video',
+  bizType: 'walk_cover' | 'mission_media' | 'audio' | 'video' | 'avatar',
   fileName: string,
 ): Promise<UploadFileResult> {
   const formData = new FormData();

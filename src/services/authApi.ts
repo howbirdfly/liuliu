@@ -67,6 +67,13 @@ export async function loadCurrentUser(): Promise<AppUser> {
   return apiRequest<AppUser>('/api/v1/auth/me');
 }
 
+export async function updateUserProfile(payload: { nickname: string; avatar?: string }): Promise<AppUser> {
+  return apiRequest<AppUser>('/api/v1/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function mockLogin(): Promise<void> {
   const response = await apiRequest<{
     token: string;
