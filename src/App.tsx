@@ -686,6 +686,160 @@ function AmapScene(props: {
   return <div ref={containerRef} className="h-full w-full" />;
 }
 
+function normalizeCompletedMissionLabels(completedMissions?: WalkItem['completedMissions']) {
+  if (!Array.isArray(completedMissions)) {
+    return [];
+  }
+
+  return completedMissions
+    .map((mission) => sanitizeCardText(mission?.mission || ''))
+    .filter((mission) => mission.length > 0);
+}
+
+function WalkDetailMap(props: {
+  path: PathPoint[];
+  locationLabel: string;
+}) {
+  const { path, locationLabel } = props;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const overlaysRef = useRef<any[]>([]);
+  const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
+
+  useEffect(() => {
+    if (path.length === 0) {
+      setNearbyPois([]);
+      return;
+    }
+
+    const lastPoint = path[path.length - 1];
+    fetchNearbyPois(lastPoint.lat, lastPoint.lng)
+      .then((pois) => setNearbyPois(pois.slice(0, 8)))
+      .catch((error) => {
+        console.error('Fetch detail nearby POIs error:', error);
+        setNearbyPois([]);
+      });
+  }, [path]);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current || path.length === 0) {
+      return;
+    }
+
+    let isDisposed = false;
+
+    loadAmapJsApi()
+      .then((AMap) => {
+        if (isDisposed || !containerRef.current || mapRef.current) {
+          return;
+        }
+
+        const lastPoint = path[path.length - 1];
+        const map = new AMap.Map(containerRef.current, {
+          zoom: 17,
+          center: [lastPoint.lng, lastPoint.lat],
+          resizeEnable: true,
+          viewMode: '2D',
+        });
+
+        map.addControl(new AMap.Scale());
+        map.addControl(new AMap.ToolBar());
+        mapRef.current = map;
+      })
+      .catch((error) => {
+        console.error('Load detail AMap error:', error);
+      });
+
+    return () => {
+      isDisposed = true;
+      if (mapRef.current) {
+        mapRef.current.destroy();
+        mapRef.current = null;
+      }
+      overlaysRef.current = [];
+    };
+  }, [path]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const AMap = window.AMap;
+    if (!map || !AMap || path.length === 0) {
+      return;
+    }
+
+    if (overlaysRef.current.length > 0) {
+      map.remove(overlaysRef.current);
+      overlaysRef.current = [];
+    }
+
+    const overlays: any[] = [];
+    const amapPath = path.map((point) => [point.lng, point.lat]);
+    const startPoint = path[0];
+    const endPoint = path[path.length - 1];
+
+    if (amapPath.length > 1) {
+      overlays.push(
+        new AMap.Polyline({
+          path: amapPath,
+          strokeColor: '#f59e0b',
+          strokeWeight: 6,
+          strokeOpacity: 0.95,
+          lineJoin: 'round',
+          lineCap: 'round',
+        }),
+      );
+    }
+
+    overlays.push(
+      new AMap.Marker({
+        position: [startPoint.lng, startPoint.lat],
+        anchor: 'center',
+        offset: new AMap.Pixel(0, 0),
+        content: createMarkerContent('#2563eb', 18, '起点'),
+        title: '起点',
+      }),
+    );
+
+    overlays.push(
+      new AMap.Marker({
+        position: [endPoint.lng, endPoint.lat],
+        anchor: 'center',
+        offset: new AMap.Pixel(0, 0),
+        content: createMarkerContent('#0f172a', 20, locationLabel || '记录位置'),
+        title: locationLabel || '记录位置',
+      }),
+    );
+
+    nearbyPois
+      .filter((poi) => typeof poi.lat === 'number' && typeof poi.lng === 'number')
+      .forEach((poi) => {
+        overlays.push(
+          new AMap.Marker({
+            position: [poi.lng as number, poi.lat as number],
+            anchor: 'center',
+            offset: new AMap.Pixel(0, 0),
+            content: createMarkerContent('#2563eb', 16, poi.title),
+            title: poi.title,
+          }),
+        );
+      });
+
+    map.add(overlays);
+    map.setFitView(overlays, false, [48, 48, 48, 48]);
+    overlaysRef.current = overlays;
+  }, [locationLabel, nearbyPois, path]);
+
+  if (path.length === 0) {
+    return (
+      <div className="flex h-72 items-center justify-center rounded-[24px] border border-dashed border-slate-300 bg-white text-sm text-slate-500">
+        这条记录里还没有可展示的轨迹。
+      </div>
+    );
+  }
+
+  return <div ref={containerRef} className="h-72 w-full overflow-hidden rounded-[24px] border border-slate-200" />;
+}
+
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [showEmailLogin, setShowEmailLogin] = useState(false);
@@ -2208,14 +2362,24 @@ export default function App() {
                           </div>
                         ) : null}
 
+                        <div className="mt-5 rounded-[24px] bg-white p-4">
+                          <div className="text-xs uppercase tracking-[0.18em] text-slate-400">轨迹地图</div>
+                          <div className="mt-3">
+                            <WalkDetailMap
+                              path={selectedProfileWalk.path || []}
+                              locationLabel={selectedProfileWalk.locationName || selectedProfileWalk.themeTitle}
+                            />
+                          </div>
+                        </div>
+
                         <div className="mt-5 grid gap-4 sm:grid-cols-2">
                           <div className="rounded-2xl bg-white px-4 py-4">
                             <div className="text-xs uppercase tracking-[0.18em] text-slate-400">完成任务</div>
                             <div className="mt-3 space-y-2">
-                              {(selectedProfileWalk.completedMissions?.length ?? 0) > 0 ? (
-                                selectedProfileWalk.completedMissions?.map((mission, index) => (
-                                  <div key={`${String(mission)}-${index}`} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                                    {typeof mission === 'string' ? mission : JSON.stringify(mission)}
+                              {normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).length > 0 ? (
+                                normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).map((mission, index) => (
+                                  <div key={`${mission}-${index}`} className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                    {mission}
                                   </div>
                                 ))
                               ) : (
@@ -2228,7 +2392,7 @@ export default function App() {
                             <div className="mt-3 space-y-2 text-sm text-slate-700">
                               <div>记录单元：{selectedProfileWalk.recordUnit || 'event'}</div>
                               <div>轨迹点数量：{selectedProfileWalk.path?.length || 0}</div>
-                              <div>查看时间：{formatWalkTime()}</div>
+                              <div>累计距离：{(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)} km</div>
                             </div>
                           </div>
                         </div>
