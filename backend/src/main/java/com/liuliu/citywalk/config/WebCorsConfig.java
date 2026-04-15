@@ -25,6 +25,10 @@ public class WebCorsConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
                 .allowedOriginPatterns(
+                        "https://liu--liu.com",
+                        "https://www.liu--liu.com",
+                        "http://liu--liu.com",
+                        "http://www.liu--liu.com",
                         "http://localhost:3000",
                         "http://127.0.0.1:3000",
                         "http://192.168.*.*:3000",
