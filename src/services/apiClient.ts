@@ -18,14 +18,26 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     },
   });
 
+  let json: any = null;
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      json = await response.json();
+    } catch {
+      json = null;
+    }
+  }
+
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
     }
-    throw new Error(`Request failed: ${response.status}`);
+    throw new Error(json?.message || `Request failed: ${response.status}`);
   }
 
-  const json = await response.json();
+  if (!json) {
+    throw new Error('API request failed');
+  }
 
   if (json?.code !== 0) {
     if (json?.code === 401 && typeof window !== 'undefined') {
