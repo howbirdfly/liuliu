@@ -17,6 +17,8 @@ import java.util.Locale;
 public class EmailAuthService {
 
     private static final int SALT_LENGTH = 16;
+    private static final long CODE_COOLDOWN_SECONDS = 60;
+    private static final long CODE_EXPIRE_MINUTES = 30;
 
     private final AuthTokenService authTokenService;
     private final UserCredentialRepository userCredentialRepository;
@@ -40,14 +42,14 @@ public class EmailAuthService {
         ensureValidEmail(normalizedEmail);
 
         emailVerificationRepository.findLatest(normalizedEmail).ifPresent(record -> {
-            if (record.createdAt() != null && record.createdAt().toInstant().isAfter(Instant.now().minusSeconds(60))) {
+            if (record.createdAt() != null && record.createdAt().toInstant().isAfter(Instant.now().minusSeconds(CODE_COOLDOWN_SECONDS))) {
                 throw new IllegalStateException("code_send_too_frequent");
             }
         });
 
         String code = generateCode();
         String codeHash = hashVerificationCode(code);
-        emailVerificationRepository.create(normalizedEmail, codeHash, Instant.now().plus(10, ChronoUnit.MINUTES));
+        emailVerificationRepository.create(normalizedEmail, codeHash, Instant.now().plus(CODE_EXPIRE_MINUTES, ChronoUnit.MINUTES));
         emailSender.sendVerificationCode(normalizedEmail, code);
     }
 

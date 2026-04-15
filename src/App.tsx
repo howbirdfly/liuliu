@@ -1551,7 +1551,7 @@ export default function App() {
     try {
       await sendEmailCode(trimmedEmail);
       setSendCodeCooldown(60);
-      setAuthInfo('验证码已发送，请查看 QQ 邮箱收件箱或垃圾箱。');
+      setAuthInfo('验证码已发送，30 分钟内有效。请查看 QQ 邮箱收件箱或垃圾箱；如果重复发送，请以最后一次收到的验证码为准。');
     } catch (error) {
       console.error('Send email code error:', error);
       setAuthError(getEmailSendErrorMessage(error));

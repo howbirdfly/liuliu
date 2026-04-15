@@ -23,7 +23,7 @@ public class EmailSender {
         }
         message.setTo(to);
         message.setSubject("遛遛账号验证码");
-        message.setText("你的验证码是：" + code + "，10分钟内有效。如非本人操作请忽略。");
+        message.setText("你的验证码是：" + code + "，30分钟内有效。如果重复发送，请以最后一次收到的验证码为准。");
         mailSender.send(message);
     }
 }
