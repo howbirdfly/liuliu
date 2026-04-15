@@ -1453,45 +1453,45 @@ export default function App() {
   const getEmailSendErrorMessage = (error: unknown) => {
     const message = error instanceof Error ? error.message : '';
     if (message.includes('code_send_too_frequent')) {
-      return '????????? 60 ?????';
+      return '验证码刚发过，请等 60 秒后再试。';
     }
     if (message.includes('email_not_supported')) {
-      return '????? QQ ?????';
+      return '目前只支持 QQ 邮箱注册。';
     }
     if (message.includes('email_send_failed')) {
-      return '????????????????';
+      return '验证码邮件发送失败，请稍后重试。';
     }
-    return '??????????????';
+    return '验证码发送失败，请稍后重试。';
   };
 
   const getEmailAuthErrorMessage = (mode: 'login' | 'register', error: unknown) => {
     const message = error instanceof Error ? error.message : '';
     if (mode === 'register') {
       if (message.includes('code_invalid')) {
-        return '????????????????';
+        return '验证码无效或已过期，请重新获取。';
       }
       if (message.includes('email_already_registered')) {
-        return '?? QQ ?????????????????';
+        return '这个 QQ 邮箱已经注册过了，直接登录就可以。';
       }
       if (message.includes('email_not_supported')) {
-        return '????? QQ ?????';
+        return '目前只支持 QQ 邮箱注册。';
       }
       if (message.includes('password_too_short')) {
-        return '?????? 6 ??';
+        return '密码至少需要 6 位。';
       }
-      return '??????????????????';
+      return '注册失败，请检查验证码、邮箱和密码。';
     }
 
     if (message.includes('email_not_registered')) {
-      return '?????????????????';
+      return '这个邮箱还没有注册，请先注册账号。';
     }
     if (message.includes('invalid_password')) {
-      return '????????????';
+      return '密码不正确，请重新输入。';
     }
     if (message.includes('email_not_supported')) {
-      return '????? QQ ?????';
+      return '目前只支持 QQ 邮箱登录。';
     }
-    return '??????????????';
+    return '登录失败，请检查邮箱和密码。';
   };
 
   const handleEmailAuthSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
