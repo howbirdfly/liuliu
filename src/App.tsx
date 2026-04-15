@@ -862,6 +862,7 @@ export default function App() {
   const [passwordInput, setPasswordInput] = useState('');
   const [emailCodeInput, setEmailCodeInput] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authInfo, setAuthInfo] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [sendCodeCooldown, setSendCodeCooldown] = useState(0);
@@ -1445,6 +1446,7 @@ export default function App() {
 
   const handleSignIn = () => {
     setAuthError('');
+    setAuthInfo('');
     setEmailLoginMode('login');
     setShowEmailLogin(true);
   };
@@ -1508,6 +1510,7 @@ export default function App() {
 
     setIsAuthLoading(true);
     setAuthError('');
+    setAuthInfo('');
     try {
       if (emailLoginMode === 'register') {
         if (!emailCodeInput.trim()) {
@@ -1544,12 +1547,15 @@ export default function App() {
     }
     setIsSendingCode(true);
     setAuthError('');
+    setAuthInfo('');
     try {
       await sendEmailCode(trimmedEmail);
       setSendCodeCooldown(60);
+      setAuthInfo('验证码已发送，请查看 QQ 邮箱收件箱或垃圾箱。');
     } catch (error) {
       console.error('Send email code error:', error);
       setAuthError(getEmailSendErrorMessage(error));
+      setAuthInfo('');
     } finally {
       setIsSendingCode(false);
     }
@@ -1817,7 +1823,11 @@ export default function App() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowEmailLogin(false)}
+                  onClick={() => {
+                    setShowEmailLogin(false);
+                    setAuthError('');
+                    setAuthInfo('');
+                  }}
                   className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
                 >
                   关闭
@@ -1867,6 +1877,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : null}
+                {authInfo ? <div className="text-sm text-emerald-600">{authInfo}</div> : null}
                 {authError ? <div className="text-sm text-rose-500">{authError}</div> : null}
                 <button
                   type="submit"
@@ -1886,6 +1897,7 @@ export default function App() {
                   onClick={() => {
                     setEmailLoginMode(emailLoginMode === 'register' ? 'login' : 'register');
                     setAuthError('');
+                    setAuthInfo('');
                   }}
                   className="rounded-full border border-slate-200 px-3 py-1 text-slate-600"
                 >
