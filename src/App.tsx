@@ -64,8 +64,8 @@ type WalkRecordCard = {
   serialNumber: string;
 };
 
-const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '质感漫步'];
-const COMBINE_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步'];
+const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步', '动物漫步'];
+const COMBINE_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步', '动物漫步'];
 const DEFAULT_CENTER: [number, number] = [31.2304, 121.4737];
 const DEFAULT_MAP_ZOOM = 16;
 const TRACKING_MAP_ZOOM = 19;
@@ -1399,15 +1399,18 @@ export default function App() {
     setIsGenerating(true);
     try {
       const { locationName, locationContextText } = await resolveCurrentContext();
-      const theme = await generateAITheme(
-        mood,
-        weather,
-        season,
-        preference,
-        locationName,
-        locationContextText,
-        walkMode,
-      );
+      const theme =
+        selectedThemesForCombine.length === 1
+          ? await generateDynamicPreset(selectedThemesForCombine[0], locationName, locationContextText, walkMode)
+          : await generateAITheme(
+              mood,
+              weather,
+              season,
+              preference,
+              locationName,
+              locationContextText,
+              walkMode,
+            );
       pushThemeHistory(theme);
     } finally {
       setIsGenerating(false);
@@ -1446,6 +1449,51 @@ export default function App() {
     setShowEmailLogin(true);
   };
 
+
+  const getEmailSendErrorMessage = (error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('code_send_too_frequent')) {
+      return '????????? 60 ?????';
+    }
+    if (message.includes('email_not_supported')) {
+      return '????? QQ ?????';
+    }
+    if (message.includes('email_send_failed')) {
+      return '????????????????';
+    }
+    return '??????????????';
+  };
+
+  const getEmailAuthErrorMessage = (mode: 'login' | 'register', error: unknown) => {
+    const message = error instanceof Error ? error.message : '';
+    if (mode === 'register') {
+      if (message.includes('code_invalid')) {
+        return '????????????????';
+      }
+      if (message.includes('email_already_registered')) {
+        return '?? QQ ?????????????????';
+      }
+      if (message.includes('email_not_supported')) {
+        return '????? QQ ?????';
+      }
+      if (message.includes('password_too_short')) {
+        return '?????? 6 ??';
+      }
+      return '??????????????????';
+    }
+
+    if (message.includes('email_not_registered')) {
+      return '?????????????????';
+    }
+    if (message.includes('invalid_password')) {
+      return '????????????';
+    }
+    if (message.includes('email_not_supported')) {
+      return '????? QQ ?????';
+    }
+    return '??????????????';
+  };
+
   const handleEmailAuthSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmedEmail = emailInput.trim().toLowerCase();
@@ -1479,7 +1527,7 @@ export default function App() {
       setEmailCodeInput('');
     } catch (error) {
       console.error('Email auth error:', error);
-      setAuthError(emailLoginMode === 'register' ? '注册失败，请检查验证码或邮箱。' : '登录失败，请检查邮箱或密码。');
+      setAuthError(getEmailAuthErrorMessage(emailLoginMode, error));
     } finally {
       setIsAuthLoading(false);
     }
@@ -1501,7 +1549,7 @@ export default function App() {
       setSendCodeCooldown(60);
     } catch (error) {
       console.error('Send email code error:', error);
-      setAuthError('验证码发送失败，请稍后重试。');
+      setAuthError(getEmailSendErrorMessage(error));
     } finally {
       setIsSendingCode(false);
     }
@@ -2034,38 +2082,6 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <button
-                    onClick={handleGenerateRandomTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                  >
-                    <Shuffle className="h-4 w-4" />
-                    随机生成
-                  </button>
-                  <button
-                    onClick={handleGenerateAiTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    AI 生成
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (isTracking) {
-                        setIsTracking(false);
-                        setLivePosition(null);
-                        return;
-                      }
-                      setPath([]);
-                      setLivePosition(null);
-                      setIsTracking(true);
-                    }}
-                    className="rounded-full border border-slate-200 px-4 py-2 text-sm"
-                  >
-                    {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
-                  </button>
-                </div>
-
                 <div className="mt-6">
                   <p className="mb-2 text-sm font-medium text-slate-600">组合主题方向</p>
                   <div className="flex flex-wrap gap-2">
@@ -2092,11 +2108,47 @@ export default function App() {
                       );
                     })}
                   </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-3">
                   <button
                     onClick={handleCombineThemes}
-                    className="mt-3 rounded-full border border-slate-200 px-4 py-2 text-sm"
+                    className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white"
                   >
                     组合生成主题
+                  </button>
+                  <button
+                    onClick={handleGenerateAiTheme}
+                    className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    AI 生成
+                  </button>
+                  <button
+                    onClick={handleGenerateRandomTheme}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                  >
+                    <Shuffle className="h-4 w-4" />
+                    随机生成
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (isTracking) {
+                        setIsTracking(false);
+                        setLivePosition(null);
+                        return;
+                      }
+                      setPath([]);
+                      setLivePosition(null);
+                      setIsTracking(true);
+                    }}
+                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                      isTracking
+                        ? 'bg-rose-500 text-white'
+                        : 'border border-slate-200 bg-sky-50 text-sky-700'
+                    }`}
+                  >
+                    {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
                   </button>
                 </div>
               </div>

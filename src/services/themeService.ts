@@ -70,6 +70,113 @@ export const PRESET_THEMES: WalkTheme[] = [
   },
 ];
 
+function getPresetThemeFallback(category: string): WalkTheme {
+  const normalized = category.replace(/\s+/g, '');
+
+  if (normalized.includes('声音')) {
+    return {
+      title: '声音漫步：城市回声',
+      description: '先把脚步放慢一点，去听风声、人声、路口的回响和突然安静下来的片刻。',
+      category: '声音漫步',
+      missions: ['停下听 30 秒周围的声音', '找到一种最突出的背景音', '记录一个突然安静下来的片刻'],
+      vibeColor: '#10b981',
+    };
+  }
+
+  if (normalized.includes('颜色')) {
+    return {
+      title: '颜色漫步：春日取样',
+      description: '沿着这段路慢慢走，留心今天最先撞进眼睛里的颜色和它们之间的变化。',
+      category: '颜色漫步',
+      missions: ['找到一种今天最醒目的颜色', '记录两种相邻但反差明显的色彩', '拍下一个让你停下来的配色角落'],
+      vibeColor: '#f59e0b',
+    };
+  }
+
+  if (normalized.includes('形状')) {
+    return {
+      title: '形状漫步：转角观察',
+      description: '从线条、轮廓和重复图案里重新认识这段熟悉的路，把目光交给形状本身。',
+      category: '形状漫步',
+      missions: ['找到一个有趣的圆形或弧线', '观察一处重复出现的几何图案', '记录一个最特别的转角轮廓'],
+      vibeColor: '#3b82f6',
+    };
+  }
+
+  if (normalized.includes('自然')) {
+    return {
+      title: '自然漫步：缝隙生长',
+      description: '去看植物、风和光线怎样偷偷长进人造空间里，找到这条路最柔软的一面。',
+      category: '自然漫步',
+      missions: ['找到一处被忽略的小植物', '观察一片最亮眼的绿色', '记录风吹过树叶或草丛的瞬间'],
+      vibeColor: '#84cc16',
+    };
+  }
+
+  if (normalized.includes('街区')) {
+    return {
+      title: '街区漫步：生活切片',
+      description: '从门面、转角和路口的人间烟火里，慢慢拼出这片街区今天的气质。',
+      category: '街区漫步',
+      missions: ['找到一个最有生活感的门面', '记录一处时间痕迹', '拍下一个有故事感的街角'],
+      vibeColor: '#f59e0b',
+    };
+  }
+
+
+  if (normalized.includes('??')) {
+    return {
+      title: '?????????',
+      description: '???????????????????????????????????',
+      category: '????',
+      missions: ['?????????????', '???????????????', '?????????????????'],
+      vibeColor: '#ec4899',
+    };
+  }
+  return PRESET_THEMES[0];
+}
+
+function isSoundAlignedMission(mission: string): boolean {
+  return ['听', '声音', '声', '回声', '噪音', '安静', '风声', '鸟鸣', '脚步', '节奏', '人声'].some((keyword) =>
+    mission.includes(keyword),
+  );
+}
+
+function isAnimalAlignedMission(mission: string): boolean {
+  return ['??', '??', '??', '?', '??', '??', '??', '??', '??', '??', '??'].some((keyword) =>
+    mission.includes(keyword),
+  );
+}
+
+function alignThemeToCategory(theme: WalkTheme, category: string): WalkTheme {
+  const fallback = getPresetThemeFallback(category);
+  const normalized = category.replace(/\s+/g, '');
+
+  if (normalized.includes('声音')) {
+    const soundMissionCount = theme.missions.filter(isSoundAlignedMission).length;
+    if (soundMissionCount < 2) {
+      return {
+        ...theme,
+        category: fallback.category,
+        missions: fallback.missions,
+      };
+    }
+  }
+
+
+  if (normalized.includes('??')) {
+    const animalMissionCount = theme.missions.filter(isAnimalAlignedMission).length;
+    if (animalMissionCount < 2) {
+      return {
+        ...theme,
+        category: fallback.category,
+        missions: fallback.missions,
+      };
+    }
+  }
+  return theme;
+}
+
 function normalizeTheme(data?: Partial<ThemeApiResponse> | null, fallback?: WalkTheme): WalkTheme {
   const base = fallback ?? PRESET_THEMES[0];
   return {
@@ -127,6 +234,7 @@ export async function generateDynamicPreset(
   locationContext: string,
   walkMode: string,
 ): Promise<WalkTheme> {
+  const fallback = getPresetThemeFallback(category);
   try {
     const data = await apiRequest<ThemeApiResponse>('/api/v1/ai/themes/preset', {
       method: 'POST',
@@ -137,10 +245,10 @@ export async function generateDynamicPreset(
         walkMode,
       }),
     });
-    return normalizeTheme(data, PRESET_THEMES[0]);
+    return alignThemeToCategory(normalizeTheme(data, fallback), category);
   } catch (error) {
     console.error('Error generating dynamic preset:', error);
-    return PRESET_THEMES[Math.floor(Math.random() * PRESET_THEMES.length)];
+    return fallback;
   }
 }
 
