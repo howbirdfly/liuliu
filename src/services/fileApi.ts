@@ -7,6 +7,18 @@ export interface UploadFileResult {
   size: number;
 }
 
+interface UploadInitResult {
+  fileId: string;
+  objectName: string;
+  host: string;
+  policy: string;
+  signature: string;
+  accessKeyId: string;
+  url: string;
+  expireAt: number;
+  successActionStatus: string;
+}
+
 function dataUrlToFile(dataUrl: string, fileName: string): File {
   const [header, base64] = dataUrl.split(',');
   const mimeMatch = header.match(/data:(.*?);base64/);
@@ -26,27 +38,75 @@ export async function uploadDataUrl(
   bizType: 'walk_cover' | 'mission_media' | 'audio' | 'video' | 'avatar',
   fileName: string,
 ): Promise<UploadFileResult> {
-  const formData = new FormData();
-  formData.append('file', dataUrlToFile(dataUrl, fileName));
-  formData.append('bizType', bizType);
+  const file = dataUrlToFile(dataUrl, fileName);
   const token = typeof window !== 'undefined' ? window.localStorage.getItem(getAuthTokenStorageKey()) : null;
 
-  const response = await fetch(`${getApiBaseUrlForDebug()}/api/v1/files/upload`, {
+  const initResponse = await fetch(`${getApiBaseUrlForDebug()}/api/v1/files/upload/init`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
+    body: JSON.stringify({
+      bizType,
+      fileName: file.name,
+      contentType: file.type,
+      size: file.size,
+    }),
+  });
+
+  if (!initResponse.ok) {
+    throw new Error(`Upload init failed: ${initResponse.status}`);
+  }
+
+  const initJson = await initResponse.json();
+  if (initJson?.code !== 0) {
+    throw new Error(initJson?.message || 'Upload init failed');
+  }
+
+  const initData = initJson.data as UploadInitResult;
+  const formData = new FormData();
+  formData.append('key', initData.objectName);
+  formData.append('policy', initData.policy);
+  formData.append('OSSAccessKeyId', initData.accessKeyId);
+  formData.append('Signature', initData.signature);
+  formData.append('success_action_status', initData.successActionStatus);
+  formData.append('file', file);
+
+  const ossResponse = await fetch(initData.host, {
+    method: 'POST',
     body: formData,
   });
 
-  if (!response.ok) {
-    throw new Error(`Upload failed: ${response.status}`);
+  if (!ossResponse.ok) {
+    throw new Error(`OSS upload failed: ${ossResponse.status}`);
   }
 
-  const json = await response.json();
-  if (json?.code !== 0) {
-    throw new Error(json?.message || 'Upload failed');
+  const completeResponse = await fetch(`${getApiBaseUrlForDebug()}/api/v1/files/upload/complete`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      fileId: initData.fileId,
+      bizType,
+      fileName: file.name,
+      objectName: initData.objectName,
+      url: initData.url,
+      contentType: file.type,
+      size: file.size,
+    }),
+  });
+
+  if (!completeResponse.ok) {
+    throw new Error(`Upload complete failed: ${completeResponse.status}`);
   }
 
-  return json.data as UploadFileResult;
+  const completeJson = await completeResponse.json();
+  if (completeJson?.code !== 0) {
+    throw new Error(completeJson?.message || 'Upload complete failed');
+  }
+
+  return completeJson.data as UploadFileResult;
 }
