@@ -12,6 +12,7 @@ import {
   Sparkles,
   UserRound,
   Users,
+  Check,
 } from 'lucide-react';
 import {
   AppUser,
@@ -216,6 +217,112 @@ function calculateDistanceMeters(
 
 function sanitizeCardText(value: string) {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+const GENERIC_LOCATION_LABELS = new Set(['当前位置', '地图选点']);
+const BROAD_LOCATION_PATTERN =
+  /([\u4e00-\u9fa5A-Za-z0-9·]{2,40}(?:大学(?:[\u4e00-\u9fa5A-Za-z0-9·]{0,10}校区)?|学院(?:[\u4e00-\u9fa5A-Za-z0-9·]{0,10}校区)?|校区|科技园|软件园|工业园|园区|公园|商圈|街区|景区|新区|开发区|街道|镇|乡|村|社区))/g;
+
+function isGenericLocationName(value?: string) {
+  if (!value) {
+    return true;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return true;
+  }
+
+  return GENERIC_LOCATION_LABELS.has(trimmed) || trimmed.startsWith('地图选点');
+}
+
+function isTooSpecificPoiName(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  if (/[（(].+[)）]/.test(trimmed)) {
+    return true;
+  }
+
+  const specificKeywords = ['咖啡', '便利店', '快递站', '驿站', '奶茶', '餐厅', '饭店', '超市', '店'];
+  return specificKeywords.some((keyword) => trimmed.includes(keyword));
+}
+
+function scoreBroadLocationCandidate(value: string) {
+  if (value.includes('大学') || value.includes('校区')) {
+    return 4;
+  }
+  if (value.includes('园区') || value.includes('科技园') || value.includes('软件园') || value.includes('工业园')) {
+    return 3;
+  }
+  if (value.includes('区') || value.includes('镇') || value.includes('街道') || value.includes('乡') || value.includes('村')) {
+    return 2;
+  }
+  return 1;
+}
+
+function extractBroadLocationName(text?: string) {
+  if (!text) {
+    return '';
+  }
+
+  const normalized = sanitizeCardText(text).replace(/[，。；：]/g, ' ');
+  if (!normalized) {
+    return '';
+  }
+
+  const candidates: string[] = [];
+  const bracketMatches = normalized.match(/[（(]([^()（）]{2,40})[)）]/g) || [];
+  bracketMatches.forEach((match) => {
+    const inner = match.slice(1, -1).trim();
+    if (inner) {
+      candidates.push(inner);
+    }
+  });
+
+  const pushPatternMatches = (source: string) => {
+    const matches = source.match(BROAD_LOCATION_PATTERN) || [];
+    matches.forEach((item) => {
+      const candidate = item.trim();
+      if (candidate) {
+        candidates.push(candidate);
+      }
+    });
+  };
+
+  pushPatternMatches(normalized);
+  bracketMatches.forEach((match) => pushPatternMatches(match.slice(1, -1)));
+
+  if (candidates.length === 0) {
+    return '';
+  }
+
+  return [...new Set(candidates)]
+    .sort((left, right) => {
+      const scoreDelta = scoreBroadLocationCandidate(right) - scoreBroadLocationCandidate(left);
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      return right.length - left.length;
+    })[0];
+}
+
+function deriveDisplayLocationName(rawName?: string, locationContextText?: string) {
+  const trimmedName = rawName?.trim() || '';
+  const broadFromName = extractBroadLocationName(trimmedName);
+  const broadFromContext = extractBroadLocationName(locationContextText);
+
+  if (isGenericLocationName(trimmedName)) {
+    return broadFromContext || broadFromName || '当前区域';
+  }
+
+  if (isTooSpecificPoiName(trimmedName)) {
+    return broadFromName || broadFromContext || trimmedName;
+  }
+
+  return trimmedName || broadFromContext || '当前区域';
 }
 
 function escapeXml(value: string) {
@@ -706,7 +813,12 @@ function normalizeCompletedMissionLabels(completedMissions?: WalkItem['completed
   }
 
   return completedMissions
-    .map((mission) => sanitizeCardText(mission?.mission || ''))
+    .map((mission) => {
+      if (typeof mission === 'string') {
+        return sanitizeCardText(mission);
+      }
+      return sanitizeCardText(mission?.mission || '');
+    })
     .filter((mission) => mission.length > 0);
 }
 
@@ -874,6 +986,7 @@ export default function App() {
   const [recordCardFilename, setRecordCardFilename] = useState('walk-record-card.svg');
   const [activeTab, setActiveTab] = useState<'explore' | 'community' | 'profile'>('explore');
   const [currentTheme, setCurrentTheme] = useState<WalkTheme | null>(PRESET_THEMES[0]);
+  const [checkedMissions, setCheckedMissions] = useState<string[]>([]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
   const [myWalks, setMyWalks] = useState<WalkItem[]>([]);
   const [selectedProfileWalk, setSelectedProfileWalk] = useState<WalkItem | null>(null);
@@ -906,6 +1019,10 @@ export default function App() {
   const [livePosition, setLivePosition] = useState<SearchLocation | null>(null);
   const searchTimeoutRef = useRef<number | null>(null);
   const hasAutoLocatedRef = useRef(false);
+
+  useEffect(() => {
+    setCheckedMissions([]);
+  }, [currentTheme?.title]);
 
   useEffect(() => {
     const callbackPayload = consumeLoginCallback();
@@ -1071,8 +1188,8 @@ export default function App() {
   }, [selectedLocation]);
 
   const currentLocationName = useMemo(
-    () => selectedLocation?.name || searchLocation || '当前位置',
-    [searchLocation, selectedLocation],
+    () => deriveDisplayLocationName(selectedLocation?.name || searchLocation || '当前位置', locationContext),
+    [locationContext, searchLocation, selectedLocation],
   );
 
   const currentPosition = useMemo<SearchLocation | null>(() => livePosition, [livePosition]);
@@ -1232,7 +1349,7 @@ export default function App() {
     setSearchResults([]);
 
     return {
-      locationName: '当前位置',
+      locationName: deriveDisplayLocationName('当前位置', context),
       locationContextText: context,
     };
   };
@@ -1240,14 +1357,14 @@ export default function App() {
   const resolveCurrentContext = async (): Promise<{ locationName: string; locationContextText: string }> => {
     if (selectedLocation) {
       return {
-        locationName: selectedLocation.name,
+        locationName: deriveDisplayLocationName(selectedLocation.name, locationContext),
         locationContextText: locationContext,
       };
     }
 
     if (searchLocation.trim()) {
       return {
-        locationName: searchLocation.trim(),
+        locationName: deriveDisplayLocationName(searchLocation.trim(), locationContext),
         locationContextText: locationContext,
       };
     }
@@ -1259,7 +1376,7 @@ export default function App() {
     }
 
     return {
-      locationName: '当前位置',
+      locationName: deriveDisplayLocationName('当前位置', locationContext),
       locationContextText: locationContext,
     };
   };
@@ -1661,7 +1778,11 @@ export default function App() {
         isPublic,
         noteText,
         path,
-        completedMissions: [],
+        completedMissions: checkedMissions.map((mission) => ({
+          mission,
+          mediaUrl: '',
+          mediaType: '',
+        })),
         photoUrl,
       });
       const card = await generateWalkRecordCardWithAi({
@@ -1670,6 +1791,7 @@ export default function App() {
         locationContext,
         noteText,
         photoUrl: cardPhotoSource || photoUrl,
+        completedMissions: checkedMissions,
       });
       const cardSvg = buildWalkRecordCardSvg(card);
       setRecordCardPreviewUrl(svgToDataUrl(cardSvg));
@@ -1680,6 +1802,7 @@ export default function App() {
       setPath([]);
       setIsTracking(false);
       setLivePosition(null);
+      setCheckedMissions([]);
       setWalkUploadPreview(null);
       setWalkUploadName('');
     } catch (error) {
@@ -2088,9 +2211,43 @@ export default function App() {
 
                 <div className="mt-5 space-y-3">
                   {(currentTheme?.missions || []).map((mission, index) => (
-                    <div key={`${mission}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                      {index + 1}. {mission}
-                    </div>
+                    <button
+                      key={`${mission}-${index}`}
+                      type="button"
+                      onClick={() => {
+                        setCheckedMissions((prev) =>
+                          prev.includes(mission) ? prev.filter((item) => item !== mission) : [...prev, mission],
+                        );
+                      }}
+                      className={`flex w-full items-start gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                        checkedMissions.includes(mission)
+                          ? 'border-emerald-300 bg-emerald-50 shadow-[0_10px_24px_rgba(16,185,129,0.12)]'
+                          : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span
+                        className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${
+                          checkedMissions.includes(mission)
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : 'border-slate-300 bg-white text-transparent'
+                        }`}
+                      >
+                        <Check className="h-4 w-4" />
+                      </span>
+                      <span className={`flex-1 ${checkedMissions.includes(mission) ? 'text-emerald-900' : 'text-slate-700'}`}>
+                        <span className={`mr-1 ${checkedMissions.includes(mission) ? 'text-emerald-500' : 'text-slate-400'}`}>{index + 1}.</span>
+                        {mission}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs ${
+                          checkedMissions.includes(mission)
+                            ? 'bg-white text-emerald-700 shadow-sm'
+                            : 'bg-white text-slate-400'
+                        }`}
+                      >
+                        {checkedMissions.includes(mission) ? '已打卡' : '待打卡'}
+                      </span>
+                    </button>
                   ))}
                 </div>
 
@@ -2389,7 +2546,7 @@ export default function App() {
             </section>
 
             <section className="space-y-6">
-              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm lg:h-[calc(100vh-12rem)] lg:min-h-[780px]">
                 <div className="mb-4 flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold">我的详细记录</h3>
@@ -2398,8 +2555,8 @@ export default function App() {
                   {isLoadingProfile && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
                 </div>
 
-                <div className="grid gap-6 lg:grid-cols-[0.88fr_1.12fr]">
-                  <div className="space-y-3">
+                <div className="grid gap-6 lg:h-[calc(100%-4.5rem)] lg:grid-cols-[0.88fr_1.12fr]">
+                  <div className="space-y-3 lg:min-h-0 lg:overflow-y-auto lg:pr-2">
                     {myWalks.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
                         还没有保存过漫步记录，先去探索页生成一条吧。
@@ -2427,7 +2584,7 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 lg:min-h-0 lg:overflow-y-auto">
                     {selectedProfileWalk ? (
                       <div>
                         <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
