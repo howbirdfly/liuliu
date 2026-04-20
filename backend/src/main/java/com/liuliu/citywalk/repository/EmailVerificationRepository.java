@@ -25,7 +25,6 @@ public class EmailVerificationRepository {
 
     public EmailVerificationRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        ensureTableExists();
     }
 
     public Optional<EmailVerificationRecord> findLatestValid(String email) {
@@ -76,25 +75,6 @@ public class EmailVerificationRepository {
         jdbcTemplate.update(
                 "update email_verification_codes set used_at = now(), updated_at = now() where id = ?",
                 id
-        );
-    }
-
-    private void ensureTableExists() {
-        jdbcTemplate.execute(
-                """
-                create table if not exists email_verification_codes (
-                    id bigint unsigned not null auto_increment,
-                    email varchar(255) not null,
-                    code_hash varchar(255) not null,
-                    expires_at datetime not null,
-                    used_at datetime default null,
-                    created_at datetime not null default current_timestamp,
-                    updated_at datetime not null default current_timestamp on update current_timestamp,
-                    primary key (id),
-                    key idx_email_verification_email (email),
-                    key idx_email_verification_expires (expires_at)
-                ) engine=InnoDB default charset=utf8mb4 comment='邮箱验证码记录';
-                """
         );
     }
 

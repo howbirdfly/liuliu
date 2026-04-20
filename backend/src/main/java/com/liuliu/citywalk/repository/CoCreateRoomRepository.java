@@ -44,7 +44,6 @@ public class CoCreateRoomRepository {
 
     public CoCreateRoomRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        ensureTables();
     }
 
     public RoomRecord createRoom(String roomCode, Long ownerUserId, String themeSnapshotJson) {
@@ -214,46 +213,6 @@ public class CoCreateRoomRepository {
 
     public void deleteMember(Long roomId, Long userId) {
         jdbcTemplate.update("delete from co_create_room_members where room_id = ? and user_id = ?", roomId, userId);
-    }
-
-    private void ensureTables() {
-        jdbcTemplate.execute(
-                """
-                create table if not exists co_create_rooms (
-                  id bigint primary key auto_increment,
-                  room_code varchar(16) not null unique,
-                  owner_user_id bigint not null,
-                  theme_snapshot text null,
-                  status varchar(16) not null default 'active',
-                  created_at datetime not null default current_timestamp,
-                  updated_at datetime not null default current_timestamp on update current_timestamp,
-                  index idx_co_create_rooms_owner_user_id (owner_user_id)
-                )
-                """
-        );
-
-        jdbcTemplate.execute(
-                """
-                create table if not exists co_create_room_members (
-                  id bigint primary key auto_increment,
-                  room_id bigint not null,
-                  user_id bigint not null,
-                  nickname varchar(64) not null,
-                  avatar_url varchar(512) null,
-                  track_color varchar(32) not null,
-                  route_points text null,
-                  current_position text null,
-                  completed_missions text null,
-                  is_tracking tinyint(1) not null default 0,
-                  last_active_at datetime not null default current_timestamp,
-                  created_at datetime not null default current_timestamp,
-                  updated_at datetime not null default current_timestamp on update current_timestamp,
-                  unique key uk_co_create_room_member (room_id, user_id),
-                  index idx_co_create_room_members_room_id (room_id),
-                  index idx_co_create_room_members_user_id (user_id)
-                )
-                """
-        );
     }
 
     private static Long toEpochMilli(Timestamp timestamp) {

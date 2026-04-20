@@ -25,7 +25,6 @@ public class UserCredentialRepository {
 
     public UserCredentialRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        ensureTableExists();
     }
 
     public Optional<UserCredentialRecord> findByEmail(String email) {
@@ -85,27 +84,6 @@ public class UserCredentialRepository {
                 """,
                 passwordHash,
                 userId
-        );
-    }
-
-    private void ensureTableExists() {
-        jdbcTemplate.execute(
-                """
-                create table if not exists user_credentials (
-                    id bigint unsigned not null auto_increment,
-                    user_id bigint unsigned not null,
-                    email varchar(255) not null,
-                    password_hash varchar(255) not null,
-                    created_at datetime not null default current_timestamp,
-                    updated_at datetime not null default current_timestamp on update current_timestamp,
-                    primary key (id),
-                    unique key uk_user_credentials_email (email),
-                    key idx_user_credentials_user_id (user_id),
-                    constraint fk_user_credentials_user_id
-                      foreign key (user_id) references users(id)
-                        on delete cascade
-                ) engine=InnoDB default charset=utf8mb4 comment='用户邮箱凭证';
-                """
         );
     }
 
