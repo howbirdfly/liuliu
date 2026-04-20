@@ -41,6 +41,16 @@ import { createWalk, fetchMyWalks, fetchPublicWalks, fetchWalkDetail, WalkItem }
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
+import {
+  CoCreateRoom,
+  CoCreateRoomMember,
+  createCoCreateRoom,
+  fetchCoCreateRoom,
+  joinCoCreateRoom,
+  leaveCoCreateRoom,
+  updateCoCreateRoomState,
+  updateCoCreateRoomTheme,
+} from './services/roomApi';
 
 type SearchLocation = {
   name: string;
@@ -63,6 +73,14 @@ type WalkRecordCard = {
   dateLabel: string;
   photoUrl?: string;
   serialNumber: string;
+};
+
+type RoomMapMember = {
+  userId: number;
+  nickname: string;
+  trackColor: string;
+  path: [number, number][];
+  currentPosition: [number, number] | null;
 };
 
 const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步', '动物漫步'];
@@ -631,12 +649,24 @@ function AmapScene(props: {
   currentPosition: SearchLocation | null;
   followCurrentPosition: boolean;
   pathCoordinates: [number, number][];
+  roomMembers?: RoomMapMember[];
   nearbyPois: MapPOI[];
   selectedPoiKey: string | null;
   onSelectMapPoint: (lat: number, lng: number) => void;
   onSelectPoi: (poi: MapPOI) => void;
 }) {
-  const { center, selectedLocation, currentPosition, followCurrentPosition, pathCoordinates, nearbyPois, selectedPoiKey, onSelectMapPoint, onSelectPoi } = props;
+  const {
+    center,
+    selectedLocation,
+    currentPosition,
+    followCurrentPosition,
+    pathCoordinates,
+    roomMembers = [],
+    nearbyPois,
+    selectedPoiKey,
+    onSelectMapPoint,
+    onSelectPoi,
+  } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
@@ -648,6 +678,7 @@ function AmapScene(props: {
     currentPosition &&
     Math.abs(selectedLocation.lat - currentPosition.lat) < 0.000001 &&
     Math.abs(selectedLocation.lng - currentPosition.lng) < 0.000001;
+  const hasRoomTracks = roomMembers.length > 0;
 
   useEffect(() => {
     onSelectMapPointRef.current = onSelectMapPoint;
@@ -729,7 +760,7 @@ function AmapScene(props: {
       );
     }
 
-    if (currentPosition) {
+    if (currentPosition && !hasRoomTracks) {
       overlays.push(
         new AMap.Marker({
           position: [currentPosition.lng, currentPosition.lat],
@@ -784,7 +815,7 @@ function AmapScene(props: {
         overlays.push(marker);
       });
 
-    if (pathCoordinates.length > 1) {
+    if (pathCoordinates.length > 1 && !hasRoomTracks) {
       overlays.push(
         new AMap.Polyline({
           path: pathCoordinates.map(([lat, lng]) => [lng, lat]),
@@ -797,12 +828,40 @@ function AmapScene(props: {
       );
     }
 
+    roomMembers.forEach((member) => {
+      if (member.path.length > 1) {
+        overlays.push(
+          new AMap.Polyline({
+            path: member.path.map(([lat, lng]) => [lng, lat]),
+            strokeColor: member.trackColor,
+            strokeWeight: 4,
+            strokeOpacity: 0.85,
+            lineJoin: 'round',
+            lineCap: 'round',
+            strokeStyle: 'dashed',
+          }),
+        );
+      }
+
+      if (member.currentPosition) {
+        overlays.push(
+          new AMap.Marker({
+            position: [member.currentPosition[1], member.currentPosition[0]],
+            anchor: 'center',
+            offset: new AMap.Pixel(0, 0),
+            content: createMarkerContent(member.trackColor, 18, `${member.nickname}位置`),
+            title: member.nickname,
+          }),
+        );
+      }
+    });
+
     if (overlays.length > 0) {
       map.add(overlays);
     }
 
     overlaysRef.current = overlays;
-  }, [currentPosition, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, selectedLocation, selectedPoiKey]);
+  }, [currentPosition, hasRoomTracks, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, roomMembers, selectedLocation, selectedPoiKey]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -1017,8 +1076,15 @@ export default function App() {
   const [path, setPath] = useState<PathPoint[]>([]);
   const [isTracking, setIsTracking] = useState(false);
   const [livePosition, setLivePosition] = useState<SearchLocation | null>(null);
+  const [roomCodeInput, setRoomCodeInput] = useState('');
+  const [coCreateRoom, setCoCreateRoom] = useState<CoCreateRoom | null>(null);
+  const [isRoomSubmitting, setIsRoomSubmitting] = useState(false);
+  const [roomError, setRoomError] = useState('');
+  const [roomMessage, setRoomMessage] = useState('');
   const searchTimeoutRef = useRef<number | null>(null);
   const hasAutoLocatedRef = useRef(false);
+  const roomSyncTimeoutRef = useRef<number | null>(null);
+  const roomThemeSyncTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     setCheckedMissions([]);
@@ -1038,6 +1104,16 @@ export default function App() {
         setUser(null);
       });
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      return;
+    }
+    setCoCreateRoom(null);
+    setRoomCodeInput('');
+    setRoomError('');
+    setRoomMessage('');
+  }, [user]);
 
   useEffect(() => {
     void refreshRecentWalks();
@@ -1210,8 +1286,14 @@ export default function App() {
       const lastPoint = path[path.length - 1];
       return [lastPoint.lat, lastPoint.lng];
     }
+    if (walkMode === 'advanced' && coCreateRoom) {
+      const activeMember = coCreateRoom.members.find((member) => member.currentPosition);
+      if (activeMember?.currentPosition) {
+        return [activeMember.currentPosition.lat, activeMember.currentPosition.lng];
+      }
+    }
     return DEFAULT_CENTER;
-  }, [currentPosition, isTracking, path, selectedLocation]);
+  }, [coCreateRoom, currentPosition, isTracking, path, selectedLocation, walkMode]);
 
   const pathCoordinates = useMemo(() => path.map((point) => [point.lat, point.lng] as [number, number]), [path]);
   const visiblePathCoordinates = useMemo(() => {
@@ -1265,6 +1347,165 @@ export default function App() {
       })
       .slice(0, 10);
   }, [communityReferencePoint, communityWalks]);
+
+  const roomThemeSnapshot = useMemo(
+    () =>
+      currentTheme
+        ? {
+            title: currentTheme.title,
+            description: currentTheme.description,
+            category: currentTheme.category,
+            missions: currentTheme.missions,
+            vibeColor: currentTheme.vibeColor,
+            provider: currentTheme.provider,
+            coverImageUrl: currentTheme.coverImageUrl,
+          }
+        : null,
+    [currentTheme],
+  );
+  const roomThemeSnapshotKey = useMemo(
+    () => (roomThemeSnapshot ? JSON.stringify(roomThemeSnapshot) : ''),
+    [roomThemeSnapshot],
+  );
+  const activeRoomThemeKey = useMemo(
+    () => (coCreateRoom?.theme ? JSON.stringify(coCreateRoom.theme) : ''),
+    [coCreateRoom?.theme],
+  );
+  const isRoomOwner = !!(user && coCreateRoom && user.id === coCreateRoom.ownerUserId);
+  const roomMemberCount = coCreateRoom?.members.length ?? 0;
+  const roomMapMembers = useMemo<RoomMapMember[]>(() => {
+    if (!coCreateRoom) {
+      return [];
+    }
+
+    return coCreateRoom.members
+      .map((member) => ({
+        userId: member.userId,
+        nickname: member.nickname,
+        trackColor: member.trackColor,
+        path:
+          user && member.userId === user.id
+            ? path.map((point) => [point.lat, point.lng] as [number, number])
+            : (member.path || []).map((point) => [point.lat, point.lng] as [number, number]),
+        currentPosition:
+          user && member.userId === user.id
+            ? currentPosition
+              ? ([currentPosition.lat, currentPosition.lng] as [number, number])
+              : null
+            : member.currentPosition
+              ? ([member.currentPosition.lat, member.currentPosition.lng] as [number, number])
+              : null,
+      }));
+  }, [coCreateRoom, currentPosition, path, user]);
+
+  const applyCoCreateRoom = (room: CoCreateRoom, options?: { syncTheme?: boolean }) => {
+    setCoCreateRoom(room);
+    if (options?.syncTheme !== false && room.theme) {
+      setCurrentTheme({
+        title: room.theme.title,
+        description: room.theme.description,
+        category: room.theme.category,
+        missions: room.theme.missions || [],
+        vibeColor: room.theme.vibeColor || '#334155',
+        provider: room.theme.provider,
+        coverImageUrl: room.theme.coverImageUrl,
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode) {
+      return;
+    }
+
+    let isDisposed = false;
+
+    const syncRoom = async () => {
+      try {
+        const room = await fetchCoCreateRoom(coCreateRoom.roomCode);
+        if (!isDisposed) {
+          applyCoCreateRoom(room);
+        }
+      } catch (error) {
+        if (!isDisposed) {
+          console.error('Fetch co-create room error:', error);
+        }
+      }
+    };
+
+    void syncRoom();
+    const timer = window.setInterval(() => {
+      void syncRoom();
+    }, 3000);
+
+    return () => {
+      isDisposed = true;
+      window.clearInterval(timer);
+    };
+  }, [coCreateRoom?.roomCode, walkMode]);
+
+  useEffect(() => {
+    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode || !roomThemeSnapshot || !isRoomOwner) {
+      return;
+    }
+
+    if (roomThemeSyncTimeoutRef.current) {
+      window.clearTimeout(roomThemeSyncTimeoutRef.current);
+    }
+
+    if (activeRoomThemeKey === roomThemeSnapshotKey) {
+      return;
+    }
+
+    roomThemeSyncTimeoutRef.current = window.setTimeout(() => {
+      updateCoCreateRoomTheme(coCreateRoom.roomCode, roomThemeSnapshot)
+        .then((room) => {
+          applyCoCreateRoom(room, { syncTheme: false });
+        })
+        .catch((error) => {
+          console.error('Sync co-create room theme error:', error);
+        });
+    }, 500);
+
+    return () => {
+      if (roomThemeSyncTimeoutRef.current) {
+        window.clearTimeout(roomThemeSyncTimeoutRef.current);
+      }
+    };
+  }, [activeRoomThemeKey, coCreateRoom?.roomCode, isRoomOwner, roomThemeSnapshot, roomThemeSnapshotKey, walkMode]);
+
+  useEffect(() => {
+    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode || !user) {
+      return;
+    }
+
+    if (roomSyncTimeoutRef.current) {
+      window.clearTimeout(roomSyncTimeoutRef.current);
+    }
+
+    roomSyncTimeoutRef.current = window.setTimeout(() => {
+      updateCoCreateRoomState(coCreateRoom.roomCode, {
+        isTracking,
+        currentPosition: currentPosition
+          ? {
+              lat: currentPosition.lat,
+              lng: currentPosition.lng,
+              timestamp: Date.now(),
+            }
+          : null,
+        path,
+        completedMissions: checkedMissions,
+      }).catch((error) => {
+        console.error('Sync co-create room state error:', error);
+      });
+    }, 600);
+
+    return () => {
+      if (roomSyncTimeoutRef.current) {
+        window.clearTimeout(roomSyncTimeoutRef.current);
+      }
+    };
+  }, [checkedMissions, coCreateRoom?.roomCode, currentPosition, isTracking, path, user, walkMode]);
 
   const toThemeFromWalk = (walk: WalkItem): WalkTheme => {
     const missions = Array.isArray(walk.completedMissions)
@@ -1498,6 +1739,82 @@ export default function App() {
       alert('切换到该 POI 失败，请稍后重试。');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleCreateCoCreateRoom = async () => {
+    if (!roomThemeSnapshot) {
+      return;
+    }
+    setIsRoomSubmitting(true);
+    setRoomError('');
+    setRoomMessage('');
+    try {
+      const room = await createCoCreateRoom({
+        roomCode: roomCodeInput.trim() || undefined,
+        theme: roomThemeSnapshot,
+      });
+      applyCoCreateRoom(room);
+      setRoomCodeInput(room.roomCode);
+      setRoomMessage(`已创建共创房间 ${room.roomCode}，现在可以邀请好友加入了。`);
+    } catch (error) {
+      console.error('Create co-create room error:', error);
+      setRoomError(error instanceof Error ? error.message : '创建房间失败，请稍后重试。');
+    } finally {
+      setIsRoomSubmitting(false);
+    }
+  };
+
+  const handleJoinCoCreateRoom = async () => {
+    const roomCode = roomCodeInput.trim();
+    if (!roomCode) {
+      setRoomError('先输入房间号，我们再一起入房。');
+      return;
+    }
+    setIsRoomSubmitting(true);
+    setRoomError('');
+    setRoomMessage('');
+    try {
+      const room = await joinCoCreateRoom(roomCode);
+      applyCoCreateRoom(room);
+      setRoomCodeInput(room.roomCode);
+      setRoomMessage(`已加入房间 ${room.roomCode}，可以开始一起记录轨迹了。`);
+    } catch (error) {
+      console.error('Join co-create room error:', error);
+      setRoomError(error instanceof Error ? error.message : '加入房间失败，请检查房间号。');
+    } finally {
+      setIsRoomSubmitting(false);
+    }
+  };
+
+  const handleLeaveCoCreateRoom = async () => {
+    if (!coCreateRoom) {
+      return;
+    }
+    setIsRoomSubmitting(true);
+    setRoomError('');
+    try {
+      await leaveCoCreateRoom(coCreateRoom.roomCode);
+      setCoCreateRoom(null);
+      setRoomMessage('已退出共创房间，纯净模式和个人记录不受影响。');
+    } catch (error) {
+      console.error('Leave co-create room error:', error);
+      setRoomError(error instanceof Error ? error.message : '退出房间失败，请稍后重试。');
+    } finally {
+      setIsRoomSubmitting(false);
+    }
+  };
+
+  const handleCopyRoomCode = async () => {
+    if (!coCreateRoom?.roomCode) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(coCreateRoom.roomCode);
+      setRoomMessage(`房间号 ${coCreateRoom.roomCode} 已复制。`);
+    } catch (error) {
+      console.error('Copy room code error:', error);
+      setRoomMessage(`房间号：${coCreateRoom.roomCode}`);
     }
   };
 
@@ -2059,6 +2376,92 @@ export default function App() {
                     </button>
                   </div>
 
+                  {walkMode === 'advanced' && (
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="inline-flex items-center gap-2 text-sm font-medium text-slate-800">
+                            <Users className="h-4 w-4" />
+                            共创房间
+                          </div>
+                          <p className="mt-1 text-sm text-slate-500">
+                            进阶模式下可以建房或输入房间号加入，大家一起参与任务并共享轨迹。
+                          </p>
+                        </div>
+                        {coCreateRoom && (
+                          <div className="rounded-full bg-white px-3 py-1 text-xs text-slate-600 shadow-sm">
+                            成员 {roomMemberCount}/{coCreateRoom.memberLimit}
+                          </div>
+                        )}
+                      </div>
+
+                      {!coCreateRoom ? (
+                        <div className="mt-4 flex flex-col gap-3 lg:flex-row">
+                          <input
+                            value={roomCodeInput}
+                            onChange={(event) => setRoomCodeInput(event.target.value.toUpperCase())}
+                            placeholder="输入房间号，或直接创建新房间"
+                            className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+                          />
+                          <div className="flex flex-wrap gap-3">
+                            <button
+                              onClick={() => void handleCreateCoCreateRoom()}
+                              disabled={isRoomSubmitting}
+                              className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                            >
+                              {isRoomSubmitting ? '处理中...' : '创建房间'}
+                            </button>
+                            <button
+                              onClick={() => void handleJoinCoCreateRoom()}
+                              disabled={isRoomSubmitting}
+                              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm disabled:opacity-60"
+                            >
+                              加入房间
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-4 space-y-3">
+                          <div className="flex flex-wrap items-center gap-3">
+                            <div className="rounded-2xl bg-white px-4 py-3 text-sm shadow-sm">
+                              <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Room Code</div>
+                              <div className="mt-1 text-xl font-semibold tracking-[0.2em] text-slate-900">{coCreateRoom.roomCode}</div>
+                            </div>
+                            <button
+                              onClick={() => void handleCopyRoomCode()}
+                              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm"
+                            >
+                              复制房间号
+                            </button>
+                            <button
+                              onClick={() => void handleLeaveCoCreateRoom()}
+                              disabled={isRoomSubmitting}
+                              className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 disabled:opacity-60"
+                            >
+                              退出房间
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {coCreateRoom.members.map((member) => (
+                              <div
+                                key={member.userId}
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm"
+                              >
+                                <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: member.trackColor }} />
+                                <span>{member.nickname}</span>
+                                {member.isOwner && <span className="text-xs text-amber-600">房主</span>}
+                                {member.isTracking && <span className="text-xs text-emerald-600">记录中</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {roomMessage && <p className="mt-3 text-sm text-emerald-600">{roomMessage}</p>}
+                      {roomError && <p className="mt-3 text-sm text-rose-600">{roomError}</p>}
+                    </div>
+                  )}
+
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
@@ -2126,6 +2529,7 @@ export default function App() {
                     currentPosition={visibleCurrentPosition}
                     followCurrentPosition={isTracking}
                     pathCoordinates={visiblePathCoordinates}
+                    roomMembers={walkMode === 'advanced' ? roomMapMembers : []}
                     nearbyPois={nearbyPois}
                     selectedPoiKey={selectedPoiKey}
                     onSelectMapPoint={(lat, lng) => void handleSelectMapPoint(lat, lng)}
