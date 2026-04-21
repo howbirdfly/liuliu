@@ -8,3 +8,6 @@ coverage/
 !.env.example
 backend/src/main/resources/application-local.yml
 backend/target/
+.idea
+*.iml
+*.class
