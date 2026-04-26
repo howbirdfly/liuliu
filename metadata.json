@@ -1,8 +1,0 @@
-{
-  "name": "Urban Wanderer | 城市漫游主题生成器",
-  "description": "通过随机生成的创意主题（如形状、颜色、声音等），带你重新发现城市的角落，开启一场有趣的 City Walk。",
-  "requestFramePermissions": [
-    "camera",
-    "geolocation"
-  ]
-}
