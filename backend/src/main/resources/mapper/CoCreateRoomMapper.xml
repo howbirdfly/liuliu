@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.CoCreateRoomMapper">
+
+    <resultMap id="CoCreateRoomEntityMap" type="com.liuliu.citywalk.mapper.entity.CoCreateRoomEntity">
+        <id property="id" column="id"/>
+        <result property="roomCode" column="room_code"/>
+        <result property="ownerUserId" column="owner_user_id"/>
+        <result property="themeSnapshot" column="theme_snapshot"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <resultMap id="CoCreateRoomMemberEntityMap" type="com.liuliu.citywalk.mapper.entity.CoCreateRoomMemberEntity">
+        <id property="id" column="id"/>
+        <result property="roomId" column="room_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="nickname" column="nickname"/>
+        <result property="avatarUrl" column="avatar_url"/>
+        <result property="trackColor" column="track_color"/>
+        <result property="routePoints" column="route_points"/>
+        <result property="currentPosition" column="current_position"/>
+        <result property="completedMissions" column="completed_missions"/>
+        <result property="isTracking" column="is_tracking"/>
+        <result property="lastActiveAt" column="last_active_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="RoomColumns">
+        id, room_code, owner_user_id, theme_snapshot, status, created_at, updated_at
+    </sql>
+
+    <sql id="MemberColumns">
+        id, room_id, user_id, nickname, avatar_url, track_color,
+        route_points, current_position, completed_missions, is_tracking,
+        last_active_at, created_at, updated_at
+    </sql>
+
+    <insert id="insertRoom" useGeneratedKeys="true" keyProperty="id">
+        insert into co_create_rooms (
+            room_code, owner_user_id, theme_snapshot, status, created_at, updated_at
+        ) values (
+            #{roomCode}, #{ownerUserId}, #{themeSnapshot}, #{status}, now(), now()
+        )
+    </insert>
+
+    <select id="findActiveRoomByCode" resultMap="CoCreateRoomEntityMap">
+        select <include refid="RoomColumns"/>
+        from co_create_rooms
+        where room_code = #{roomCode} and status = 'active'
+        limit 1
+    </select>
+
+    <select id="findActiveRoomById" resultMap="CoCreateRoomEntityMap">
+        select <include refid="RoomColumns"/>
+        from co_create_rooms
+        where id = #{roomId} and status = 'active'
+        limit 1
+    </select>
+
+    <update id="updateRoomTheme">
+        update co_create_rooms
+        set theme_snapshot = #{themeSnapshot}, updated_at = now()
+        where id = #{roomId}
+    </update>
+
+    <update id="changeOwner">
+        update co_create_rooms
+        set owner_user_id = #{ownerUserId}, updated_at = now()
+        where id = #{roomId}
+    </update>
+
+    <delete id="deleteMembersByRoomId">
+        delete from co_create_room_members where room_id = #{roomId}
+    </delete>
+
+    <delete id="deleteRoomById">
+        delete from co_create_rooms where id = #{roomId}
+    </delete>
+
+    <select id="countMembers" resultType="java.lang.Integer">
+        select count(1) from co_create_room_members where room_id = #{roomId}
+    </select>
+
+    <select id="findMember" resultMap="CoCreateRoomMemberEntityMap">
+        select <include refid="MemberColumns"/>
+        from co_create_room_members
+        where room_id = #{roomId} and user_id = #{userId}
+        limit 1
+    </select>
+
+    <select id="listMembers" resultMap="CoCreateRoomMemberEntityMap">
+        select <include refid="MemberColumns"/>
+        from co_create_room_members
+        where room_id = #{roomId}
+        order by created_at asc
+    </select>
+
+    <insert id="upsertMember">
+        insert into co_create_room_members (
+            room_id, user_id, nickname, avatar_url, track_color,
+            route_points, current_position, completed_missions, is_tracking,
+            last_active_at, created_at, updated_at
+        ) values (
+            #{roomId}, #{userId}, #{nickname}, #{avatarUrl}, #{trackColor},
+            #{routePoints}, #{currentPosition}, #{completedMissions}, #{isTracking},
+            now(), now(), now()
+        )
+        on duplicate key update
+            nickname = values(nickname),
+            avatar_url = values(avatar_url),
+            track_color = values(track_color),
+            updated_at = now(),
+            last_active_at = now()
+    </insert>
+
+    <update id="updateMemberState">
+        update co_create_room_members
+        set route_points = #{routePoints},
+            current_position = #{currentPosition},
+            completed_missions = #{completedMissions},
+            is_tracking = #{isTracking},
+            updated_at = now(),
+            last_active_at = now()
+        where room_id = #{roomId} and user_id = #{userId}
+    </update>
+
+    <delete id="deleteMember">
+        delete from co_create_room_members where room_id = #{roomId} and user_id = #{userId}
+    </delete>
+
+</mapper>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.EmailVerificationMapper">
+
+    <resultMap id="EmailVerificationEntityMap" type="com.liuliu.citywalk.mapper.entity.EmailVerificationEntity">
+        <id property="id" column="id"/>
+        <result property="email" column="email"/>
+        <result property="codeHash" column="code_hash"/>
+        <result property="expiresAt" column="expires_at"/>
+        <result property="usedAt" column="used_at"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="findLatestValid" resultMap="EmailVerificationEntityMap">
+        select id, email, code_hash, expires_at, used_at, created_at
+        from email_verification_codes
+        where email = #{email}
+          and used_at is null
+          and expires_at &gt; now()
+        order by id desc
+        limit 1
+    </select>
+
+    <select id="findLatest" resultMap="EmailVerificationEntityMap">
+        select id, email, code_hash, expires_at, used_at, created_at
+        from email_verification_codes
+        where email = #{email}
+        order by id desc
+        limit 1
+    </select>
+
+    <insert id="insertRecord">
+        insert into email_verification_codes (email, code_hash, expires_at, created_at, updated_at)
+        values (#{email}, #{codeHash}, #{expiresAt}, now(), now())
+    </insert>
+
+    <update id="markUsed">
+        update email_verification_codes set used_at = now(), updated_at = now() where id = #{id}
+    </update>
+
+</mapper>

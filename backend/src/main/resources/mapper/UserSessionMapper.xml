@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.UserSessionMapper">
+
+    <resultMap id="UserSessionEntityMap" type="com.liuliu.citywalk.mapper.entity.UserSessionEntity">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="accessToken" column="access_token"/>
+        <result property="refreshToken" column="refresh_token"/>
+        <result property="expiresAt" column="expires_at"/>
+    </resultMap>
+
+    <insert id="insertSession">
+        insert into user_sessions (user_id, access_token, refresh_token, expires_at, client_type, created_at, updated_at)
+        values (#{userId}, #{accessToken}, #{refreshToken}, date_add(now(), interval #{expiresInSeconds} second), #{clientType}, now(), now())
+    </insert>
+
+    <select id="findValidByAccessToken" resultMap="UserSessionEntityMap">
+        select id, user_id, access_token, refresh_token, expires_at
+        from user_sessions
+        where access_token = #{accessToken}
+          and (expires_at is null or expires_at &gt; now())
+        order by id desc
+        limit 1
+    </select>
+
+</mapper>

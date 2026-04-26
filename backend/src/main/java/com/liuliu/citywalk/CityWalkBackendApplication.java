@@ -4,11 +4,13 @@ import com.liuliu.citywalk.config.AmapProperties;
 import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.config.WechatOpenProperties;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 @SpringBootApplication
+@MapperScan("com.liuliu.citywalk.mapper")
 @EnableConfigurationProperties({
         WechatOpenProperties.class,
         DeepSeekProperties.class,

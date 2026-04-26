@@ -1,14 +1,19 @@
 package com.liuliu.citywalk.service;
 
+import com.liuliu.citywalk.mapper.EmailVerificationMapper;
+import com.liuliu.citywalk.mapper.UserCredentialMapper;
+import com.liuliu.citywalk.mapper.UserMapper;
+import com.liuliu.citywalk.mapper.entity.EmailVerificationEntity;
+import com.liuliu.citywalk.mapper.entity.UserCredentialEntity;
+import com.liuliu.citywalk.mapper.entity.UserEntity;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
-import com.liuliu.citywalk.repository.EmailVerificationRepository;
-import com.liuliu.citywalk.repository.UserCredentialRepository;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
@@ -21,19 +26,22 @@ public class EmailAuthService {
     private static final long CODE_EXPIRE_MINUTES = 30;
 
     private final AuthTokenService authTokenService;
-    private final UserCredentialRepository userCredentialRepository;
-    private final EmailVerificationRepository emailVerificationRepository;
+    private final UserCredentialMapper userCredentialMapper;
+    private final EmailVerificationMapper emailVerificationMapper;
+    private final UserMapper userMapper;
     private final EmailSender emailSender;
 
     public EmailAuthService(
             AuthTokenService authTokenService,
-            UserCredentialRepository userCredentialRepository,
-            EmailVerificationRepository emailVerificationRepository,
+            UserCredentialMapper userCredentialMapper,
+            EmailVerificationMapper emailVerificationMapper,
+            UserMapper userMapper,
             EmailSender emailSender
     ) {
         this.authTokenService = authTokenService;
-        this.userCredentialRepository = userCredentialRepository;
-        this.emailVerificationRepository = emailVerificationRepository;
+        this.userCredentialMapper = userCredentialMapper;
+        this.emailVerificationMapper = emailVerificationMapper;
+        this.userMapper = userMapper;
         this.emailSender = emailSender;
     }
 
@@ -41,15 +49,15 @@ public class EmailAuthService {
         String normalizedEmail = normalizeEmail(email);
         ensureValidEmail(normalizedEmail);
 
-        emailVerificationRepository.findLatest(normalizedEmail).ifPresent(record -> {
-            if (record.createdAt() != null && record.createdAt().toInstant().isAfter(Instant.now().minusSeconds(CODE_COOLDOWN_SECONDS))) {
-                throw new IllegalStateException("code_send_too_frequent");
-            }
-        });
+        EmailVerificationEntity latest = emailVerificationMapper.findLatest(normalizedEmail);
+        if (latest != null && latest.getCreatedAt() != null
+                && latest.getCreatedAt().toInstant().isAfter(Instant.now().minusSeconds(CODE_COOLDOWN_SECONDS))) {
+            throw new IllegalStateException("code_send_too_frequent");
+        }
 
         String code = generateCode();
         String codeHash = hashVerificationCode(code);
-        emailVerificationRepository.create(normalizedEmail, codeHash, Instant.now().plus(CODE_EXPIRE_MINUTES, ChronoUnit.MINUTES));
+        emailVerificationMapper.insertRecord(normalizedEmail, codeHash, Timestamp.from(Instant.now().plus(CODE_EXPIRE_MINUTES, ChronoUnit.MINUTES)));
         emailSender.sendVerificationCode(normalizedEmail, code);
     }
 
@@ -58,25 +66,27 @@ public class EmailAuthService {
         ensureValidEmail(normalizedEmail);
         ensureValidPassword(password);
 
-        userCredentialRepository.findByEmail(normalizedEmail).ifPresent(item -> {
+        UserCredentialEntity existingCredential = userCredentialMapper.findByEmail(normalizedEmail);
+        if (existingCredential != null) {
             throw new IllegalStateException("email_already_registered");
-        });
+        }
 
-        EmailVerificationRepository.EmailVerificationRecord record = emailVerificationRepository.findLatestValid(normalizedEmail)
-                .orElseThrow(() -> new IllegalStateException("code_invalid"));
-        if (!verifyVerificationCode(code, record.codeHash())) {
+        EmailVerificationEntity record = emailVerificationMapper.findLatestValid(normalizedEmail);
+        if (record == null || !verifyVerificationCode(code, record.getCodeHash())) {
             throw new IllegalStateException("code_invalid");
         }
-        emailVerificationRepository.markUsed(record.id());
+        emailVerificationMapper.markUsed(record.getId());
 
-        Long userId = userCredentialRepository.createUser(
-                normalizedEmail,
-                buildNickname(normalizedEmail),
-                ""
-        );
+        String nickname = buildNickname(normalizedEmail);
+        userMapper.insertWebUser(normalizedEmail, nickname, "");
+        UserEntity user = userMapper.findByOpenid(normalizedEmail);
+        if (user == null || user.getId() == null) {
+            throw new IllegalStateException("created_user_not_found");
+        }
+
         String passwordHash = hashPassword(password);
-        userCredentialRepository.createCredential(userId, normalizedEmail, passwordHash);
-        return buildLoginResponse(userId, buildNickname(normalizedEmail), "");
+        userCredentialMapper.insertCredential(user.getId(), normalizedEmail, passwordHash);
+        return buildLoginResponse(user.getId(), nickname, "");
     }
 
     public LoginResponse login(String email, String password) {
@@ -84,14 +94,16 @@ public class EmailAuthService {
         ensureValidEmail(normalizedEmail);
         ensureValidPassword(password);
 
-        UserCredentialRepository.UserCredentialRecord credential = userCredentialRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new IllegalStateException("email_not_registered"));
+        UserCredentialEntity credential = userCredentialMapper.findByEmail(normalizedEmail);
+        if (credential == null) {
+            throw new IllegalStateException("email_not_registered");
+        }
 
-        if (!verifyPassword(password, credential.passwordHash())) {
+        if (!verifyPassword(password, credential.getPasswordHash())) {
             throw new IllegalStateException("invalid_password");
         }
 
-        return buildLoginResponse(credential.userId(), buildNickname(normalizedEmail), "");
+        return buildLoginResponse(credential.getUserId(), buildNickname(normalizedEmail), "");
     }
 
     private LoginResponse buildLoginResponse(Long userId, String nickname, String avatar) {
@@ -124,7 +136,7 @@ public class EmailAuthService {
     private String buildNickname(String email) {
         int index = email.indexOf('@');
         String nickname = index > 0 ? email.substring(0, index) : email;
-        return nickname.isBlank() ? "QQ用户" : nickname;
+        return nickname.isBlank() ? "QQ鐢ㄦ埛" : nickname;
     }
 
     private String generateCode() {

@@ -1,26 +1,30 @@
 package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.context.MiniappUserContext;
+import com.liuliu.citywalk.mapper.UserMapper;
+import com.liuliu.citywalk.mapper.entity.UserEntity;
 import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappUserResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
-import com.liuliu.citywalk.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.Timestamp;
+import java.util.Optional;
 
 @Service
 public class UserSessionService {
 
     private final AuthTokenService authTokenService;
-    private final UserRepository userRepository;
-    private final StoredUser guestUser = new StoredUser(0L, "guest", "游客", "", "guest", 0L, 0L);
+    private final UserMapper userMapper;
+    private final StoredUser guestUser = new StoredUser(0L, "guest", "娓稿", "", "guest", 0L, 0L);
 
     public UserSessionService(
             AuthTokenService authTokenService,
-            UserRepository userRepository
+            UserMapper userMapper
     ) {
         this.authTokenService = authTokenService;
-        this.userRepository = userRepository;
+        this.userMapper = userMapper;
     }
 
     @Transactional
@@ -36,9 +40,9 @@ public class UserSessionService {
     @Transactional
     public MiniappSyncUserResponse syncUser(String code, String nickName, String avatarUrl, String clientType) {
         String openId = buildOpenId(code, nickName);
-        UserRepository.UserRecord user = userRepository.findByOpenid(openId)
-                .map(item -> userRepository.updateProfileAndLogin(item.id(), normalizeNickName(nickName), normalizeAvatar(avatarUrl)))
-                .orElseGet(() -> userRepository.create(openId, normalizeNickName(nickName), normalizeAvatar(avatarUrl)));
+        UserRecord user = findByOpenid(openId)
+                .map(item -> updateProfileAndLogin(item.id(), normalizeNickName(nickName), normalizeAvatar(avatarUrl), clientType))
+                .orElseGet(() -> createUser(openId, normalizeNickName(nickName), normalizeAvatar(avatarUrl), clientType));
 
         String token = authTokenService.createAccessToken(user.id());
         String refreshToken = authTokenService.createRefreshToken(user.id());
@@ -61,7 +65,7 @@ public class UserSessionService {
             throw new IllegalStateException("login_required");
         }
 
-        UserRepository.UserRecord updatedUser = userRepository.updateProfile(
+        UserRecord updatedUser = updateProfile(
                 currentUser.id(),
                 normalizeNickName(nickName),
                 normalizeAvatar(avatarUrl)
@@ -84,7 +88,7 @@ public class UserSessionService {
 
         try {
             AuthTokenService.TokenClaims claims = authTokenService.parseAccessToken(token);
-            return userRepository.findById(claims.userId())
+            return findById(claims.userId())
                     .map(this::toStoredUser)
                     .orElse(guestUser);
         } catch (Exception error) {
@@ -96,9 +100,36 @@ public class UserSessionService {
         if (userId == null || userId <= 0) {
             return guestUser;
         }
-        return userRepository.findById(userId)
+        return findById(userId)
                 .map(this::toStoredUser)
                 .orElse(guestUser);
+    }
+
+    private Optional<UserRecord> findByOpenid(String openid) {
+        return Optional.ofNullable(userMapper.findByOpenid(openid)).map(this::toRecord);
+    }
+
+    private Optional<UserRecord> findById(Long id) {
+        return Optional.ofNullable(userMapper.findById(id)).map(this::toRecord);
+    }
+
+    private UserRecord createUser(String openid, String nickname, String avatarUrl, String clientType) {
+        if ("web".equalsIgnoreCase(normalizeClientType(clientType))) {
+            userMapper.insertWebUser(openid, nickname, avatarUrl);
+        } else {
+            userMapper.insertMiniappUser(openid, nickname, avatarUrl);
+        }
+        return findByOpenid(openid).orElseThrow(() -> new IllegalStateException("created_user_not_found"));
+    }
+
+    private UserRecord updateProfileAndLogin(Long id, String nickname, String avatarUrl, String clientType) {
+        userMapper.updateProfileAndLogin(id, nickname, avatarUrl, normalizeClientType(clientType));
+        return findById(id).orElseThrow(() -> new IllegalStateException("updated_user_not_found"));
+    }
+
+    private UserRecord updateProfile(Long id, String nickname, String avatarUrl) {
+        userMapper.updateProfile(id, nickname, avatarUrl);
+        return findById(id).orElseThrow(() -> new IllegalStateException("updated_user_not_found"));
     }
 
     private String extractToken(String authorizationHeader) {
@@ -121,7 +152,7 @@ public class UserSessionService {
     }
 
     private String normalizeNickName(String nickName) {
-        return nickName == null || nickName.isBlank() ? "微信用户" : nickName.trim();
+        return nickName == null || nickName.isBlank() ? "寰俊鐢ㄦ埛" : nickName.trim();
     }
 
     private String normalizeAvatar(String avatarUrl) {
@@ -135,7 +166,7 @@ public class UserSessionService {
         return clientType.trim();
     }
 
-    private StoredUser toStoredUser(UserRepository.UserRecord user) {
+    private StoredUser toStoredUser(UserRecord user) {
         return new StoredUser(
                 user.id(),
                 user.openid(),
@@ -159,7 +190,7 @@ public class UserSessionService {
         );
     }
 
-    private MiniappUserResponse toResponse(UserRepository.UserRecord user) {
+    private MiniappUserResponse toResponse(UserRecord user) {
         return user == null ? null : new MiniappUserResponse(
                 user.id(),
                 user.openid(),
@@ -169,6 +200,33 @@ public class UserSessionService {
                 user.createdAt(),
                 user.lastLoginAt()
         );
+    }
+
+    private UserRecord toRecord(UserEntity user) {
+        return new UserRecord(
+                user.getId(),
+                user.getOpenid(),
+                user.getNickname(),
+                user.getAvatarUrl(),
+                user.getRole(),
+                toEpochMilli(user.getCreatedAt()),
+                toEpochMilli(user.getLastLoginAt())
+        );
+    }
+
+    private static Long toEpochMilli(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant().toEpochMilli();
+    }
+
+    private record UserRecord(
+            Long id,
+            String openid,
+            String nickname,
+            String avatarUrl,
+            String role,
+            Long createdAt,
+            Long lastLoginAt
+    ) {
     }
 
     public record StoredUser(

@@ -6,7 +6,7 @@ import com.liuliu.citywalk.model.dto.request.FileUploadInitRequest;
 import com.liuliu.citywalk.model.dto.response.FileUploadSignatureResponse;
 import com.liuliu.citywalk.model.dto.response.FileUploadResponse;
 import com.liuliu.citywalk.config.AliOssProperties;
-import com.liuliu.citywalk.repository.UploadedFileRepository;
+import com.liuliu.citywalk.mapper.UploadedFileMapper;
 import com.liuliu.citywalk.service.UserSessionService;
 import com.liuliu.citywalk.util.AliOssUtil;
 import jakarta.validation.Valid;
@@ -34,7 +34,7 @@ import javax.crypto.spec.SecretKeySpec;
 @RequestMapping("/api/v1/files")
 public class FileController {
 
-    private final UploadedFileRepository uploadedFileRepository;
+    private final UploadedFileMapper uploadedFileMapper;
     private final UserSessionService userSessionService;
     private final AliOssUtil aliOssUtil;
     private final AliOssProperties aliOssProperties;
@@ -43,11 +43,11 @@ public class FileController {
     private static final long DIRECT_UPLOAD_EXPIRE_SECONDS = 600L;
     private static final String SUCCESS_ACTION_STATUS = "200";
 
-    public FileController(UploadedFileRepository uploadedFileRepository,
+    public FileController(UploadedFileMapper uploadedFileMapper,
                           UserSessionService userSessionService,
                           AliOssUtil aliOssUtil,
                           AliOssProperties aliOssProperties) {
-        this.uploadedFileRepository = uploadedFileRepository;
+        this.uploadedFileMapper = uploadedFileMapper;
         this.userSessionService = userSessionService;
         this.aliOssUtil = aliOssUtil;
         this.aliOssProperties = aliOssProperties;
@@ -89,10 +89,10 @@ public class FileController {
     public ApiResponse<FileUploadResponse> completeUpload(
             @Valid @RequestBody FileUploadCompleteRequest request,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
-    ) {
+        ) {
         String safeBizType = normalizeSegment(request.bizType(), "common");
         UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
-        uploadedFileRepository.save(
+        uploadedFileMapper.insertFile(
                 user == null || user.isGuest() ? null : user.id(),
                 safeBizType,
                 request.objectName(),
@@ -123,7 +123,7 @@ public class FileController {
         String url = aliOssUtil.upload(file.getBytes(), objectName);
 
         UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
-        uploadedFileRepository.save(
+        uploadedFileMapper.insertFile(
                 user == null || user.isGuest() ? null : user.id(),
                 safeBizType,
                 objectName,

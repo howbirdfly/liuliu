@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.WalkRecordMapper">
+
+    <resultMap id="WalkRecordEntityMap" type="com.liuliu.citywalk.mapper.entity.WalkRecordEntity">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="themeTitle" column="theme_title"/>
+        <result property="themeSnapshot" column="theme_snapshot"/>
+        <result property="locationName" column="location_name"/>
+        <result property="locationContext" column="location_context"/>
+        <result property="routePoints" column="route_points"/>
+        <result property="missionsCompleted" column="missions_completed"/>
+        <result property="missionReviews" column="mission_reviews"/>
+        <result property="photoList" column="photo_list"/>
+        <result property="coverImage" column="cover_image"/>
+        <result property="noteText" column="note_text"/>
+        <result property="isPublic" column="is_public"/>
+        <result property="walkMode" column="walk_mode"/>
+        <result property="generationSource" column="generation_source"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="WalkRecordColumns">
+        id, user_id, theme_title, theme_snapshot, location_name, location_context,
+        route_points, missions_completed, mission_reviews, photo_list, cover_image,
+        note_text, is_public, walk_mode, generation_source, status, created_at, updated_at
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into walk_records (
+            user_id, theme_title, theme_snapshot, location_name, location_context,
+            route_points, missions_completed, mission_reviews, photo_list, cover_image,
+            note_text, is_public, walk_mode, generation_source, status, created_at, updated_at
+        ) values (
+            #{userId}, #{themeTitle}, #{themeSnapshot}, #{locationName}, #{locationContext},
+            #{routePoints}, #{missionsCompleted}, #{missionReviews}, #{photoList}, #{coverImage},
+            #{noteText}, #{isPublic}, #{walkMode}, #{generationSource}, #{status}, now(), now()
+        )
+    </insert>
+
+    <select id="findMyActive" resultMap="WalkRecordEntityMap">
+        select <include refid="WalkRecordColumns"/>
+        from walk_records
+        where user_id = #{userId} and status = 'active'
+        order by created_at desc
+        limit #{limit}
+    </select>
+
+    <select id="findPublicActive" resultMap="WalkRecordEntityMap">
+        select <include refid="WalkRecordColumns"/>
+        from walk_records
+        where is_public = 1 and status = 'active'
+        order by created_at desc
+        limit #{limit}
+    </select>
+
+    <select id="findActiveById" resultMap="WalkRecordEntityMap">
+        select <include refid="WalkRecordColumns"/>
+        from walk_records
+        where id = #{id} and status = 'active'
+        limit 1
+    </select>
+
+</mapper>

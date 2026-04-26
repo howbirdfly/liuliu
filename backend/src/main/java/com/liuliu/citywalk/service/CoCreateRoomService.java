@@ -3,6 +3,9 @@ package com.liuliu.citywalk.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.mapper.CoCreateRoomMapper;
+import com.liuliu.citywalk.mapper.entity.CoCreateRoomEntity;
+import com.liuliu.citywalk.mapper.entity.CoCreateRoomMemberEntity;
 import com.liuliu.citywalk.model.dto.request.CoCreateRoomThemeRequest;
 import com.liuliu.citywalk.model.dto.request.CreateCoCreateRoomRequest;
 import com.liuliu.citywalk.model.dto.request.JoinCoCreateRoomRequest;
@@ -12,10 +15,10 @@ import com.liuliu.citywalk.model.dto.request.UpdateCoCreateRoomThemeRequest;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomMemberResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomThemeResponse;
-import com.liuliu.citywalk.repository.CoCreateRoomRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -35,17 +38,17 @@ public class CoCreateRoomService {
             "#ec4899"
     );
 
-    private final CoCreateRoomRepository roomRepository;
+    private final CoCreateRoomMapper roomMapper;
     private final UserSessionService userSessionService;
     private final ObjectMapper objectMapper;
     private final Random random = new Random();
 
     public CoCreateRoomService(
-            CoCreateRoomRepository roomRepository,
+            CoCreateRoomMapper roomMapper,
             UserSessionService userSessionService,
             ObjectMapper objectMapper
     ) {
-        this.roomRepository = roomRepository;
+        this.roomMapper = roomMapper;
         this.userSessionService = userSessionService;
         this.objectMapper = objectMapper;
     }
@@ -56,12 +59,12 @@ public class CoCreateRoomService {
         String roomCode = normalizeRequestedRoomCode(request.roomCode());
         if (roomCode == null) {
             roomCode = generateUniqueRoomCode();
-        } else if (roomRepository.findRoomByCode(roomCode).isPresent()) {
+        } else if (findRoomByCode(roomCode).isPresent()) {
             throw new IllegalStateException("room_code_already_exists");
         }
 
-        CoCreateRoomRepository.RoomRecord room = roomRepository.createRoom(roomCode, user.id(), writeJson(normalizeTheme(request.theme())));
-        roomRepository.addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), TRACK_COLORS.get(0));
+        RoomRecord room = createRoomRecord(roomCode, user.id(), writeJson(normalizeTheme(request.theme())));
+        addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), TRACK_COLORS.get(0));
         return getRoom(authorizationHeader, room.roomCode());
     }
 
@@ -69,19 +72,19 @@ public class CoCreateRoomService {
     public CoCreateRoomResponse joinRoom(String authorizationHeader, JoinCoCreateRoomRequest request) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
         String roomCode = normalizeRoomCode(request.roomCode());
-        CoCreateRoomRepository.RoomRecord room = roomRepository.findRoomByCode(roomCode)
+        RoomRecord room = findRoomByCode(roomCode)
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
 
-        Optional<CoCreateRoomRepository.MemberRecord> existingMember = roomRepository.findMember(room.id(), user.id());
+        Optional<MemberRecord> existingMember = findMember(room.id(), user.id());
         if (existingMember.isEmpty()) {
-            int memberCount = roomRepository.countMembers(room.id());
+            int memberCount = countMembers(room.id());
             if (memberCount >= MEMBER_LIMIT) {
                 throw new IllegalStateException("room_is_full");
             }
             String trackColor = TRACK_COLORS.get(Math.min(memberCount, TRACK_COLORS.size() - 1));
-            roomRepository.addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), trackColor);
+            addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), trackColor);
         } else {
-            roomRepository.addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), existingMember.get().trackColor());
+            addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), existingMember.get().trackColor());
         }
 
         return getRoom(authorizationHeader, room.roomCode());
@@ -89,25 +92,25 @@ public class CoCreateRoomService {
 
     public CoCreateRoomResponse getRoom(String authorizationHeader, String roomCode) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
-        CoCreateRoomRepository.RoomRecord room = roomRepository.findRoomByCode(normalizeRoomCode(roomCode))
+        RoomRecord room = findRoomByCode(normalizeRoomCode(roomCode))
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
-        roomRepository.findMember(room.id(), user.id()).orElseThrow(() -> new IllegalStateException("room_membership_required"));
+        findMember(room.id(), user.id()).orElseThrow(() -> new IllegalStateException("room_membership_required"));
         return toResponse(room);
     }
 
     @Transactional
     public CoCreateRoomResponse updateRoomState(String authorizationHeader, String roomCode, UpdateCoCreateRoomStateRequest request) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
-        CoCreateRoomRepository.RoomRecord room = roomRepository.findRoomByCode(normalizeRoomCode(roomCode))
+        RoomRecord room = findRoomByCode(normalizeRoomCode(roomCode))
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
-        roomRepository.findMember(room.id(), user.id()).orElseThrow(() -> new IllegalStateException("room_membership_required"));
+        findMember(room.id(), user.id()).orElseThrow(() -> new IllegalStateException("room_membership_required"));
 
         List<PathPointRequest> path = normalizePath(request.path());
         PathPointRequest currentPosition = normalizePoint(request.currentPosition());
         List<String> completedMissions = normalizeCompletedMissions(request.completedMissions());
         boolean isTracking = Boolean.TRUE.equals(request.isTracking());
 
-        roomRepository.updateMemberState(
+        updateMemberState(
                 room.id(),
                 user.id(),
                 writeJson(path),
@@ -116,42 +119,42 @@ public class CoCreateRoomService {
                 isTracking
         );
 
-        return toResponse(roomRepository.findRoomById(room.id()).orElseThrow(() -> new IllegalStateException("room_not_found")));
+        return toResponse(findRoomById(room.id()).orElseThrow(() -> new IllegalStateException("room_not_found")));
     }
 
     @Transactional
     public CoCreateRoomResponse updateRoomTheme(String authorizationHeader, String roomCode, UpdateCoCreateRoomThemeRequest request) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
-        CoCreateRoomRepository.RoomRecord room = roomRepository.findRoomByCode(normalizeRoomCode(roomCode))
+        RoomRecord room = findRoomByCode(normalizeRoomCode(roomCode))
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
         if (!room.ownerUserId().equals(user.id())) {
             throw new IllegalStateException("room_owner_required");
         }
-        roomRepository.updateRoomTheme(room.id(), writeJson(normalizeTheme(request.theme())));
+        roomMapper.updateRoomTheme(room.id(), writeJson(normalizeTheme(request.theme())));
         return getRoom(authorizationHeader, room.roomCode());
     }
 
     @Transactional
     public void leaveRoom(String authorizationHeader, String roomCode) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
-        CoCreateRoomRepository.RoomRecord room = roomRepository.findRoomByCode(normalizeRoomCode(roomCode))
+        RoomRecord room = findRoomByCode(normalizeRoomCode(roomCode))
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
-        roomRepository.deleteMember(room.id(), user.id());
-        int remainingMembers = roomRepository.countMembers(room.id());
+        roomMapper.deleteMember(room.id(), user.id());
+        int remainingMembers = countMembers(room.id());
         if (remainingMembers <= 0) {
-            roomRepository.deleteRoom(room.id());
+            deleteRoom(room.id());
             return;
         }
 
         if (room.ownerUserId().equals(user.id())) {
-            roomRepository.listMembers(room.id()).stream()
+            listMembers(room.id()).stream()
                     .findFirst()
-                    .ifPresent(member -> roomRepository.changeOwner(room.id(), member.userId()));
+                    .ifPresent(member -> roomMapper.changeOwner(room.id(), member.userId()));
         }
     }
 
-    private CoCreateRoomResponse toResponse(CoCreateRoomRepository.RoomRecord room) {
-        List<CoCreateRoomRepository.MemberRecord> members = roomRepository.listMembers(room.id());
+    private CoCreateRoomResponse toResponse(RoomRecord room) {
+        List<MemberRecord> members = listMembers(room.id());
         return new CoCreateRoomResponse(
                 room.roomCode(),
                 room.ownerUserId(),
@@ -173,6 +176,99 @@ public class CoCreateRoomService {
         );
     }
 
+    private RoomRecord createRoomRecord(String roomCode, Long ownerUserId, String themeSnapshotJson) {
+        CoCreateRoomEntity entity = new CoCreateRoomEntity();
+        entity.setRoomCode(roomCode);
+        entity.setOwnerUserId(ownerUserId);
+        entity.setThemeSnapshot(themeSnapshotJson);
+        entity.setStatus("active");
+        roomMapper.insertRoom(entity);
+        if (entity.getId() == null) {
+            throw new IllegalStateException("failed_to_create_room");
+        }
+        return findRoomById(entity.getId()).orElseThrow(() -> new IllegalStateException("created_room_not_found"));
+    }
+
+    private Optional<RoomRecord> findRoomByCode(String roomCode) {
+        return Optional.ofNullable(roomMapper.findActiveRoomByCode(roomCode)).map(this::toRoomRecord);
+    }
+
+    private Optional<RoomRecord> findRoomById(Long roomId) {
+        return Optional.ofNullable(roomMapper.findActiveRoomById(roomId)).map(this::toRoomRecord);
+    }
+
+    private int countMembers(Long roomId) {
+        Integer count = roomMapper.countMembers(roomId);
+        return count == null ? 0 : count;
+    }
+
+    private Optional<MemberRecord> findMember(Long roomId, Long userId) {
+        return Optional.ofNullable(roomMapper.findMember(roomId, userId)).map(this::toMemberRecord);
+    }
+
+    private List<MemberRecord> listMembers(Long roomId) {
+        return roomMapper.listMembers(roomId).stream()
+                .map(this::toMemberRecord)
+                .toList();
+    }
+
+    private void addMember(Long roomId, Long userId, String nickname, String avatarUrl, String trackColor) {
+        CoCreateRoomMemberEntity entity = new CoCreateRoomMemberEntity();
+        entity.setRoomId(roomId);
+        entity.setUserId(userId);
+        entity.setNickname(nickname);
+        entity.setAvatarUrl(avatarUrl);
+        entity.setTrackColor(trackColor);
+        entity.setRoutePoints("[]");
+        entity.setCurrentPosition(null);
+        entity.setCompletedMissions("[]");
+        entity.setIsTracking(false);
+        roomMapper.upsertMember(entity);
+    }
+
+    private void updateMemberState(Long roomId,
+                                   Long userId,
+                                   String routePointsJson,
+                                   String currentPositionJson,
+                                   String completedMissionsJson,
+                                   boolean isTracking) {
+        roomMapper.updateMemberState(roomId, userId, routePointsJson, currentPositionJson, completedMissionsJson, isTracking);
+    }
+
+    private void deleteRoom(Long roomId) {
+        roomMapper.deleteMembersByRoomId(roomId);
+        roomMapper.deleteRoomById(roomId);
+    }
+
+    private RoomRecord toRoomRecord(CoCreateRoomEntity entity) {
+        return new RoomRecord(
+                entity.getId(),
+                entity.getRoomCode(),
+                entity.getOwnerUserId(),
+                entity.getThemeSnapshot(),
+                entity.getStatus(),
+                toEpochMilli(entity.getCreatedAt()),
+                toEpochMilli(entity.getUpdatedAt())
+        );
+    }
+
+    private MemberRecord toMemberRecord(CoCreateRoomMemberEntity entity) {
+        return new MemberRecord(
+                entity.getId(),
+                entity.getRoomId(),
+                entity.getUserId(),
+                entity.getNickname(),
+                entity.getAvatarUrl(),
+                entity.getTrackColor(),
+                entity.getRoutePoints(),
+                entity.getCurrentPosition(),
+                entity.getCompletedMissions(),
+                entity.getIsTracking(),
+                toEpochMilli(entity.getLastActiveAt()),
+                toEpochMilli(entity.getCreatedAt())
+        );
+    }
+
     private UserSessionService.StoredUser requireUser(String authorizationHeader) {
         UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
         if (user == null || user.isGuest()) {
@@ -184,7 +280,7 @@ public class CoCreateRoomService {
     private String generateUniqueRoomCode() {
         for (int attempt = 0; attempt < 20; attempt++) {
             String roomCode = String.format(Locale.ROOT, "%06d", random.nextInt(1_000_000));
-            if (roomRepository.findRoomByCode(roomCode).isEmpty()) {
+            if (findRoomByCode(roomCode).isEmpty()) {
                 return roomCode;
             }
         }
@@ -339,5 +435,36 @@ public class CoCreateRoomService {
         } catch (Exception error) {
             return List.of();
         }
+    }
+
+    private static Long toEpochMilli(Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toInstant().toEpochMilli();
+    }
+
+    private record RoomRecord(
+            Long id,
+            String roomCode,
+            Long ownerUserId,
+            String themeSnapshotJson,
+            String status,
+            Long createdAt,
+            Long updatedAt
+    ) {
+    }
+
+    private record MemberRecord(
+            Long id,
+            Long roomId,
+            Long userId,
+            String nickname,
+            String avatarUrl,
+            String trackColor,
+            String routePointsJson,
+            String currentPositionJson,
+            String completedMissionsJson,
+            Boolean isTracking,
+            Long lastActiveAt,
+            Long createdAt
+    ) {
     }
 }
