@@ -6,6 +6,17 @@ export interface PathPoint {
   timestamp: number;
 }
 
+export interface RoomMemberTrack {
+  userId: number;
+  nickname: string;
+  trackColor: string;
+  isOwner?: boolean;
+  isTracking?: boolean;
+  currentPosition?: PathPoint | null;
+  path: PathPoint[];
+  completedMissions?: string[];
+}
+
 export interface CompletedMissionPayload {
   mission: string;
   mediaUrl: string;
@@ -21,6 +32,8 @@ export interface CreateWalkPayload {
   noteText?: string;
   path: PathPoint[];
   completedMissions: CompletedMissionPayload[];
+  roomCode?: string;
+  roomMembers?: RoomMemberTrack[];
   photoUrl?: string;
   videoUrl?: string;
   audioUrl?: string;
@@ -39,6 +52,8 @@ export interface WalkItem {
   audioUrl?: string;
   path?: PathPoint[];
   completedMissions?: CompletedMissionPayload[];
+  roomCode?: string;
+  roomMembers?: RoomMemberTrack[];
   createdAt?: number;
 }
 

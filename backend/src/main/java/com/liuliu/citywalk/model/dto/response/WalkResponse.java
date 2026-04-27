@@ -15,6 +15,8 @@ public record WalkResponse(
         String audioUrl,
         List<?> path,
         List<?> completedMissions,
+        String roomCode,
+        List<RoomMemberTrackResponse> roomMembers,
         Long createdAt
 ) {
 }

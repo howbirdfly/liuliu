@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -30,6 +31,7 @@ import java.util.Random;
 public class CoCreateRoomService {
 
     private static final int MEMBER_LIMIT = 5;
+    private static final long MEMBER_INACTIVE_TIMEOUT_MILLIS = 20_000;
     private static final List<String> TRACK_COLORS = List.of(
             "#2563eb",
             "#f97316",
@@ -186,14 +188,32 @@ public class CoCreateRoomService {
         if (entity.getId() == null) {
             throw new IllegalStateException("failed_to_create_room");
         }
-        return findRoomById(entity.getId()).orElseThrow(() -> new IllegalStateException("created_room_not_found"));
+        return loadRoomById(entity.getId()).orElseThrow(() -> new IllegalStateException("created_room_not_found"));
     }
 
     private Optional<RoomRecord> findRoomByCode(String roomCode) {
-        return Optional.ofNullable(roomMapper.findActiveRoomByCode(roomCode)).map(this::toRoomRecord);
+        CoCreateRoomEntity entity = roomMapper.findActiveRoomByCode(roomCode);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        cleanupInactiveMembers(entity.getId());
+        return loadRoomByCode(roomCode);
     }
 
     private Optional<RoomRecord> findRoomById(Long roomId) {
+        CoCreateRoomEntity entity = roomMapper.findActiveRoomById(roomId);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        cleanupInactiveMembers(roomId);
+        return loadRoomById(roomId);
+    }
+
+    private Optional<RoomRecord> loadRoomByCode(String roomCode) {
+        return Optional.ofNullable(roomMapper.findActiveRoomByCode(roomCode)).map(this::toRoomRecord);
+    }
+
+    private Optional<RoomRecord> loadRoomById(Long roomId) {
         return Optional.ofNullable(roomMapper.findActiveRoomById(roomId)).map(this::toRoomRecord);
     }
 
@@ -238,6 +258,31 @@ public class CoCreateRoomService {
     private void deleteRoom(Long roomId) {
         roomMapper.deleteMembersByRoomId(roomId);
         roomMapper.deleteRoomById(roomId);
+    }
+
+    private void cleanupInactiveMembers(Long roomId) {
+        Timestamp cutoff = Timestamp.from(Instant.now().minusMillis(MEMBER_INACTIVE_TIMEOUT_MILLIS));
+        roomMapper.deleteInactiveMembers(roomId, cutoff);
+
+        int remainingMembers = countMembers(roomId);
+        if (remainingMembers <= 0) {
+            deleteRoom(roomId);
+            return;
+        }
+
+        RoomRecord room = Optional.ofNullable(roomMapper.findActiveRoomById(roomId))
+                .map(this::toRoomRecord)
+                .orElse(null);
+        if (room == null) {
+            return;
+        }
+
+        boolean ownerStillPresent = findMember(roomId, room.ownerUserId()).isPresent();
+        if (!ownerStillPresent) {
+            listMembers(roomId).stream()
+                    .findFirst()
+                    .ifPresent(member -> roomMapper.changeOwner(roomId, member.userId()));
+        }
     }
 
     private RoomRecord toRoomRecord(CoCreateRoomEntity entity) {

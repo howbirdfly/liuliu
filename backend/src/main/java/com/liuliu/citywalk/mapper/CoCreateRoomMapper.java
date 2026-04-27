@@ -5,6 +5,7 @@ import com.liuliu.citywalk.mapper.entity.CoCreateRoomMemberEntity;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.sql.Timestamp;
 import java.util.List;
 
 @Mapper
@@ -40,4 +41,6 @@ public interface CoCreateRoomMapper {
                           @Param("isTracking") Boolean isTracking);
 
     int deleteMember(@Param("roomId") Long roomId, @Param("userId") Long userId);
+
+    int deleteInactiveMembers(@Param("roomId") Long roomId, @Param("cutoff") Timestamp cutoff);
 }

@@ -9,6 +9,8 @@ import com.liuliu.citywalk.mapper.entity.WalkRecordEntity;
 import com.liuliu.citywalk.model.dto.request.CompletedMissionRequest;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
 import com.liuliu.citywalk.model.dto.request.PathPointRequest;
+import com.liuliu.citywalk.model.dto.request.RoomMemberTrackRequest;
+import com.liuliu.citywalk.model.dto.response.RoomMemberTrackResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
 import org.springframework.stereotype.Service;
 
@@ -104,6 +106,8 @@ public class WalkService {
                 null,
                 routePoints,
                 completedMissions,
+                snapshot.get("roomCode") instanceof String roomCode ? roomCode : null,
+                parseRoomMembers(snapshot.get("roomMembers")),
                 toEpochMilli(entity.getCreatedAt())
         );
     }
@@ -116,6 +120,13 @@ public class WalkService {
         snapshot.put("missions", missions);
         snapshot.put("vibeColor", "#5a5a40");
         snapshot.put("provider", "web-debug");
+        if (request.roomCode() != null && !request.roomCode().isBlank()) {
+            snapshot.put("roomCode", request.roomCode().trim());
+        }
+        List<RoomMemberTrackResponse> roomMembers = normalizeRoomMembers(request.roomMembers());
+        if (!roomMembers.isEmpty()) {
+            snapshot.put("roomMembers", roomMembers);
+        }
         return snapshot;
     }
 
@@ -150,6 +161,53 @@ public class WalkService {
         return List.of(photoUrl.trim());
     }
 
+    private List<RoomMemberTrackResponse> normalizeRoomMembers(List<RoomMemberTrackRequest> roomMembers) {
+        if (roomMembers == null || roomMembers.isEmpty()) {
+            return List.of();
+        }
+        return roomMembers.stream()
+                .filter(member -> member != null && member.userId() != null)
+                .map(member -> new RoomMemberTrackResponse(
+                        member.userId(),
+                        safeText(member.nickname(), "队友"),
+                        safeText(member.trackColor(), "#2563eb"),
+                        Boolean.TRUE.equals(member.isOwner()),
+                        Boolean.TRUE.equals(member.isTracking()),
+                        normalizePoint(member.currentPosition()),
+                        normalizePointList(member.path()),
+                        normalizeCompletedMissionStrings(member.completedMissions())
+                ))
+                .toList();
+    }
+
+    private PathPointRequest normalizePoint(PathPointRequest point) {
+        if (point == null || point.lat() == null || point.lng() == null || point.timestamp() == null) {
+            return null;
+        }
+        return new PathPointRequest(point.lat(), point.lng(), point.timestamp());
+    }
+
+    private List<PathPointRequest> normalizePointList(List<PathPointRequest> points) {
+        if (points == null || points.isEmpty()) {
+            return List.of();
+        }
+        return points.stream()
+                .map(this::normalizePoint)
+                .filter(point -> point != null)
+                .toList();
+    }
+
+    private List<String> normalizeCompletedMissionStrings(List<String> completedMissions) {
+        if (completedMissions == null || completedMissions.isEmpty()) {
+            return List.of();
+        }
+        return completedMissions.stream()
+                .filter(item -> item != null && !item.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
@@ -170,6 +228,17 @@ public class WalkService {
             return objectMapper.readValue(json, typeReference);
         } catch (Exception error) {
             return fallback;
+        }
+    }
+
+    private List<RoomMemberTrackResponse> parseRoomMembers(Object rawRoomMembers) {
+        if (rawRoomMembers == null) {
+            return List.of();
+        }
+        try {
+            return objectMapper.convertValue(rawRoomMembers, new TypeReference<List<RoomMemberTrackResponse>>() { });
+        } catch (IllegalArgumentException error) {
+            return List.of();
         }
     }
 

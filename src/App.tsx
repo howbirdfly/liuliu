@@ -83,6 +83,67 @@ type RoomMapMember = {
   currentPosition: [number, number] | null;
 };
 
+function buildSavedRoomMembers(
+  room: CoCreateRoom | null,
+  currentUser: AppUser | null,
+  currentPath: PathPoint[],
+  currentLocation: SearchLocation | null,
+  checkedMissionLabels: string[],
+  tracking: boolean,
+) {
+  if (!room) {
+    return [];
+  }
+
+  return room.members.map((member) => {
+    const isCurrentUser = !!currentUser && member.userId === currentUser.id;
+    const memberPath = isCurrentUser ? currentPath : member.path || [];
+    const memberCurrentPosition = isCurrentUser
+      ? currentLocation
+        ? {
+            lat: currentLocation.lat,
+            lng: currentLocation.lng,
+            timestamp: currentPath[currentPath.length - 1]?.timestamp ?? Date.now(),
+          }
+        : null
+      : member.currentPosition || null;
+
+    return {
+      userId: member.userId,
+      nickname: member.nickname,
+      trackColor: member.trackColor,
+      isOwner: member.isOwner,
+      isTracking: isCurrentUser ? tracking : member.isTracking,
+      currentPosition: memberCurrentPosition,
+      path: memberPath,
+      completedMissions: isCurrentUser ? checkedMissionLabels : member.completedMissions || [],
+    };
+  });
+}
+
+function toRoomMapMembers(roomMembers?: WalkItem['roomMembers']): RoomMapMember[] {
+  if (!Array.isArray(roomMembers)) {
+    return [];
+  }
+
+  return roomMembers
+    .filter((member) => member && typeof member.userId === 'number')
+    .map((member) => ({
+      userId: member.userId,
+      nickname: member.nickname || '队友',
+      trackColor: member.trackColor || '#2563eb',
+      path: Array.isArray(member.path)
+        ? member.path
+            .filter((point) => typeof point?.lat === 'number' && typeof point?.lng === 'number')
+            .map((point) => [point.lat, point.lng] as [number, number])
+        : [],
+      currentPosition:
+        member.currentPosition && typeof member.currentPosition.lat === 'number' && typeof member.currentPosition.lng === 'number'
+          ? ([member.currentPosition.lat, member.currentPosition.lng] as [number, number])
+          : null,
+    }));
+}
+
 const RANDOM_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步', '动物漫步'];
 const COMBINE_CATEGORIES = ['形状漫步', '颜色漫步', '声音漫步', '街区漫步', '自然漫步', '动物漫步'];
 const DEFAULT_CENTER: [number, number] = [31.2304, 121.4737];
@@ -884,30 +945,56 @@ function normalizeCompletedMissionLabels(completedMissions?: WalkItem['completed
 function WalkDetailMap(props: {
   path: PathPoint[];
   locationLabel: string;
+  roomMembers?: RoomMapMember[];
 }) {
-  const { path, locationLabel } = props;
+  const { path, locationLabel, roomMembers = [] } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const overlaysRef = useRef<any[]>([]);
   const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
+  const hasRoomTracks = roomMembers.length > 0;
+  const primaryPath = useMemo(() => {
+    if (!hasRoomTracks) {
+      return path;
+    }
+    const firstMemberWithPath = roomMembers.find((member) => member.path.length > 0);
+    if (firstMemberWithPath) {
+      return firstMemberWithPath.path.map(([lat, lng], index) => ({
+        lat,
+        lng,
+        timestamp: index,
+      }));
+    }
+    const firstMemberWithPosition = roomMembers.find((member) => member.currentPosition);
+    if (firstMemberWithPosition?.currentPosition) {
+      return [
+        {
+          lat: firstMemberWithPosition.currentPosition[0],
+          lng: firstMemberWithPosition.currentPosition[1],
+          timestamp: Date.now(),
+        },
+      ];
+    }
+    return [];
+  }, [hasRoomTracks, path, roomMembers]);
 
   useEffect(() => {
-    if (path.length === 0) {
+    if (primaryPath.length === 0) {
       setNearbyPois([]);
       return;
     }
 
-    const lastPoint = path[path.length - 1];
+    const lastPoint = primaryPath[primaryPath.length - 1];
     fetchNearbyPois(lastPoint.lat, lastPoint.lng)
       .then((pois) => setNearbyPois(pois.slice(0, 8)))
       .catch((error) => {
         console.error('Fetch detail nearby POIs error:', error);
         setNearbyPois([]);
       });
-  }, [path]);
+  }, [primaryPath]);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current || path.length === 0) {
+    if (!containerRef.current || mapRef.current || primaryPath.length === 0) {
       return;
     }
 
@@ -919,7 +1006,7 @@ function WalkDetailMap(props: {
           return;
         }
 
-        const lastPoint = path[path.length - 1];
+        const lastPoint = primaryPath[primaryPath.length - 1];
         const map = new AMap.Map(containerRef.current, {
           zoom: 17,
           center: [lastPoint.lng, lastPoint.lat],
@@ -943,12 +1030,12 @@ function WalkDetailMap(props: {
       }
       overlaysRef.current = [];
     };
-  }, [path]);
+  }, [primaryPath]);
 
   useEffect(() => {
     const map = mapRef.current;
     const AMap = window.AMap;
-    if (!map || !AMap || path.length === 0) {
+    if (!map || !AMap || primaryPath.length === 0) {
       return;
     }
 
@@ -958,42 +1045,92 @@ function WalkDetailMap(props: {
     }
 
     const overlays: any[] = [];
-    const amapPath = path.map((point) => [point.lng, point.lat]);
-    const startPoint = path[0];
-    const endPoint = path[path.length - 1];
+    if (hasRoomTracks) {
+      roomMembers.forEach((member) => {
+        if (member.path.length > 1) {
+          overlays.push(
+            new AMap.Polyline({
+              path: member.path.map(([lat, lng]) => [lng, lat]),
+              strokeColor: member.trackColor,
+              strokeWeight: 5,
+              strokeOpacity: 0.92,
+              lineJoin: 'round',
+              lineCap: 'round',
+            }),
+          );
+          const [startLat, startLng] = member.path[0];
+          overlays.push(
+            new AMap.Marker({
+              position: [startLng, startLat],
+              anchor: 'center',
+              offset: new AMap.Pixel(0, 0),
+              content: createMarkerContent(member.trackColor, 16, `${member.nickname}起点`),
+              title: `${member.nickname}起点`,
+            }),
+          );
+        }
 
-    if (amapPath.length > 1) {
+        if (member.currentPosition) {
+          overlays.push(
+            new AMap.Marker({
+              position: [member.currentPosition[1], member.currentPosition[0]],
+              anchor: 'center',
+              offset: new AMap.Pixel(0, 0),
+              content: createMarkerContent(member.trackColor, 18, `${member.nickname}位置`),
+              title: `${member.nickname}位置`,
+            }),
+          );
+        } else if (member.path.length > 0) {
+          const [endLat, endLng] = member.path[member.path.length - 1];
+          overlays.push(
+            new AMap.Marker({
+              position: [endLng, endLat],
+              anchor: 'center',
+              offset: new AMap.Pixel(0, 0),
+              content: createMarkerContent(member.trackColor, 18, `${member.nickname}轨迹`),
+              title: `${member.nickname}轨迹`,
+            }),
+          );
+        }
+      });
+    } else {
+      const amapPath = path.map((point) => [point.lng, point.lat]);
+      const startPoint = path[0];
+      const endPoint = path[path.length - 1];
+
+      if (amapPath.length > 1) {
+        overlays.push(
+          new AMap.Polyline({
+            path: amapPath,
+            strokeColor: '#f59e0b',
+            strokeWeight: 6,
+            strokeOpacity: 0.95,
+            lineJoin: 'round',
+            lineCap: 'round',
+          }),
+        );
+      }
+
       overlays.push(
-        new AMap.Polyline({
-          path: amapPath,
-          strokeColor: '#f59e0b',
-          strokeWeight: 6,
-          strokeOpacity: 0.95,
-          lineJoin: 'round',
-          lineCap: 'round',
+        new AMap.Marker({
+          position: [startPoint.lng, startPoint.lat],
+          anchor: 'center',
+          offset: new AMap.Pixel(0, 0),
+          content: createMarkerContent('#2563eb', 18, '起点'),
+          title: '起点',
+        }),
+      );
+
+      overlays.push(
+        new AMap.Marker({
+          position: [endPoint.lng, endPoint.lat],
+          anchor: 'center',
+          offset: new AMap.Pixel(0, 0),
+          content: createMarkerContent('#0f172a', 20, locationLabel || '记录位置'),
+          title: locationLabel || '记录位置',
         }),
       );
     }
-
-    overlays.push(
-      new AMap.Marker({
-        position: [startPoint.lng, startPoint.lat],
-        anchor: 'center',
-        offset: new AMap.Pixel(0, 0),
-        content: createMarkerContent('#2563eb', 18, '起点'),
-        title: '起点',
-      }),
-    );
-
-    overlays.push(
-      new AMap.Marker({
-        position: [endPoint.lng, endPoint.lat],
-        anchor: 'center',
-        offset: new AMap.Pixel(0, 0),
-        content: createMarkerContent('#0f172a', 20, locationLabel || '记录位置'),
-        title: locationLabel || '记录位置',
-      }),
-    );
 
     nearbyPois
       .filter((poi) => typeof poi.lat === 'number' && typeof poi.lng === 'number')
@@ -1012,9 +1149,9 @@ function WalkDetailMap(props: {
     map.add(overlays);
     map.setFitView(overlays, false, [48, 48, 48, 48]);
     overlaysRef.current = overlays;
-  }, [locationLabel, nearbyPois, path]);
+  }, [hasRoomTracks, locationLabel, nearbyPois, path, primaryPath, roomMembers]);
 
-  if (path.length === 0) {
+  if (primaryPath.length === 0) {
     return (
       <div className="flex h-72 items-center justify-center rounded-[24px] border border-dashed border-slate-300 bg-white text-sm text-slate-500">
         这条记录里还没有可展示的轨迹。
@@ -1428,6 +1565,12 @@ export default function App() {
         }
       } catch (error) {
         if (!isDisposed) {
+          if (error instanceof Error && (error.message === 'room_not_found' || error.message === 'room_membership_required')) {
+            setCoCreateRoom(null);
+            setRoomMessage('房间已自动解散。');
+            setRoomError('');
+            return;
+          }
           console.error('Fetch co-create room error:', error);
         }
       }
@@ -2086,6 +2229,10 @@ export default function App() {
         : path.length > 0
           ? 'location'
           : 'event';
+      const savedRoomMembers =
+        walkMode === 'advanced'
+          ? buildSavedRoomMembers(coCreateRoom, user, path, livePosition ?? selectedLocation, checkedMissions, isTracking)
+          : [];
 
       await createWalk({
         themeTitle: currentTheme.title,
@@ -2100,6 +2247,8 @@ export default function App() {
           mediaUrl: '',
           mediaType: '',
         })),
+        roomCode: walkMode === 'advanced' ? coCreateRoom?.roomCode : undefined,
+        roomMembers: savedRoomMembers,
         photoUrl,
       });
       const card = await generateWalkRecordCardWithAi({
@@ -3031,6 +3180,7 @@ export default function App() {
                             <WalkDetailMap
                               path={selectedProfileWalk.path || []}
                               locationLabel={selectedProfileWalk.locationName || selectedProfileWalk.themeTitle}
+                              roomMembers={toRoomMapMembers(selectedProfileWalk.roomMembers)}
                             />
                           </div>
                         </div>

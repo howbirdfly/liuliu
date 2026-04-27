@@ -133,4 +133,11 @@
         delete from co_create_room_members where room_id = #{roomId} and user_id = #{userId}
     </delete>
 
+    <delete id="deleteInactiveMembers">
+        delete from co_create_room_members
+        where room_id = #{roomId}
+          and last_active_at is not null
+          and last_active_at &lt; #{cutoff}
+    </delete>
+
 </mapper>
