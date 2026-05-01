@@ -1162,6 +1162,51 @@ function WalkDetailMap(props: {
   return <div ref={containerRef} className="h-72 w-full overflow-hidden rounded-[24px] border border-slate-200" />;
 }
 
+function formatProfilePostDate(timestamp?: number) {
+  if (!timestamp) {
+    return '刚刚记录';
+  }
+
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function buildProfilePostSummary(walk: WalkItem) {
+  const note = sanitizeCardText(walk.noteText || '');
+  if (note) {
+    return note.length > 48 ? `${note.slice(0, 48)}...` : note;
+  }
+
+  const location = sanitizeCardText(walk.locationName || '');
+  if (location) {
+    return `在${location}留下了一段漫步记录。`;
+  }
+
+  return '今天也认真收藏了一段属于自己的漫步瞬间。';
+}
+
+function getProfilePostCoverHeightClass(walk: WalkItem) {
+  const seed = (walk.id || 0) % 3;
+  if (walk.photoUrl) {
+    return seed === 0 ? 'h-72' : seed === 1 ? 'h-80' : 'h-64';
+  }
+  return seed === 0 ? 'h-44' : seed === 1 ? 'h-52' : 'h-48';
+}
+
+function getProfilePostGradient(walk: WalkItem) {
+  const category = sanitizeCardText(walk.themeCategory || '');
+  if (category.includes('声音')) {
+    return 'from-sky-100 via-cyan-50 to-white';
+  }
+  if (category.includes('自然')) {
+    return 'from-lime-100 via-emerald-50 to-white';
+  }
+  if (category.includes('动物')) {
+    return 'from-amber-100 via-rose-50 to-white';
+  }
+  return 'from-orange-100 via-amber-50 to-white';
+}
+
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [showEmailLogin, setShowEmailLogin] = useState(false);
@@ -1186,6 +1231,7 @@ export default function App() {
   const [history, setHistory] = useState<WalkTheme[]>([]);
   const [myWalks, setMyWalks] = useState<WalkItem[]>([]);
   const [selectedProfileWalk, setSelectedProfileWalk] = useState<WalkItem | null>(null);
+  const [profileViewMode, setProfileViewMode] = useState<'feed' | 'post'>('feed');
   const [communityWalks, setCommunityWalks] = useState<WalkItem[]>([]);
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
@@ -1194,6 +1240,7 @@ export default function App() {
   const [profileAvatarPreview, setProfileAvatarPreview] = useState<string | null>(null);
   const [profileAvatarName, setProfileAvatarName] = useState('');
   const [profileMessage, setProfileMessage] = useState('');
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mood, setMood] = useState('好奇');
@@ -2147,17 +2194,25 @@ export default function App() {
       setUser(null);
       setMyWalks([]);
       setSelectedProfileWalk(null);
+      setProfileViewMode('feed');
+      setShowProfileEditor(false);
       setProfileMessage('');
     }
   };
 
   const handleOpenProfileWalk = async (walkId: number) => {
     setIsLoadingProfile(true);
+    setProfileViewMode('post');
     try {
+      const preview = myWalks.find((walk) => walk.id === walkId);
+      if (preview) {
+        setSelectedProfileWalk(preview);
+      }
       const detail = await fetchWalkDetail(walkId);
       setSelectedProfileWalk(detail);
     } catch (error) {
       console.error('Fetch walk detail error:', error);
+      setProfileViewMode('feed');
     } finally {
       setIsLoadingProfile(false);
     }
@@ -2995,7 +3050,340 @@ export default function App() {
             </div>
           </main>
         ) : (
-          <main className="grid gap-6 lg:grid-cols-[0.88fr_1.12fr]">
+          <>
+            {profileViewMode === 'post' && selectedProfileWalk ? (
+              <main className="space-y-6">
+                <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+                  <button
+                    onClick={() => {
+                      setProfileViewMode('feed');
+                      setSelectedProfileWalk(null);
+                    }}
+                    className="mb-6 rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                  >
+                    返回个人主页
+                  </button>
+
+                  <article className="mx-auto max-w-3xl space-y-6">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={profileAvatarPreview || user?.avatar || 'https://placehold.co/80x80?text=U'}
+                        alt="author avatar"
+                        className="h-12 w-12 rounded-full object-cover"
+                      />
+                      <div>
+                        <div className="font-medium text-slate-900">{user?.nickname || '我的漫步记录'}</div>
+                        <div className="text-sm text-slate-500">{formatProfilePostDate(selectedProfileWalk.createdAt)}</div>
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-slate-50">
+                      {selectedProfileWalk.photoUrl ? (
+                        <img
+                          src={selectedProfileWalk.photoUrl}
+                          alt={selectedProfileWalk.themeTitle}
+                          className="h-[460px] w-full object-cover"
+                        />
+                      ) : (
+                        <div
+                          className={`${getProfilePostGradient(selectedProfileWalk)} flex h-[320px] flex-col justify-end px-8 py-8 text-white`}
+                        >
+                          <div className="text-xs uppercase tracking-[0.24em] text-white/70">
+                            {selectedProfileWalk.themeCategory || '城市漫步'}
+                          </div>
+                          <h3 className="mt-3 text-4xl font-semibold">{selectedProfileWalk.themeTitle}</h3>
+                          <p className="mt-4 max-w-2xl text-sm leading-7 text-white/90">
+                            {buildProfilePostSummary(selectedProfileWalk)}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                        {selectedProfileWalk.themeCategory || '城市漫步'}
+                      </div>
+                      <h3 className="mt-2 text-3xl font-semibold text-slate-900">{selectedProfileWalk.themeTitle}</h3>
+                      <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-500">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5">
+                          <MapPin className="h-4 w-4" />
+                          {selectedProfileWalk.locationName || '未填写地点'}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                          {selectedProfileWalk.isPublic ? '已公开发布' : '仅自己可见'}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                          轨迹点 {selectedProfileWalk.path?.length || 0}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                          距离 {(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)} km
+                        </span>
+                      </div>
+                    </div>
+
+                    {selectedProfileWalk.noteText ? (
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">我的记录</div>
+                        <p className="mt-4 text-base leading-8 text-slate-700">{selectedProfileWalk.noteText}</p>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">轨迹地图</div>
+                      <div className="mt-3">
+                        <WalkDetailMap
+                          path={selectedProfileWalk.path || []}
+                          locationLabel={selectedProfileWalk.locationName || selectedProfileWalk.themeTitle}
+                          roomMembers={toRoomMapMembers(selectedProfileWalk.roomMembers)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">完成任务</div>
+                        <div className="mt-4 space-y-3">
+                          {normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).length > 0 ? (
+                            normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).map((mission, index) => (
+                              <div
+                                key={`${mission}-${index}`}
+                                className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                              >
+                                {mission}
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-slate-500">这条记录里还没有单独保存任务完成项。</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">路线概览</div>
+                        <div className="mt-4 space-y-3 text-sm leading-7 text-slate-700">
+                          <div>记录单元：{selectedProfileWalk.recordUnit || 'event'}</div>
+                          <div>轨迹点数量：{selectedProfileWalk.path?.length || 0}</div>
+                          <div>累计距离：{(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)} km</div>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </section>
+              </main>
+            ) : (
+              <main className="space-y-6">
+                <section className="rounded-[32px] border border-slate-200 bg-white px-6 py-7 shadow-sm sm:px-8">
+                  <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="flex items-center gap-4">
+                      <img
+                        src={profileAvatarPreview || user?.avatar || 'https://placehold.co/120x120?text=U'}
+                        alt="profile avatar"
+                        className="h-24 w-24 rounded-[28px] object-cover"
+                      />
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">My Citywalk Notes</p>
+                        <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.nickname || '还未登录'}</h2>
+                        <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
+                          这里像你的漫步笔记主页一样，收纳每一次主题生成、任务打卡、照片和轨迹记录。
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={() => setShowProfileEditor((value) => !value)}
+                        className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                      >
+                        {showProfileEditor ? '收起资料编辑' : '编辑主页资料'}
+                      </button>
+                      {user ? (
+                        <button
+                          onClick={handleSignOut}
+                          className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                        >
+                          退出登录
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">记录总数</div>
+                      <div className="mt-2 text-2xl font-semibold text-slate-900">{myWalks.length}</div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">公开记录</div>
+                      <div className="mt-2 text-2xl font-semibold text-slate-900">
+                        {myWalks.filter((item) => item.isPublic).length}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">带照片记录</div>
+                      <div className="mt-2 text-2xl font-semibold text-slate-900">
+                        {myWalks.filter((item) => Boolean(item.photoUrl)).length}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                {showProfileEditor ? (
+                  <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h3 className="text-lg font-semibold text-slate-900">编辑个人资料</h3>
+                      {isSavingProfile && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
+                    </div>
+
+                    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+                      <label className="block">
+                        <span className="mb-2 block text-sm font-medium text-slate-700">昵称</span>
+                        <input
+                          value={profileNickname}
+                          onChange={(event) => setProfileNickname(event.target.value)}
+                          placeholder="给自己起一个更喜欢的名字"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                        />
+                      </label>
+
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="text-sm font-medium text-slate-700">头像</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              换一张你喜欢的照片，让这页更像自己的城市漫步主页。
+                            </div>
+                            {profileAvatarName ? <div className="mt-2 text-xs text-slate-400">{profileAvatarName}</div> : null}
+                          </div>
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                            <ImagePlus className="h-4 w-4" />
+                            选择头像
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                if (!file) {
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  if (typeof reader.result === 'string') {
+                                    setProfileAvatarPreview(reader.result);
+                                    setProfileAvatarName(file.name);
+                                    setProfileMessage('');
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {profileMessage ? (
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                        {profileMessage}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <button
+                        onClick={handleSaveProfile}
+                        disabled={!user || isSavingProfile}
+                        className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
+                      >
+                        保存个人资料
+                      </button>
+                      <button
+                        onClick={() => setShowProfileEditor(false)}
+                        className="rounded-2xl border border-slate-200 px-5 py-3 text-sm text-slate-600 transition hover:bg-slate-50"
+                      >
+                        先不修改
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-2xl font-semibold text-slate-900">我的历史记录</h3>
+                      <p className="mt-2 text-sm leading-7 text-slate-500">
+                        这里像你的漫步帖子流。每一张卡片都可以点开，进入更完整的帖子详情页。
+                      </p>
+                    </div>
+                    {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
+                  </div>
+
+                  {myWalks.length === 0 ? (
+                    <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
+                      还没有保存过漫步记录，先去探索页生成一条属于自己的城市帖子吧。
+                    </div>
+                  ) : (
+                    <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
+                      {myWalks.map((walk) => (
+                        <button
+                          key={walk.id}
+                          onClick={() => void handleOpenProfileWalk(walk.id)}
+                          className="group mb-5 block w-full break-inside-avoid rounded-[28px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                          {walk.photoUrl ? (
+                            <img
+                              src={walk.photoUrl}
+                              alt={walk.themeTitle}
+                              className={`${getProfilePostCoverHeightClass(walk)} w-full rounded-t-[28px] object-cover`}
+                            />
+                          ) : (
+                            <div
+                              className={`${getProfilePostGradient(walk)} ${getProfilePostCoverHeightClass(walk)} flex items-end rounded-t-[28px] px-5 py-5 text-white`}
+                            >
+                              <div>
+                                <div className="text-xs uppercase tracking-[0.2em] text-white/70">
+                                  {walk.themeCategory || '城市漫步'}
+                                </div>
+                                <div className="mt-2 text-2xl font-semibold leading-tight">{walk.themeTitle}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-3 px-5 py-4">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-900">{walk.themeTitle}</div>
+                              <p className="mt-2 text-sm leading-7 text-slate-600">{buildProfilePostSummary(walk)}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                                <MapPin className="h-3.5 w-3.5" />
+                                {walk.locationName || '未填写地点'}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
+                              {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={profileAvatarPreview || user?.avatar || 'https://placehold.co/40x40?text=U'}
+                                  alt="author avatar"
+                                  className="h-8 w-8 rounded-full object-cover"
+                                />
+                                <div className="text-sm text-slate-600">{user?.nickname || '我的记录'}</div>
+                              </div>
+                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </main>
+            )}
+            {false ? (
+              <main className="grid gap-6 lg:grid-cols-[0.88fr_1.12fr]">
             <section className="space-y-6">
               <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center gap-4">
@@ -3220,6 +3608,8 @@ export default function App() {
               </div>
             </section>
           </main>
+            ) : null}
+          </>
         )}
       </div>
     </div>
