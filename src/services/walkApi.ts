@@ -44,6 +44,9 @@ export interface WalkItem {
   themeTitle: string;
   themeCategory?: string;
   locationName?: string;
+  authorId?: number;
+  authorNickname?: string;
+  authorAvatar?: string;
   recordUnit: string;
   isPublic: boolean;
   noteText?: string;

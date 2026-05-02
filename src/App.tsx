@@ -1233,6 +1233,8 @@ export default function App() {
   const [selectedProfileWalk, setSelectedProfileWalk] = useState<WalkItem | null>(null);
   const [profileViewMode, setProfileViewMode] = useState<'feed' | 'post'>('feed');
   const [communityWalks, setCommunityWalks] = useState<WalkItem[]>([]);
+  const [selectedCommunityWalk, setSelectedCommunityWalk] = useState<WalkItem | null>(null);
+  const [communityViewMode, setCommunityViewMode] = useState<'feed' | 'post'>('feed');
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -2218,6 +2220,24 @@ export default function App() {
     }
   };
 
+  const handleOpenCommunityWalk = async (walkId: number) => {
+    setIsLoadingCommunity(true);
+    setCommunityViewMode('post');
+    try {
+      const preview = communityWalks.find((walk) => walk.id === walkId);
+      if (preview) {
+        setSelectedCommunityWalk(preview);
+      }
+      const detail = await fetchWalkDetail(walkId);
+      setSelectedCommunityWalk(detail);
+    } catch (error) {
+      console.error('Fetch community walk detail error:', error);
+      setCommunityViewMode('feed');
+    } finally {
+      setIsLoadingCommunity(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!user) {
       alert('请先登录后再编辑个人资料。');
@@ -3020,35 +3040,220 @@ export default function App() {
             </aside>
           </main>
         ) : activeTab === 'community' ? (
-          <main className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-semibold">社区漫步</h2>
-                <p className="text-sm text-slate-500">查看大家公开发布的漫步记录</p>
-              </div>
-              {isLoadingCommunity && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
-            </div>
+          communityViewMode === 'post' && selectedCommunityWalk ? (
+            <main className="space-y-6">
+              <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+                <button
+                  onClick={() => {
+                    setCommunityViewMode('feed');
+                    setSelectedCommunityWalk(null);
+                  }}
+                  className="mb-6 rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                >
+                  返回社区
+                </button>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              {visibleCommunityWalks.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
-                  暂时还没有社区内容，等你来发布第一条记录。
-                </div>
-              ) : (
-                visibleCommunityWalks.map((walk) => (
-                  <article key={walk.id} className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
-                    <div className="text-xs uppercase tracking-[0.2em] text-slate-400">{walk.themeCategory || '城市'}</div>
-                    <h3 className="mt-2 text-lg font-semibold">{walk.themeTitle}</h3>
-                    <p className="mt-1 text-sm text-slate-500">{walk.locationName || '未填写地点'}</p>
-                    {walk.noteText && <p className="mt-4 text-sm leading-7 text-slate-700">{walk.noteText}</p>}
-                    {walk.photoUrl && (
-                      <img src={walk.photoUrl} alt={walk.themeTitle} className="mt-4 h-48 w-full rounded-2xl object-cover" />
+                <article className="mx-auto max-w-3xl space-y-6">
+                  <div className="flex items-center gap-3">
+                    {selectedCommunityWalk.authorAvatar ? (
+                      <img
+                        src={selectedCommunityWalk.authorAvatar}
+                        alt={selectedCommunityWalk.authorNickname || '社区漫步者'}
+                        className="h-12 w-12 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-sm font-medium text-slate-600">
+                        {(selectedCommunityWalk.authorNickname || '社区').slice(0, 1)}
+                      </div>
                     )}
-                  </article>
-                ))
-              )}
-            </div>
-          </main>
+                    <div>
+                      <div className="font-medium text-slate-900">{selectedCommunityWalk.authorNickname || '社区漫步者'}</div>
+                      <div className="text-sm text-slate-500">{formatProfilePostDate(selectedCommunityWalk.createdAt)}</div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-slate-50">
+                    {selectedCommunityWalk.photoUrl ? (
+                      <img
+                        src={selectedCommunityWalk.photoUrl}
+                        alt={selectedCommunityWalk.themeTitle}
+                        className="h-[460px] w-full object-cover"
+                      />
+                    ) : (
+                      <div
+                        className={`${getProfilePostGradient(selectedCommunityWalk)} flex h-[320px] flex-col justify-end px-8 py-8 text-white`}
+                      >
+                        <div className="text-xs uppercase tracking-[0.24em] text-white/70">
+                          {selectedCommunityWalk.themeCategory || '城市漫步'}
+                        </div>
+                        <h3 className="mt-3 text-4xl font-semibold">{selectedCommunityWalk.themeTitle}</h3>
+                        <p className="mt-4 max-w-2xl text-sm leading-7 text-white/90">
+                          {buildProfilePostSummary(selectedCommunityWalk)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                      {selectedCommunityWalk.themeCategory || '城市漫步'}
+                    </div>
+                    <h3 className="mt-2 text-3xl font-semibold text-slate-900">{selectedCommunityWalk.themeTitle}</h3>
+                    <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-500">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5">
+                        <MapPin className="h-4 w-4" />
+                        {selectedCommunityWalk.locationName || '未填写地点'}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5">社区公开记录</span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                        轨迹点 {selectedCommunityWalk.path?.length || 0}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                        距离 {(calculatePathDistance(selectedCommunityWalk.path || []) / 1000).toFixed(2)} km
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedCommunityWalk.noteText ? (
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">漫步记录</div>
+                      <p className="mt-4 text-base leading-8 text-slate-700">{selectedCommunityWalk.noteText}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-400">轨迹地图</div>
+                    <div className="mt-3">
+                      <WalkDetailMap
+                        path={selectedCommunityWalk.path || []}
+                        locationLabel={selectedCommunityWalk.locationName || selectedCommunityWalk.themeTitle}
+                        roomMembers={toRoomMapMembers(selectedCommunityWalk.roomMembers)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">完成任务</div>
+                      <div className="mt-4 space-y-3">
+                        {normalizeCompletedMissionLabels(selectedCommunityWalk.completedMissions).length > 0 ? (
+                          normalizeCompletedMissionLabels(selectedCommunityWalk.completedMissions).map((mission, index) => (
+                            <div
+                              key={`${mission}-${index}`}
+                              className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                            >
+                              {mission}
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-sm text-slate-500">这条公开记录里还没有单独保存任务完成项。</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">路线概览</div>
+                      <div className="mt-4 space-y-3 text-sm leading-7 text-slate-700">
+                        <div>记录单元：{selectedCommunityWalk.recordUnit || 'event'}</div>
+                        <div>轨迹点数量：{selectedCommunityWalk.path?.length || 0}</div>
+                        <div>累计距离：{(calculatePathDistance(selectedCommunityWalk.path || []) / 1000).toFixed(2)} km</div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </section>
+            </main>
+          ) : (
+            <main className="space-y-6">
+              <section className="rounded-[32px] border border-slate-200 bg-white px-6 py-7 shadow-sm sm:px-8">
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Community Feed</p>
+                    <h2 className="mt-2 text-3xl font-semibold text-slate-900">社区漫步</h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
+                      看看大家公开发布的漫步记录，像刷帖子一样翻一翻城市里的灵感和轨迹。
+                    </p>
+                  </div>
+                  {isLoadingCommunity && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
+                </div>
+              </section>
+
+              <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+                {visibleCommunityWalks.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
+                    暂时还没有社区内容，等你来发布第一条记录。
+                  </div>
+                ) : (
+                  <div className="columns-1 gap-5 md:columns-2 xl:columns-3">
+                    {visibleCommunityWalks.map((walk) => (
+                      <article
+                        key={walk.id}
+                        className="mb-5 break-inside-avoid overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                      >
+                        <button
+                          onClick={() => void handleOpenCommunityWalk(walk.id)}
+                          className="block w-full text-left"
+                        >
+                          {walk.photoUrl ? (
+                            <img
+                              src={walk.photoUrl}
+                              alt={walk.themeTitle}
+                              className={`${getProfilePostCoverHeightClass(walk)} w-full rounded-t-[28px] object-cover`}
+                            />
+                          ) : (
+                            <div
+                              className={`${getProfilePostGradient(walk)} ${getProfilePostCoverHeightClass(walk)} flex items-end rounded-t-[28px] px-5 py-5 text-white`}
+                            >
+                              <div>
+                                <div className="text-xs uppercase tracking-[0.22em] text-white/70">
+                                  {walk.themeCategory || '城市漫步'}
+                                </div>
+                                <h3 className="mt-2 text-xl font-semibold">{walk.themeTitle}</h3>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-3 px-5 py-4">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-900">{walk.themeTitle}</div>
+                              <p className="mt-2 text-sm leading-7 text-slate-600">{buildProfilePostSummary(walk)}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                                <MapPin className="h-3.5 w-3.5" />
+                                {walk.locationName || '未填写地点'}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
+                              {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <div className="flex items-center gap-2">
+                                {walk.authorAvatar ? (
+                                  <img
+                                    src={walk.authorAvatar}
+                                    alt={walk.authorNickname || '社区漫步者'}
+                                    className="h-8 w-8 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-medium text-slate-600">
+                                    {(walk.authorNickname || '社区').slice(0, 1)}
+                                  </div>
+                                )}
+                                <div className="text-sm text-slate-600">{walk.authorNickname || '社区漫步者'}</div>
+                              </div>
+                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
+                            </div>
+                          </div>
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </main>
+          )
         ) : (
           <>
             {profileViewMode === 'post' && selectedProfileWalk ? (
