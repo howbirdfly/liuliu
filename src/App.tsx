@@ -2103,6 +2103,10 @@ export default function App() {
   const getEmailAuthErrorMessage = (mode: EmailAuthMode, error: unknown) => {
     const message = error instanceof Error ? error.message : '';
 
+    if (message.includes('login_required') || message.includes('invalid_token')) {
+      return mode === 'reset' ? '重置密码请求被拦截了，请刷新页面后重试；如果后端刚更新，请重启后端服务。' : '登录状态已失效，请刷新页面后重试。';
+    }
+
     if (mode === 'register') {
       if (message.includes('code_invalid')) {
         return '验证码无效或已过期。';
