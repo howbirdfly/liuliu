@@ -7,6 +7,7 @@ import {
   LogIn,
   LogOut,
   MapPin,
+  LocateFixed,
   Search,
   Shuffle,
   Sparkles,
@@ -736,6 +737,8 @@ function AmapScene(props: {
   const overlaysRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
   const onSelectMapPointRef = useRef(onSelectMapPoint);
+  const previousFollowCurrentPositionRef = useRef(followCurrentPosition);
+  const [isRecenteringCurrentPosition, setIsRecenteringCurrentPosition] = useState(false);
   const [mapReadyVersion, setMapReadyVersion] = useState(0);
   const isSameCoordinate =
     selectedLocation &&
@@ -795,7 +798,21 @@ function AmapScene(props: {
       return;
     }
 
-    mapRef.current.setZoomAndCenter(followCurrentPosition ? TRACKING_MAP_ZOOM : DEFAULT_MAP_ZOOM, [center[1], center[0]]);
+    const map = mapRef.current;
+    const nextCenter: [number, number] = [center[1], center[0]];
+    const wasFollowing = previousFollowCurrentPositionRef.current;
+
+    if (followCurrentPosition) {
+      if (!wasFollowing) {
+        map.setZoomAndCenter(TRACKING_MAP_ZOOM, nextCenter);
+      } else {
+        map.setCenter(nextCenter);
+      }
+    } else {
+      map.setZoomAndCenter(DEFAULT_MAP_ZOOM, nextCenter);
+    }
+
+    previousFollowCurrentPositionRef.current = followCurrentPosition;
   }, [center, followCurrentPosition]);
 
   useEffect(() => {
@@ -927,7 +944,50 @@ function AmapScene(props: {
     overlaysRef.current = overlays;
   }, [currentPosition, hasRoomTracks, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, roomMembers, selectedLocation, selectedPoiKey]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  const handleRecenterCurrentPosition = () => {
+    if (!mapRef.current || isRecenteringCurrentPosition) {
+      return;
+    }
+
+    if (currentPosition) {
+      mapRef.current.setZoomAndCenter(TRACKING_MAP_ZOOM, [currentPosition.lng, currentPosition.lat]);
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      return;
+    }
+
+    setIsRecenteringCurrentPosition(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const gcjPosition = convertWgs84ToGcj02(position.coords.latitude, position.coords.longitude);
+        mapRef.current?.setZoomAndCenter(TRACKING_MAP_ZOOM, [gcjPosition.lng, gcjPosition.lat]);
+        setIsRecenteringCurrentPosition(false);
+      },
+      (error) => {
+        console.error('Recenter current position error:', error);
+        setIsRecenteringCurrentPosition(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 1000 },
+    );
+  };
+
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      <button
+        type="button"
+        onClick={handleRecenterCurrentPosition}
+        disabled={isRecenteringCurrentPosition}
+        className="absolute bottom-24 right-4 z-20 flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-sky-600 shadow-[0_10px_24px_rgba(15,23,42,0.14)] transition hover:scale-[1.02] hover:text-sky-700 disabled:cursor-wait disabled:opacity-75"
+        aria-label="回到当前位置"
+        title="回到当前位置"
+      >
+        {isRecenteringCurrentPosition ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <LocateFixed className="h-5 w-5" />}
+      </button>
+    </div>
+  );
 }
 
 function normalizeCompletedMissionLabels(completedMissions?: WalkItem['completedMissions']) {
@@ -1154,6 +1214,15 @@ function WalkDetailMap(props: {
     overlaysRef.current = overlays;
   }, [hasRoomTracks, locationLabel, nearbyPois, path, primaryPath, roomMembers]);
 
+  const handleRecenterTrack = () => {
+    if (!mapRef.current || primaryPath.length === 0) {
+      return;
+    }
+
+    const lastPoint = primaryPath[primaryPath.length - 1];
+    mapRef.current.setZoomAndCenter(TRACKING_MAP_ZOOM, [lastPoint.lng, lastPoint.lat]);
+  };
+
   if (primaryPath.length === 0) {
     return (
       <div className="flex h-72 items-center justify-center rounded-[24px] border border-dashed border-slate-300 bg-white text-sm text-slate-500">
@@ -1162,7 +1231,20 @@ function WalkDetailMap(props: {
     );
   }
 
-  return <div ref={containerRef} className="h-72 w-full overflow-hidden rounded-[24px] border border-slate-200" />;
+  return (
+    <div className="relative h-72 w-full overflow-hidden rounded-[24px] border border-slate-200">
+      <div ref={containerRef} className="h-full w-full" />
+      <button
+        type="button"
+        onClick={handleRecenterTrack}
+        className="absolute bottom-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-lg transition hover:scale-[1.02] hover:text-slate-900"
+        aria-label="回到轨迹位置"
+        title="回到轨迹位置"
+      >
+        <LocateFixed className="h-5 w-5" />
+      </button>
+    </div>
+  );
 }
 
 function formatProfilePostDate(timestamp?: number) {
