@@ -4,6 +4,7 @@ import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.request.EmailCodeRequest;
 import com.liuliu.citywalk.model.dto.request.EmailLoginRequest;
 import com.liuliu.citywalk.model.dto.request.EmailRegisterRequest;
+import com.liuliu.citywalk.model.dto.request.EmailResetPasswordRequest;
 import com.liuliu.citywalk.model.dto.request.LoginRequest;
 import com.liuliu.citywalk.model.dto.request.UpdateUserProfileRequest;
 import com.liuliu.citywalk.model.dto.request.WebSyncUserRequest;
@@ -77,7 +78,7 @@ public class AuthController {
     @PostMapping("/email/send-code")
     public ApiResponse<Boolean> sendEmailCode(@Valid @RequestBody EmailCodeRequest request) {
         try {
-            emailAuthService.sendVerificationCode(request.email());
+            emailAuthService.sendVerificationCode(request.email(), request.scene());
             return ApiResponse.success(Boolean.TRUE);
         } catch (IllegalStateException error) {
             return ApiResponse.fail(400, error.getMessage());
@@ -99,6 +100,16 @@ public class AuthController {
     public ApiResponse<LoginResponse> emailLogin(@Valid @RequestBody EmailLoginRequest request) {
         try {
             return ApiResponse.success(emailAuthService.login(request.email(), request.password()));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        }
+    }
+
+    @PostMapping("/email/reset-password")
+    public ApiResponse<Boolean> resetPassword(@Valid @RequestBody EmailResetPasswordRequest request) {
+        try {
+            emailAuthService.resetPassword(request.email(), request.password(), request.code());
+            return ApiResponse.success(Boolean.TRUE);
         } catch (IllegalStateException error) {
             return ApiResponse.fail(400, error.getMessage());
         }

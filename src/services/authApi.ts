@@ -88,10 +88,10 @@ export async function mockLogin(): Promise<void> {
   saveToken(response.token);
 }
 
-export async function sendEmailCode(email: string): Promise<void> {
+export async function sendEmailCode(email: string, scene: 'register' | 'reset'): Promise<void> {
   await apiRequest('/api/v1/auth/email/send-code', {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, scene }),
   });
 }
 
@@ -121,6 +121,13 @@ export async function loginWithEmail(email: string, password: string): Promise<v
   });
 
   saveToken(response.token);
+}
+
+export async function resetPasswordWithEmail(email: string, password: string, code: string): Promise<void> {
+  await apiRequest('/api/v1/auth/email/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, code }),
+  });
 }
 
 export async function redirectToWechatLogin(): Promise<void> {

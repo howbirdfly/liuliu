@@ -22,6 +22,7 @@ import {
   logoutFromServer,
   loginWithEmail,
   registerWithEmail,
+  resetPasswordWithEmail,
   redirectToWechatLogin,
   sendEmailCode,
   updateUserProfile,
@@ -74,6 +75,8 @@ type WalkRecordCard = {
   photoUrl?: string;
   serialNumber: string;
 };
+
+type EmailAuthMode = 'login' | 'register' | 'reset';
 
 type RoomMapMember = {
   userId: number;
@@ -1210,7 +1213,7 @@ function getProfilePostGradient(walk: WalkItem) {
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [showEmailLogin, setShowEmailLogin] = useState(false);
-  const [emailLoginMode, setEmailLoginMode] = useState<'login' | 'register'>('login');
+  const [emailLoginMode, setEmailLoginMode] = useState<EmailAuthMode>('login');
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [emailCodeInput, setEmailCodeInput] = useState('');
@@ -2077,14 +2080,19 @@ export default function App() {
     setShowEmailLogin(true);
   };
 
-
-  const getEmailSendErrorMessage = (error: unknown) => {
+  const getEmailSendErrorMessage = (mode: EmailAuthMode, error: unknown) => {
     const message = error instanceof Error ? error.message : '';
     if (message.includes('code_send_too_frequent')) {
       return '验证码刚发过，请等 60 秒后再试。';
     }
+    if (message.includes('email_not_registered')) {
+      return '这个 QQ 邮箱还没有注册账号，不能直接找回密码。';
+    }
+    if (message.includes('email_already_registered')) {
+      return '这个 QQ 邮箱已经注册过了，请直接登录。';
+    }
     if (message.includes('email_not_supported')) {
-      return '目前只支持 QQ 邮箱注册。';
+      return mode === 'reset' ? '目前只支持 QQ 邮箱找回密码。' : '目前只支持 QQ 邮箱获取验证码。';
     }
     if (message.includes('email_send_failed')) {
       return '验证码邮件发送失败，请稍后重试。';
@@ -2092,32 +2100,49 @@ export default function App() {
     return '验证码发送失败，请稍后重试。';
   };
 
-  const getEmailAuthErrorMessage = (mode: 'login' | 'register', error: unknown) => {
+  const getEmailAuthErrorMessage = (mode: EmailAuthMode, error: unknown) => {
     const message = error instanceof Error ? error.message : '';
+
     if (mode === 'register') {
       if (message.includes('code_invalid')) {
-        return '验证码无效或已过期，请重新获取。';
+        return '验证码无效或已过期。';
       }
       if (message.includes('email_already_registered')) {
-        return '这个 QQ 邮箱已经注册过了，直接登录就可以。';
+        return '这个 QQ 邮箱已经注册过了。';
       }
       if (message.includes('email_not_supported')) {
-        return '目前只支持 QQ 邮箱注册。';
+        return '目前只支持 QQ 邮箱。';
       }
       if (message.includes('password_too_short')) {
         return '密码至少需要 6 位。';
       }
-      return '注册失败，请检查验证码、邮箱和密码。';
+      return '注册失败，请检查邮箱、验证码和密码。';
+    }
+
+    if (mode === 'reset') {
+      if (message.includes('code_invalid')) {
+        return '验证码无效或已过期。';
+      }
+      if (message.includes('email_not_registered')) {
+        return '这个 QQ 邮箱还没有注册账号。';
+      }
+      if (message.includes('email_not_supported')) {
+        return '目前只支持 QQ 邮箱。';
+      }
+      if (message.includes('password_too_short')) {
+        return '新密码至少需要 6 位。';
+      }
+      return '重置密码失败，请检查邮箱、验证码和新密码。';
     }
 
     if (message.includes('email_not_registered')) {
-      return '这个邮箱还没有注册，请先注册账号。';
+      return '这个 QQ 邮箱还没有注册账号。';
     }
     if (message.includes('invalid_password')) {
       return '密码不正确，请重新输入。';
     }
     if (message.includes('email_not_supported')) {
-      return '目前只支持 QQ 邮箱登录。';
+      return '目前只支持 QQ 邮箱。';
     }
     return '登录失败，请检查邮箱和密码。';
   };
@@ -2126,11 +2151,11 @@ export default function App() {
     event.preventDefault();
     const trimmedEmail = emailInput.trim().toLowerCase();
     if (!trimmedEmail || !trimmedEmail.endsWith('@qq.com')) {
-      setAuthError('请使用 QQ 邮箱登录（例如：name@qq.com）。');
+      setAuthError('请使用 QQ 邮箱登录，例如 name@qq.com。');
       return;
     }
     if (!passwordInput || passwordInput.length < 6) {
-      setAuthError('密码至少 6 位。');
+      setAuthError(emailLoginMode === 'reset' ? '新密码至少需要 6 位。' : '密码至少需要 6 位。');
       return;
     }
 
@@ -2138,13 +2163,23 @@ export default function App() {
     setAuthError('');
     setAuthInfo('');
     try {
-      if (emailLoginMode === 'register') {
+      if (emailLoginMode !== 'login') {
         if (!emailCodeInput.trim()) {
           setAuthError('请输入邮箱验证码。');
           setIsAuthLoading(false);
           return;
         }
-        await registerWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
+        if (emailLoginMode === 'register') {
+          await registerWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
+        } else {
+          await resetPasswordWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
+          setEmailLoginMode('login');
+          setPasswordInput('');
+          setEmailCodeInput('');
+          setAuthInfo('密码已重置成功，现在可以使用新密码登录。');
+          setIsAuthLoading(false);
+          return;
+        }
       } else {
         await loginWithEmail(trimmedEmail, passwordInput);
       }
@@ -2175,12 +2210,12 @@ export default function App() {
     setAuthError('');
     setAuthInfo('');
     try {
-      await sendEmailCode(trimmedEmail);
+      await sendEmailCode(trimmedEmail, emailLoginMode === 'reset' ? 'reset' : 'register');
       setSendCodeCooldown(60);
       setAuthInfo('验证码已发送，30 分钟内有效。请查看 QQ 邮箱收件箱或垃圾箱；如果重复发送，请以最后一次收到的验证码为准。');
     } catch (error) {
       console.error('Send email code error:', error);
-      setAuthError(getEmailSendErrorMessage(error));
+      setAuthError(getEmailSendErrorMessage(emailLoginMode, error));
       setAuthInfo('');
     } finally {
       setIsSendingCode(false);
@@ -2474,7 +2509,6 @@ export default function App() {
             )}
           </div>
         </header>
-
         {showEmailLogin && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
             <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
@@ -2482,7 +2516,7 @@ export default function App() {
                 <div>
                   <h2 className="text-xl font-semibold text-slate-900">QQ 邮箱登录</h2>
                   <p className="text-sm text-slate-500">
-                    {emailLoginMode === 'register' ? '创建账号并绑定邮箱' : '使用邮箱 + 密码登录'}
+                    {emailLoginMode === 'register' ? '创建账号并绑定邮箱' : emailLoginMode === 'reset' ? '通过验证码重置密码' : '使用邮箱 + 密码登录'}
                   </p>
                 </div>
                 <button
@@ -2491,6 +2525,7 @@ export default function App() {
                     setShowEmailLogin(false);
                     setAuthError('');
                     setAuthInfo('');
+                    setEmailCodeInput('');
                   }}
                   className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
                 >
@@ -2519,7 +2554,12 @@ export default function App() {
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
                   />
                 </div>
-                {emailLoginMode === 'register' ? (
+                {emailLoginMode === 'reset' ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    重置密码模式：先获取邮箱验证码，输入新密码后提交即可完成修改。
+                  </div>
+                ) : null}
+                {emailLoginMode !== 'login' ? (
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">邮箱验证码</label>
                     <div className="flex gap-3">
@@ -2548,24 +2588,43 @@ export default function App() {
                   disabled={isAuthLoading}
                   className="flex w-full items-center justify-center rounded-2xl bg-slate-900 py-3 text-sm font-medium text-white disabled:opacity-60"
                 >
-                  {isAuthLoading ? '处理中...' : emailLoginMode === 'register' ? '创建账号' : '登录'}
+                  {isAuthLoading ? '处理中...' : emailLoginMode === 'register' ? '创建账号' : emailLoginMode === 'reset' ? '重置密码' : '登录'}
                 </button>
               </form>
 
+              {emailLoginMode === 'login' ? (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthError('');
+                      setAuthInfo('');
+                      setPasswordInput('');
+                      setEmailCodeInput('');
+                      setEmailLoginMode('reset');
+                    }}
+                    className="text-sm text-slate-500 transition hover:text-slate-700"
+                  >
+                    忘记密码？
+                  </button>
+                </div>
+              ) : null}
+
               <div className="mt-4 flex items-center justify-between text-sm">
                 <span className="text-slate-500">
-                  {emailLoginMode === 'register' ? '已有账号？' : '没有账号？'}
+                  {emailLoginMode === 'register' ? '已有账号？' : emailLoginMode === 'reset' ? '想起密码了？' : '没有账号？'}
                 </span>
                 <button
                   type="button"
                   onClick={() => {
-                    setEmailLoginMode(emailLoginMode === 'register' ? 'login' : 'register');
+                    setEmailLoginMode(emailLoginMode === 'login' ? 'register' : 'login');
                     setAuthError('');
                     setAuthInfo('');
+                    setEmailCodeInput('');
                   }}
                   className="rounded-full border border-slate-200 px-3 py-1 text-slate-600"
                 >
-                  {emailLoginMode === 'register' ? '去登录' : '去注册'}
+                  {emailLoginMode === 'register' ? '去登录' : emailLoginMode === 'reset' ? '返回登录' : '去注册'}
                 </button>
               </div>
             </div>

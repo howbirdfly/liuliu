@@ -45,9 +45,18 @@ public class EmailAuthService {
         this.emailSender = emailSender;
     }
 
-    public void sendVerificationCode(String email) {
+    public void sendVerificationCode(String email, String scene) {
         String normalizedEmail = normalizeEmail(email);
         ensureValidEmail(normalizedEmail);
+        String normalizedScene = normalizeScene(scene);
+
+        UserCredentialEntity existingCredential = userCredentialMapper.findByEmail(normalizedEmail);
+        if ("register".equals(normalizedScene) && existingCredential != null) {
+            throw new IllegalStateException("email_already_registered");
+        }
+        if ("reset".equals(normalizedScene) && existingCredential == null) {
+            throw new IllegalStateException("email_not_registered");
+        }
 
         EmailVerificationEntity latest = emailVerificationMapper.findLatest(normalizedEmail);
         if (latest != null && latest.getCreatedAt() != null
@@ -71,11 +80,7 @@ public class EmailAuthService {
             throw new IllegalStateException("email_already_registered");
         }
 
-        EmailVerificationEntity record = emailVerificationMapper.findLatestValid(normalizedEmail);
-        if (record == null || !verifyVerificationCode(code, record.getCodeHash())) {
-            throw new IllegalStateException("code_invalid");
-        }
-        emailVerificationMapper.markUsed(record.getId());
+        consumeVerificationCode(normalizedEmail, code);
 
         String nickname = buildNickname(normalizedEmail);
         userMapper.insertWebUser(normalizedEmail, nickname, "");
@@ -106,6 +111,21 @@ public class EmailAuthService {
         return buildLoginResponse(credential.getUserId(), buildNickname(normalizedEmail), "");
     }
 
+    public void resetPassword(String email, String password, String code) {
+        String normalizedEmail = normalizeEmail(email);
+        ensureValidEmail(normalizedEmail);
+        ensureValidPassword(password);
+
+        UserCredentialEntity credential = userCredentialMapper.findByEmail(normalizedEmail);
+        if (credential == null) {
+            throw new IllegalStateException("email_not_registered");
+        }
+
+        consumeVerificationCode(normalizedEmail, code);
+        String passwordHash = hashPassword(password);
+        userCredentialMapper.updatePassword(credential.getUserId(), passwordHash);
+    }
+
     private LoginResponse buildLoginResponse(Long userId, String nickname, String avatar) {
         String token = authTokenService.createAccessToken(userId);
         String refreshToken = authTokenService.createRefreshToken(userId);
@@ -121,6 +141,10 @@ public class EmailAuthService {
         return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 
+    private String normalizeScene(String scene) {
+        return scene == null ? "" : scene.trim().toLowerCase(Locale.ROOT);
+    }
+
     private void ensureValidEmail(String email) {
         if (email.isBlank() || !email.endsWith("@qq.com")) {
             throw new IllegalStateException("email_not_supported");
@@ -131,6 +155,14 @@ public class EmailAuthService {
         if (password == null || password.length() < 6) {
             throw new IllegalStateException("password_too_short");
         }
+    }
+
+    private void consumeVerificationCode(String email, String code) {
+        EmailVerificationEntity record = emailVerificationMapper.findLatestValid(email);
+        if (record == null || !verifyVerificationCode(code, record.getCodeHash())) {
+            throw new IllegalStateException("code_invalid");
+        }
+        emailVerificationMapper.markUsed(record.getId());
     }
 
     private String buildNickname(String email) {
