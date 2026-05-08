@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.mapper.UserMapper;
 import com.liuliu.citywalk.mapper.WalkRecordMapper;
+import com.liuliu.citywalk.mapper.entity.UserEntity;
 import com.liuliu.citywalk.mapper.entity.WalkRecordEntity;
 import com.liuliu.citywalk.model.dto.request.CompletedMissionRequest;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
@@ -93,11 +94,15 @@ public class WalkService {
                 : !routePoints.isEmpty()
                 ? "location"
                 : "event";
+        UserEntity author = resolveAuthor(entity.getUserId());
         return new WalkResponse(
                 entity.getId(),
                 entity.getThemeTitle(),
                 themeCategory,
                 entity.getLocationName(),
+                entity.getUserId(),
+                resolveAuthorNickname(author),
+                resolveAuthorAvatar(author),
                 recordUnit,
                 entity.getIsPublic(),
                 entity.getNoteText(),
@@ -110,6 +115,27 @@ public class WalkService {
                 parseRoomMembers(snapshot.get("roomMembers")),
                 toEpochMilli(entity.getCreatedAt())
         );
+    }
+
+    private UserEntity resolveAuthor(Long userId) {
+        if (userId == null || userId <= 0) {
+            return null;
+        }
+        return userMapper.findById(userId);
+    }
+
+    private String resolveAuthorNickname(UserEntity author) {
+        if (author == null || author.getNickname() == null || author.getNickname().isBlank()) {
+            return "社区漫步者";
+        }
+        return author.getNickname().trim();
+    }
+
+    private String resolveAuthorAvatar(UserEntity author) {
+        if (author == null || author.getAvatarUrl() == null) {
+            return "";
+        }
+        return author.getAvatarUrl().trim();
     }
 
     private Map<String, Object> buildThemeSnapshot(CreateWalkRequest request, List<String> missions) {

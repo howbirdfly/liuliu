@@ -1618,6 +1618,8 @@ export default function App() {
       })
       .slice(0, 10);
   }, [communityReferencePoint, communityWalks]);
+  const communityPublisherName = user?.nickname?.trim() || '社区漫步者';
+  const communityPublisherAvatar = user?.avatar?.trim() || '';
 
   const roomThemeSnapshot = useMemo(
     () =>
@@ -3149,6 +3151,38 @@ export default function App() {
                   <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
                   同时发布到社区
                 </label>
+
+                {isPublic ? (
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="font-medium text-slate-800">发布者设定</div>
+                        <p className="mt-1 text-xs leading-6 text-slate-500">
+                          社区模式会使用当前已保存的真实作者资料发布，包括昵称和头像。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">真实作者</span>
+                    </div>
+
+                    <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/80 bg-white px-3 py-3">
+                      {communityPublisherAvatar ? (
+                        <img
+                          src={communityPublisherAvatar}
+                          alt={communityPublisherName}
+                          className="h-12 w-12 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                          <UserRound className="h-5 w-5" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-medium text-slate-900">{communityPublisherName}</div>
+                        <div className="mt-1 text-xs text-slate-500">头像将显示为真实作者头像</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-3 text-sm text-slate-500">当前轨迹点数量：{path.length}</div>
 
