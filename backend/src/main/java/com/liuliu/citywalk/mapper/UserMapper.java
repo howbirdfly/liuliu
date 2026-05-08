@@ -13,16 +13,19 @@ public interface UserMapper {
 
     int insertMiniappUser(@Param("openid") String openid,
                           @Param("nickname") String nickname,
-                          @Param("avatarUrl") String avatarUrl);
+                          @Param("avatarUrl") String avatarUrl,
+                          @Param("bio") String bio);
 
     int insertWebUser(@Param("openid") String openid,
                       @Param("nickname") String nickname,
-                      @Param("avatarUrl") String avatarUrl);
+                      @Param("avatarUrl") String avatarUrl,
+                      @Param("bio") String bio);
 
     int insertDebugUser(@Param("id") Long id,
                         @Param("openid") String openid,
                         @Param("nickname") String nickname,
                         @Param("avatarUrl") String avatarUrl,
+                        @Param("bio") String bio,
                         @Param("source") String source);
 
     int updateProfileAndLogin(@Param("id") Long id,
@@ -32,7 +35,8 @@ public interface UserMapper {
 
     int updateProfile(@Param("id") Long id,
                       @Param("nickname") String nickname,
-                      @Param("avatarUrl") String avatarUrl);
+                      @Param("avatarUrl") String avatarUrl,
+                      @Param("bio") String bio);
 
     Integer countById(@Param("id") Long id);
 }

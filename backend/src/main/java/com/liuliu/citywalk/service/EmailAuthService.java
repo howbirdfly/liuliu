@@ -66,7 +66,11 @@ public class EmailAuthService {
 
         String code = generateCode();
         String codeHash = hashVerificationCode(code);
-        emailVerificationMapper.insertRecord(normalizedEmail, codeHash, Timestamp.from(Instant.now().plus(CODE_EXPIRE_MINUTES, ChronoUnit.MINUTES)));
+        emailVerificationMapper.insertRecord(
+                normalizedEmail,
+                codeHash,
+                Timestamp.from(Instant.now().plus(CODE_EXPIRE_MINUTES, ChronoUnit.MINUTES))
+        );
         emailSender.sendVerificationCode(normalizedEmail, code);
     }
 
@@ -83,7 +87,7 @@ public class EmailAuthService {
         consumeVerificationCode(normalizedEmail, code);
 
         String nickname = buildNickname(normalizedEmail);
-        userMapper.insertWebUser(normalizedEmail, nickname, "");
+        userMapper.insertWebUser(normalizedEmail, nickname, "", "");
         UserEntity user = userMapper.findByOpenid(normalizedEmail);
         if (user == null || user.getId() == null) {
             throw new IllegalStateException("created_user_not_found");
@@ -91,7 +95,7 @@ public class EmailAuthService {
 
         String passwordHash = hashPassword(password);
         userCredentialMapper.insertCredential(user.getId(), normalizedEmail, passwordHash);
-        return buildLoginResponse(user.getId(), nickname, "");
+        return buildLoginResponse(user);
     }
 
     public LoginResponse login(String email, String password) {
@@ -108,7 +112,8 @@ public class EmailAuthService {
             throw new IllegalStateException("invalid_password");
         }
 
-        return buildLoginResponse(credential.getUserId(), buildNickname(normalizedEmail), "");
+        UserEntity user = loadOrRestoreUser(credential.getUserId(), normalizedEmail);
+        return buildLoginResponse(user);
     }
 
     public void resetPassword(String email, String password, String code) {
@@ -126,15 +131,43 @@ public class EmailAuthService {
         userCredentialMapper.updatePassword(credential.getUserId(), passwordHash);
     }
 
-    private LoginResponse buildLoginResponse(Long userId, String nickname, String avatar) {
-        String token = authTokenService.createAccessToken(userId);
-        String refreshToken = authTokenService.createRefreshToken(userId);
+    private LoginResponse buildLoginResponse(UserEntity user) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalStateException("user_not_found");
+        }
+
+        String token = authTokenService.createAccessToken(user.getId());
+        String refreshToken = authTokenService.createRefreshToken(user.getId());
         return new LoginResponse(
                 token,
                 refreshToken,
                 authTokenService.getAccessExpireSeconds(),
-                new UserProfileResponse(userId, nickname, avatar)
+                new UserProfileResponse(
+                        user.getId(),
+                        safeText(user.getNickname(), buildNickname(safeText(user.getOpenid(), ""))),
+                        safeText(user.getAvatarUrl(), ""),
+                        safeText(user.getBio(), "")
+                )
         );
+    }
+
+    private UserEntity loadOrRestoreUser(Long userId, String email) {
+        if (userId == null || userId <= 0) {
+            throw new IllegalStateException("user_not_found");
+        }
+
+        UserEntity existingUser = userMapper.findById(userId);
+        if (existingUser != null) {
+            return existingUser;
+        }
+
+        String normalizedEmail = normalizeEmail(email);
+        userMapper.insertDebugUser(userId, normalizedEmail, buildNickname(normalizedEmail), "", "", "web");
+        UserEntity restoredUser = userMapper.findById(userId);
+        if (restoredUser == null) {
+            throw new IllegalStateException("user_not_found");
+        }
+        return restoredUser;
     }
 
     private String normalizeEmail(String email) {
@@ -168,7 +201,11 @@ public class EmailAuthService {
     private String buildNickname(String email) {
         int index = email.indexOf('@');
         String nickname = index > 0 ? email.substring(0, index) : email;
-        return nickname.isBlank() ? "QQ鐢ㄦ埛" : nickname;
+        return nickname.isBlank() ? "QQ用户" : nickname;
+    }
+
+    private String safeText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
     }
 
     private String generateCode() {

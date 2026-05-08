@@ -17,7 +17,7 @@ public class UserSessionService {
 
     private final AuthTokenService authTokenService;
     private final UserMapper userMapper;
-    private final StoredUser guestUser = new StoredUser(0L, "guest", "娓稿", "", "guest", 0L, 0L);
+    private final StoredUser guestUser = new StoredUser(0L, "guest", "游客", "", "", "guest", 0L, 0L);
 
     public UserSessionService(
             AuthTokenService authTokenService,
@@ -59,7 +59,7 @@ public class UserSessionService {
     }
 
     @Transactional
-    public UserProfileResponse updateProfile(String authorizationHeader, String nickName, String avatarUrl) {
+    public UserProfileResponse updateProfile(String authorizationHeader, String nickName, String avatarUrl, String bio) {
         StoredUser currentUser = resolveUser(authorizationHeader);
         if (currentUser == null || currentUser.isGuest()) {
             throw new IllegalStateException("login_required");
@@ -68,12 +68,14 @@ public class UserSessionService {
         UserRecord updatedUser = updateProfile(
                 currentUser.id(),
                 normalizeNickName(nickName),
-                normalizeAvatar(avatarUrl)
+                normalizeAvatar(avatarUrl),
+                normalizeBio(bio)
         );
         return new UserProfileResponse(
                 updatedUser.id(),
                 updatedUser.nickname(),
-                updatedUser.avatarUrl()
+                updatedUser.avatarUrl(),
+                updatedUser.bio()
         );
     }
 
@@ -115,9 +117,9 @@ public class UserSessionService {
 
     private UserRecord createUser(String openid, String nickname, String avatarUrl, String clientType) {
         if ("web".equalsIgnoreCase(normalizeClientType(clientType))) {
-            userMapper.insertWebUser(openid, nickname, avatarUrl);
+            userMapper.insertWebUser(openid, nickname, avatarUrl, "");
         } else {
-            userMapper.insertMiniappUser(openid, nickname, avatarUrl);
+            userMapper.insertMiniappUser(openid, nickname, avatarUrl, "");
         }
         return findByOpenid(openid).orElseThrow(() -> new IllegalStateException("created_user_not_found"));
     }
@@ -127,8 +129,8 @@ public class UserSessionService {
         return findById(id).orElseThrow(() -> new IllegalStateException("updated_user_not_found"));
     }
 
-    private UserRecord updateProfile(Long id, String nickname, String avatarUrl) {
-        userMapper.updateProfile(id, nickname, avatarUrl);
+    private UserRecord updateProfile(Long id, String nickname, String avatarUrl, String bio) {
+        userMapper.updateProfile(id, nickname, avatarUrl, bio);
         return findById(id).orElseThrow(() -> new IllegalStateException("updated_user_not_found"));
     }
 
@@ -152,11 +154,15 @@ public class UserSessionService {
     }
 
     private String normalizeNickName(String nickName) {
-        return nickName == null || nickName.isBlank() ? "寰俊鐢ㄦ埛" : nickName.trim();
+        return nickName == null || nickName.isBlank() ? "微信用户" : nickName.trim();
     }
 
     private String normalizeAvatar(String avatarUrl) {
         return avatarUrl == null ? "" : avatarUrl.trim();
+    }
+
+    private String normalizeBio(String bio) {
+        return bio == null ? "" : bio.trim();
     }
 
     private String normalizeClientType(String clientType) {
@@ -172,6 +178,7 @@ public class UserSessionService {
                 user.openid(),
                 user.nickname(),
                 user.avatarUrl(),
+                user.bio(),
                 user.role(),
                 user.createdAt(),
                 user.lastLoginAt()
@@ -208,6 +215,7 @@ public class UserSessionService {
                 user.getOpenid(),
                 user.getNickname(),
                 user.getAvatarUrl(),
+                user.getBio(),
                 user.getRole(),
                 toEpochMilli(user.getCreatedAt()),
                 toEpochMilli(user.getLastLoginAt())
@@ -223,6 +231,7 @@ public class UserSessionService {
             String openid,
             String nickname,
             String avatarUrl,
+            String bio,
             String role,
             Long createdAt,
             Long lastLoginAt
@@ -234,6 +243,7 @@ public class UserSessionService {
             String openid,
             String nickName,
             String avatarUrl,
+            String bio,
             String role,
             Long createdAt,
             Long lastLoginAt

@@ -276,7 +276,7 @@ public class WalkService {
         if (count != null && count > 0) {
             return;
         }
-        userMapper.insertDebugUser(userId, "web_debug_" + userId, "Web Debug User", "", "web");
+        userMapper.insertDebugUser(userId, "web_debug_" + userId, "Web Debug User", "", "", "web");
     }
 
     private Long toEpochMilli(Timestamp timestamp) {

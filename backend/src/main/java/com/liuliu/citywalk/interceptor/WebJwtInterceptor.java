@@ -45,8 +45,7 @@ public class WebJwtInterceptor implements HandlerInterceptor {
 
         try {
             AuthTokenService.TokenClaims claims = authTokenService.parseAccessToken(token);
-            UserSessionService.StoredUser user = userSessionService.resolveUserByToken(token);
-            if (user == null || user.isGuest() || !claims.userId().equals(user.id())) {
+            if (claims.userId() == null || claims.userId() <= 0) {
                 writeUnauthorized(response, "invalid_token");
                 return false;
             }

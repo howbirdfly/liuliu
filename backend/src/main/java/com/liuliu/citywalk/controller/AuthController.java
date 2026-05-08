@@ -52,7 +52,7 @@ public class AuthController {
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         Long userId = 1001L;
-        UserProfileResponse user = new UserProfileResponse(userId, "六六", "https://cdn.example.com/avatar.jpg");
+        UserProfileResponse user = new UserProfileResponse(userId, "六六", "https://cdn.example.com/avatar.jpg", "");
         LoginResponse response = new LoginResponse(
                 authTokenService.createAccessToken(userId),
                 authTokenService.createRefreshToken(userId),
@@ -65,7 +65,7 @@ public class AuthController {
     @PostMapping("/mock-login")
     public ApiResponse<LoginResponse> mockLogin() {
         Long userId = 1001L;
-        UserProfileResponse user = new UserProfileResponse(userId, "本地测试用户", "https://cdn.example.com/avatar.jpg");
+        UserProfileResponse user = new UserProfileResponse(userId, "本地测试用户", "https://cdn.example.com/avatar.jpg", "");
         LoginResponse response = new LoginResponse(
                 authTokenService.createAccessToken(userId),
                 authTokenService.createRefreshToken(userId),
@@ -151,7 +151,8 @@ public class AuthController {
             return ApiResponse.success(new UserProfileResponse(
                     currentUser.id(),
                     currentUser.nickName(),
-                    currentUser.avatarUrl()
+                    currentUser.avatarUrl(),
+                    currentUser.bio()
             ));
         }
         return ApiResponse.success(wechatAuthService.loadCurrentUser(authorizationHeader));
@@ -166,7 +167,8 @@ public class AuthController {
             UserProfileResponse response = userSessionService.updateProfile(
                     authorizationHeader,
                     request.nickname(),
-                    request.avatar()
+                    request.avatar(),
+                    request.bio()
             );
             return ApiResponse.success(response);
         } catch (IllegalStateException error) {

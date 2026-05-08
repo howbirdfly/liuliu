@@ -63,7 +63,7 @@ public class WechatAuthService {
     }
 
     public UserProfileResponse loadCurrentUser(String authorizationHeader) {
-        return new UserProfileResponse(1001L, "六六", "https://cdn.example.com/avatar.jpg");
+        return new UserProfileResponse(1001L, "六六", "https://cdn.example.com/avatar.jpg", "");
     }
 
     private WechatCallbackResponse mockWechatLoginSuccess(String code) {
@@ -71,7 +71,8 @@ public class WechatAuthService {
         UserProfileResponse user = new UserProfileResponse(
                 userId,
                 code == null || code.isBlank() ? "微信用户" : "微信用户_" + code.substring(0, Math.min(6, code.length())),
-                "https://cdn.example.com/avatar.jpg"
+                "https://cdn.example.com/avatar.jpg",
+                ""
         );
 
         return new WechatCallbackResponse(

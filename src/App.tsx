@@ -1326,6 +1326,7 @@ export default function App() {
   const [profileNickname, setProfileNickname] = useState('');
   const [profileAvatarPreview, setProfileAvatarPreview] = useState<string | null>(null);
   const [profileAvatarName, setProfileAvatarName] = useState('');
+  const [profileBio, setProfileBio] = useState('');
   const [profileMessage, setProfileMessage] = useState('');
   const [showProfileEditor, setShowProfileEditor] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1436,6 +1437,7 @@ export default function App() {
     setProfileNickname(user?.nickname || '');
     setProfileAvatarPreview(user?.avatar || null);
     setProfileAvatarName('');
+    setProfileBio(user?.bio || '');
   }, [user]);
 
   useEffect(() => {
@@ -2251,6 +2253,7 @@ export default function App() {
     setAuthError('');
     setAuthInfo('');
     try {
+      let profile: AppUser | null = null;
       if (emailLoginMode !== 'login') {
         if (!emailCodeInput.trim()) {
           setAuthError('请输入邮箱验证码。');
@@ -2258,7 +2261,7 @@ export default function App() {
           return;
         }
         if (emailLoginMode === 'register') {
-          await registerWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
+          profile = await registerWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
         } else {
           await resetPasswordWithEmail(trimmedEmail, passwordInput, emailCodeInput.trim());
           setEmailLoginMode('login');
@@ -2269,9 +2272,11 @@ export default function App() {
           return;
         }
       } else {
-        await loginWithEmail(trimmedEmail, passwordInput);
+        profile = await loginWithEmail(trimmedEmail, passwordInput);
       }
-      const profile = await loadCurrentUser();
+      if (!profile) {
+        profile = await loadCurrentUser();
+      }
       setUser(profile);
       await refreshRecentWalks(profile);
       setShowEmailLogin(false);
@@ -2368,6 +2373,7 @@ export default function App() {
     }
 
     const nextNickname = profileNickname.trim();
+    const nextBio = profileBio.trim();
     if (!nextNickname) {
       alert('昵称不能为空。');
       return;
@@ -2388,6 +2394,7 @@ export default function App() {
       const updatedUser = await updateUserProfile({
         nickname: nextNickname,
         avatar: nextAvatar,
+        bio: nextBio,
       });
       setUser(updatedUser);
       setProfileMessage('个人资料已更新。');
@@ -3567,9 +3574,11 @@ export default function App() {
                       <div>
                         <p className="text-xs uppercase tracking-[0.24em] text-slate-400">My Citywalk Notes</p>
                         <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.nickname || '还未登录'}</h2>
-                        <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-500">
-                          这里像你的漫步笔记主页一样，收纳每一次主题生成、任务打卡、照片和轨迹记录。
-                        </p>
+                        {user?.bio?.trim() ? (
+                          <p className="mt-3 max-w-2xl whitespace-pre-line text-sm leading-7 text-slate-500">
+                            {user.bio.trim()}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 
@@ -3623,7 +3632,10 @@ export default function App() {
                         <span className="mb-2 block text-sm font-medium text-slate-700">昵称</span>
                         <input
                           value={profileNickname}
-                          onChange={(event) => setProfileNickname(event.target.value)}
+                          onChange={(event) => {
+                            setProfileNickname(event.target.value);
+                            setProfileMessage('');
+                          }}
                           placeholder="给自己起一个更喜欢的名字"
                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
                         />
@@ -3665,6 +3677,22 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+
+                    <label className="mt-5 block">
+                      <span className="mb-2 block text-sm font-medium text-slate-700">个人简介</span>
+                      <textarea
+                        value={profileBio}
+                        onChange={(event) => {
+                          setProfileBio(event.target.value);
+                          setProfileMessage('');
+                        }}
+                        maxLength={120}
+                        rows={4}
+                        placeholder="写一句介绍自己或你的漫步偏好"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 outline-none"
+                      />
+                      <div className="mt-2 text-xs text-slate-400">{profileBio.trim().length}/120</div>
+                    </label>
 
                     {profileMessage ? (
                       <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">

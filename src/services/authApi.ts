@@ -4,6 +4,7 @@ export interface AppUser {
   id: number;
   nickname: string;
   avatar?: string;
+  bio?: string;
 }
 
 interface WechatLoginUrlResponse {
@@ -67,14 +68,14 @@ export async function loadCurrentUser(): Promise<AppUser> {
   return apiRequest<AppUser>('/api/v1/auth/me');
 }
 
-export async function updateUserProfile(payload: { nickname: string; avatar?: string }): Promise<AppUser> {
+export async function updateUserProfile(payload: { nickname: string; avatar?: string; bio?: string }): Promise<AppUser> {
   return apiRequest<AppUser>('/api/v1/auth/profile', {
     method: 'PUT',
     body: JSON.stringify(payload),
   });
 }
 
-export async function mockLogin(): Promise<void> {
+export async function mockLogin(): Promise<AppUser> {
   const response = await apiRequest<{
     token: string;
     refreshToken: string;
@@ -83,19 +84,22 @@ export async function mockLogin(): Promise<void> {
   }>('/api/v1/auth/mock-login', {
     method: 'POST',
     body: JSON.stringify({}),
+    skipAuth: true,
   });
 
   saveToken(response.token);
+  return response.user;
 }
 
 export async function sendEmailCode(email: string, scene: 'register' | 'reset'): Promise<void> {
   await apiRequest('/api/v1/auth/email/send-code', {
     method: 'POST',
     body: JSON.stringify({ email, scene }),
+    skipAuth: true,
   });
 }
 
-export async function registerWithEmail(email: string, password: string, code: string): Promise<void> {
+export async function registerWithEmail(email: string, password: string, code: string): Promise<AppUser> {
   const response = await apiRequest<{
     token: string;
     refreshToken: string;
@@ -104,12 +108,14 @@ export async function registerWithEmail(email: string, password: string, code: s
   }>('/api/v1/auth/email/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, code }),
+    skipAuth: true,
   });
 
   saveToken(response.token);
+  return response.user;
 }
 
-export async function loginWithEmail(email: string, password: string): Promise<void> {
+export async function loginWithEmail(email: string, password: string): Promise<AppUser> {
   const response = await apiRequest<{
     token: string;
     refreshToken: string;
@@ -118,15 +124,18 @@ export async function loginWithEmail(email: string, password: string): Promise<v
   }>('/api/v1/auth/email/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+    skipAuth: true,
   });
 
   saveToken(response.token);
+  return response.user;
 }
 
 export async function resetPasswordWithEmail(email: string, password: string, code: string): Promise<void> {
   await apiRequest('/api/v1/auth/email/reset-password', {
     method: 'POST',
     body: JSON.stringify({ email, password, code }),
+    skipAuth: true,
   });
 }
 

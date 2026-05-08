@@ -8,6 +8,7 @@ public class UserEntity {
     private String openid;
     private String nickname;
     private String avatarUrl;
+    private String bio;
     private String role;
     private Timestamp createdAt;
     private Timestamp lastLoginAt;
@@ -42,6 +43,14 @@ public class UserEntity {
 
     public void setAvatarUrl(String avatarUrl) {
         this.avatarUrl = avatarUrl;
+    }
+
+    public String getBio() {
+        return bio;
+    }
+
+    public void setBio(String bio) {
+        this.bio = bio;
     }
 
     public String getRole() {

@@ -2,19 +2,24 @@ const DEFAULT_API_BASE_URL = 'http://localhost:8080';
 const AUTH_TOKEN_KEY = 'citywalk_token';
 const AUTH_REQUIRED_EVENT = 'auth:required';
 
+type ApiRequestInit = RequestInit & {
+  skipAuth?: boolean;
+};
+
 function getApiBaseUrl(): string {
   const value = import.meta.env.VITE_API_BASE_URL?.trim();
   return value ? value.replace(/\/$/, '') : DEFAULT_API_BASE_URL;
 }
 
-export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const { skipAuth, headers, ...requestInit } = init ?? {};
   const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_KEY) : null;
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    ...init,
+    ...requestInit,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init?.headers ?? {}),
+      ...(!skipAuth && token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(headers ?? {}),
     },
   });
 
@@ -30,6 +35,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
+      window.localStorage.removeItem(AUTH_TOKEN_KEY);
       window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
     }
     throw new Error(json?.message || `Request failed: ${response.status}`);
@@ -41,6 +47,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
 
   if (json?.code !== 0) {
     if (json?.code === 401 && typeof window !== 'undefined') {
+      window.localStorage.removeItem(AUTH_TOKEN_KEY);
       window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
     }
     throw new Error(json?.message || 'API request failed');

@@ -238,7 +238,7 @@ public class MiniappWalkService {
         if (count != null && count > 0) {
             return;
         }
-        userMapper.insertDebugUser(userId, "debug_" + userId, "Debug User", "", "miniapp");
+        userMapper.insertDebugUser(userId, "debug_" + userId, "Debug User", "", "", "miniapp");
     }
 
     private <T> T parseJson(String json, TypeReference<T> typeReference, T fallback) {

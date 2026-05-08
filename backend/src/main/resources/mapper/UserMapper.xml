@@ -9,39 +9,40 @@
         <result property="openid" column="openid"/>
         <result property="nickname" column="nickname"/>
         <result property="avatarUrl" column="avatar_url"/>
+        <result property="bio" column="bio"/>
         <result property="role" column="role"/>
         <result property="createdAt" column="created_at"/>
         <result property="lastLoginAt" column="last_login_at"/>
     </resultMap>
 
     <select id="findByOpenid" resultMap="UserEntityMap">
-        select id, openid, nickname, avatar_url, role, created_at, last_login_at
+        select id, openid, nickname, avatar_url, bio, role, created_at, last_login_at
         from users
         where openid = #{openid}
         limit 1
     </select>
 
     <select id="findById" resultMap="UserEntityMap">
-        select id, openid, nickname, avatar_url, role, created_at, last_login_at
+        select id, openid, nickname, avatar_url, bio, role, created_at, last_login_at
         from users
         where id = #{id}
         limit 1
     </select>
 
     <insert id="insertMiniappUser" useGeneratedKeys="true" keyProperty="id">
-        insert into users (openid, nickname, avatar_url, role, status, source, created_at, updated_at, last_login_at)
-        values (#{openid}, #{nickname}, #{avatarUrl}, 'user', 'active', 'miniapp', now(), now(), now())
+        insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
+        values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'miniapp', now(), now(), now())
     </insert>
 
     <insert id="insertWebUser" useGeneratedKeys="true" keyProperty="id">
-        insert into users (openid, nickname, avatar_url, role, status, source, created_at, updated_at, last_login_at)
-        values (#{openid}, #{nickname}, #{avatarUrl}, 'user', 'active', 'web', now(), now(), now())
+        insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
+        values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'web', now(), now(), now())
     </insert>
 
     <insert id="insertDebugUser">
         insert into users (
-          id, openid, nickname, avatar_url, role, status, source, created_at, updated_at, last_login_at
-        ) values (#{id}, #{openid}, #{nickname}, #{avatarUrl}, 'user', 'active', #{source}, now(), now(), now())
+          id, openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at
+        ) values (#{id}, #{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', #{source}, now(), now(), now())
     </insert>
 
     <update id="updateProfileAndLogin">
@@ -52,7 +53,7 @@
 
     <update id="updateProfile">
         update users
-        set nickname = #{nickname}, avatar_url = #{avatarUrl}, updated_at = now()
+        set nickname = #{nickname}, avatar_url = #{avatarUrl}, bio = #{bio}, updated_at = now()
         where id = #{id}
     </update>
 

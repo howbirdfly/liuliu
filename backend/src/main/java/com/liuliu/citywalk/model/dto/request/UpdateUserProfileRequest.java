@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 public record UpdateUserProfileRequest(
         @NotBlank(message = "昵称不能为空")
         String nickname,
-        String avatar
+        String avatar,
+        String bio
 ) {
 }
