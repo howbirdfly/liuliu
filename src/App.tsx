@@ -522,6 +522,10 @@ function deriveDisplayLocationName(rawName?: string, locationContextText?: strin
   return trimmedName || broadFromContext || '当前区域';
 }
 
+function hasBroadLocationHint(value?: string) {
+  return extractBroadLocationName(value).length > 0;
+}
+
 function escapeXml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -2048,16 +2052,34 @@ export default function App() {
 
   const resolveCurrentContext = async (): Promise<{ locationName: string; locationContextText: string }> => {
     if (selectedLocation) {
+      let nextLocationContext = locationContext;
+      if (isGenericLocationName(selectedLocation.name) || !hasBroadLocationHint(nextLocationContext)) {
+        try {
+          nextLocationContext = await getLocationContext(selectedLocation.lat, selectedLocation.lng);
+          setLocationContext(nextLocationContext);
+        } catch (error) {
+          console.error('Refresh selected location context error:', error);
+        }
+      }
       return {
-        locationName: deriveDisplayLocationName(selectedLocation.name, locationContext),
-        locationContextText: locationContext,
+        locationName: deriveDisplayLocationName(selectedLocation.name, nextLocationContext),
+        locationContextText: nextLocationContext,
       };
     }
 
     if (searchLocation.trim()) {
+      let nextLocationContext = locationContext;
+      if ((isGenericLocationName(searchLocation.trim()) || !hasBroadLocationHint(nextLocationContext)) && currentPosition) {
+        try {
+          nextLocationContext = await getLocationContext(currentPosition.lat, currentPosition.lng);
+          setLocationContext(nextLocationContext);
+        } catch (error) {
+          console.error('Refresh current geolocation context error:', error);
+        }
+      }
       return {
-        locationName: deriveDisplayLocationName(searchLocation.trim(), locationContext),
-        locationContextText: locationContext,
+        locationName: deriveDisplayLocationName(searchLocation.trim(), nextLocationContext),
+        locationContextText: nextLocationContext,
       };
     }
 
@@ -2604,6 +2626,7 @@ export default function App() {
         : path.length > 0
           ? 'location'
           : 'event';
+      const { locationName, locationContextText } = await resolveCurrentContext();
       const savedRoomMembers =
         walkMode === 'advanced'
           ? buildSavedRoomMembers(coCreateRoom, user, path, livePosition ?? selectedLocation, checkedMissions, isTracking)
@@ -2612,7 +2635,7 @@ export default function App() {
       await createWalk({
         themeTitle: currentTheme.title,
         themeCategory: currentTheme.category,
-        locationName: currentLocationName,
+        locationName,
         recordUnit,
         isPublic,
         noteText,
@@ -2628,8 +2651,8 @@ export default function App() {
       });
       const card = await generateWalkRecordCardWithAi({
         theme: currentTheme,
-        locationName: currentLocationName,
-        locationContext,
+        locationName,
+        locationContext: locationContextText,
         noteText,
         photoUrl: cardPhotoSource || photoUrl,
         completedMissions: checkedMissions,
