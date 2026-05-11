@@ -82,6 +82,7 @@ type EmailAuthMode = 'login' | 'register' | 'reset';
 type RoomMapMember = {
   userId: number;
   nickname: string;
+  avatarUrl?: string;
   trackColor: string;
   path: [number, number][];
   currentPosition: [number, number] | null;
@@ -115,6 +116,7 @@ function buildSavedRoomMembers(
     return {
       userId: member.userId,
       nickname: member.nickname,
+      avatarUrl: isCurrentUser ? currentUser?.avatar : member.avatarUrl,
       trackColor: member.trackColor,
       isOwner: member.isOwner,
       isTracking: isCurrentUser ? tracking : member.isTracking,
@@ -134,6 +136,7 @@ function toRoomMapMembers(roomMembers?: WalkItem['roomMembers']): RoomMapMember[
     .filter((member) => member && typeof member.userId === 'number')
     .map((member) => ({
       userId: member.userId,
+      avatarUrl: member.avatarUrl,
       nickname: member.nickname || '队友',
       trackColor: member.trackColor || '#2563eb',
       path: Array.isArray(member.path)
@@ -156,6 +159,9 @@ const TRACKING_MAP_ZOOM = 19;
 const MIN_TRACKING_DISTANCE_METERS = 2.5;
 const MAX_ACCEPTABLE_POSITION_ACCURACY_METERS = 150;
 const MAX_TIMED_TRACK_POINT_INTERVAL_MS = 5000;
+const MAX_REASONABLE_WALKING_SPEED_MPS = 6;
+const SHORT_INTERVAL_JUMP_WINDOW_MS = 15000;
+const MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS = 120;
 
 declare global {
   interface Window {
@@ -246,6 +252,82 @@ function createMarkerContent(color: string, size = 18, label?: string) {
   `;
 }
 
+function getMarkerFallbackText(label?: string) {
+  const text = (label || '').trim();
+  return text ? text.slice(0, 1).toUpperCase() : 'U';
+}
+
+function createAvatarMarkerContent(options: {
+  color: string;
+  size?: number;
+  label?: string;
+  avatarUrl?: string;
+  fallbackText?: string;
+}) {
+  const { color, size = 22, label, avatarUrl, fallbackText } = options;
+  const safeLabel = label ? escapeHtml(label) : '';
+  const safeAvatarUrl = avatarUrl ? escapeHtml(avatarUrl) : '';
+  const safeFallbackText = escapeHtml(getMarkerFallbackText(fallbackText || label));
+  return `
+    <div style="position:relative;width:0;height:0;">
+      ${
+        safeLabel
+          ? `<div style="
+              position:absolute;
+              left:50%;
+              bottom:${size / 2 + 12}px;
+              transform:translateX(-50%);
+              max-width:140px;
+              padding:4px 8px;
+              border-radius:9999px;
+              background:rgba(255,255,255,0.96);
+              border:1px solid rgba(148,163,184,0.35);
+              box-shadow:0 6px 18px rgba(15,23,42,0.14);
+              color:#0f172a;
+              font-size:12px;
+              line-height:1.2;
+              white-space:nowrap;
+              overflow:hidden;
+              text-overflow:ellipsis;
+            ">${safeLabel}</div>`
+          : ''
+      }
+      <div style="
+        position:absolute;
+        left:50%;
+        top:50%;
+        transform:translate(-50%,-50%);
+        width:${size}px;
+        height:${size}px;
+        border-radius:9999px;
+        background:${color};
+        border:3px solid white;
+        box-shadow:0 8px 20px rgba(15,23,42,0.24);
+        overflow:hidden;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:white;
+        font-size:${Math.max(10, Math.floor(size * 0.42))}px;
+        font-weight:700;
+        line-height:1;
+      ">
+        <span>${safeFallbackText}</span>
+        ${
+          safeAvatarUrl
+            ? `<img
+                src="${safeAvatarUrl}"
+                alt="${safeFallbackText}"
+                style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"
+                onerror="this.style.display='none';"
+              />`
+            : ''
+        }
+      </div>
+    </div>
+  `;
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -296,6 +378,38 @@ function calculateDistanceMeters(
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
 
   return 2 * earthRadius * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function isLikelyTrackJump(params: {
+  distanceMeters: number;
+  elapsedMs: number;
+  accuracyMeters?: number;
+}) {
+  const { distanceMeters, elapsedMs, accuracyMeters } = params;
+  const accuracyValue = Number.isFinite(accuracyMeters) ? Math.max(0, accuracyMeters ?? 0) : 999;
+
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+    return false;
+  }
+
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return distanceMeters > Math.max(MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS, accuracyValue * 3);
+  }
+
+  if (
+    elapsedMs <= SHORT_INTERVAL_JUMP_WINDOW_MS &&
+    distanceMeters > Math.max(MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS, accuracyValue * 3)
+  ) {
+    return true;
+  }
+
+  const elapsedSeconds = elapsedMs / 1000;
+  const maxReasonableDistance = Math.max(
+    elapsedSeconds * MAX_REASONABLE_WALKING_SPEED_MPS + accuracyValue * 1.5,
+    accuracyValue <= 25 ? 35 : accuracyValue <= 60 ? 60 : 90,
+  );
+
+  return distanceMeters > maxReasonableDistance;
 }
 
 function sanitizeCardText(value: string) {
@@ -712,6 +826,8 @@ function AmapScene(props: {
   center: [number, number];
   selectedLocation: SearchLocation | null;
   currentPosition: SearchLocation | null;
+  currentUserAvatar?: string;
+  currentUserNickname?: string;
   followCurrentPosition: boolean;
   pathCoordinates: [number, number][];
   roomMembers?: RoomMapMember[];
@@ -724,6 +840,8 @@ function AmapScene(props: {
     center,
     selectedLocation,
     currentPosition,
+    currentUserAvatar,
+    currentUserNickname,
     followCurrentPosition,
     pathCoordinates,
     roomMembers = [],
@@ -847,7 +965,13 @@ function AmapScene(props: {
           position: [currentPosition.lng, currentPosition.lat],
           anchor: 'center',
           offset: new AMap.Pixel(0, 0),
-          content: createMarkerContent('#f97316', 20, currentPosition.name),
+          content: createAvatarMarkerContent({
+            color: '#f97316',
+            size: 22,
+            label: currentPosition.name,
+            avatarUrl: currentUserAvatar,
+            fallbackText: currentUserNickname || currentPosition.name,
+          }),
           title: currentPosition.name,
         }),
       );
@@ -930,7 +1054,13 @@ function AmapScene(props: {
             position: [member.currentPosition[1], member.currentPosition[0]],
             anchor: 'center',
             offset: new AMap.Pixel(0, 0),
-            content: createMarkerContent(member.trackColor, 18, `${member.nickname}位置`),
+            content: createAvatarMarkerContent({
+              color: member.trackColor,
+              size: 22,
+              label: `${member.nickname}位置`,
+              avatarUrl: member.avatarUrl,
+              fallbackText: member.nickname,
+            }),
             title: member.nickname,
           }),
         );
@@ -1127,7 +1257,13 @@ function WalkDetailMap(props: {
               position: [startLng, startLat],
               anchor: 'center',
               offset: new AMap.Pixel(0, 0),
-              content: createMarkerContent(member.trackColor, 16, `${member.nickname}起点`),
+              content: createAvatarMarkerContent({
+                color: member.trackColor,
+                size: 18,
+                label: `${member.nickname}起点`,
+                avatarUrl: member.avatarUrl,
+                fallbackText: member.nickname,
+              }),
               title: `${member.nickname}起点`,
             }),
           );
@@ -1139,7 +1275,13 @@ function WalkDetailMap(props: {
               position: [member.currentPosition[1], member.currentPosition[0]],
               anchor: 'center',
               offset: new AMap.Pixel(0, 0),
-              content: createMarkerContent(member.trackColor, 18, `${member.nickname}位置`),
+              content: createAvatarMarkerContent({
+                color: member.trackColor,
+                size: 22,
+                label: `${member.nickname}位置`,
+                avatarUrl: member.avatarUrl,
+                fallbackText: member.nickname,
+              }),
               title: `${member.nickname}位置`,
             }),
           );
@@ -1150,7 +1292,13 @@ function WalkDetailMap(props: {
               position: [endLng, endLat],
               anchor: 'center',
               offset: new AMap.Pixel(0, 0),
-              content: createMarkerContent(member.trackColor, 18, `${member.nickname}轨迹`),
+              content: createAvatarMarkerContent({
+                color: member.trackColor,
+                size: 20,
+                label: `${member.nickname}轨迹`,
+                avatarUrl: member.avatarUrl,
+                fallbackText: member.nickname,
+              }),
               title: `${member.nickname}轨迹`,
             }),
           );
@@ -1479,6 +1627,16 @@ export default function App() {
         const distance = calculateDistanceMeters(lastPoint, nextPoint);
         const elapsed = nextPoint.timestamp - lastPoint.timestamp;
         const accuracyValue = Number.isFinite(accuracy) ? accuracy : 999;
+        const isJumpPoint = isLikelyTrackJump({
+          distanceMeters: distance,
+          elapsedMs: elapsed,
+          accuracyMeters: accuracyValue,
+        });
+
+        if (isJumpPoint) {
+          return prev;
+        }
+
         const minDistance =
           accuracyValue <= 25
             ? MIN_TRACKING_DISTANCE_METERS
@@ -1588,13 +1746,24 @@ export default function App() {
       { lat: lastCoordinate[0], lng: lastCoordinate[1] },
       { lat: currentCoordinate[0], lng: currentCoordinate[1] },
     );
+    const lastPathPoint = path[path.length - 1];
+    const tailElapsed = lastPathPoint ? Date.now() - lastPathPoint.timestamp : 0;
 
     if (tailDistance < 0.8) {
       return pathCoordinates;
     }
 
+    if (
+      isLikelyTrackJump({
+        distanceMeters: tailDistance,
+        elapsedMs: tailElapsed,
+      })
+    ) {
+      return pathCoordinates;
+    }
+
     return [...pathCoordinates, currentCoordinate];
-  }, [currentPosition, isTracking, pathCoordinates]);
+  }, [currentPosition, isTracking, path, pathCoordinates]);
   const pathDistanceKm = useMemo(() => calculatePathDistance(path) / 1000, [path]);
   const communityReferencePoint = useMemo(() => {
     if (selectedLocation) {
@@ -1657,6 +1826,7 @@ export default function App() {
       .map((member) => ({
         userId: member.userId,
         nickname: member.nickname,
+        avatarUrl: user && member.userId === user.id ? user.avatar : member.avatarUrl,
         trackColor: member.trackColor,
         path:
           user && member.userId === user.id
@@ -2905,6 +3075,8 @@ export default function App() {
                     center={mapCenter}
                     selectedLocation={selectedLocation}
                     currentPosition={visibleCurrentPosition}
+                    currentUserAvatar={user?.avatar}
+                    currentUserNickname={user?.nickname}
                     followCurrentPosition={isTracking}
                     pathCoordinates={visiblePathCoordinates}
                     roomMembers={walkMode === 'advanced' ? roomMapMembers : []}

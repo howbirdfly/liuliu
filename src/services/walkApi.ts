@@ -9,6 +9,7 @@ export interface PathPoint {
 export interface RoomMemberTrack {
   userId: number;
   nickname: string;
+  avatarUrl?: string;
   trackColor: string;
   isOwner?: boolean;
   isTracking?: boolean;
