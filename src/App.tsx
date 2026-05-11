@@ -526,6 +526,15 @@ function hasBroadLocationHint(value?: string) {
   return extractBroadLocationName(value).length > 0;
 }
 
+function pickNearbyPoiTitle(pois?: MapPOI[]) {
+  if (!Array.isArray(pois)) {
+    return '';
+  }
+
+  const matchedPoi = pois.find((poi) => sanitizeCardText(poi.title || '').length > 0);
+  return matchedPoi ? sanitizeCardText(matchedPoi.title) : '';
+}
+
 function escapeXml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -2061,8 +2070,12 @@ export default function App() {
           console.error('Refresh selected location context error:', error);
         }
       }
+      const originPoint =
+        isGenericLocationName(selectedLocation.name) && path.length > 0
+          ? { lat: path[0].lat, lng: path[0].lng }
+          : { lat: selectedLocation.lat, lng: selectedLocation.lng };
       return {
-        locationName: deriveDisplayLocationName(selectedLocation.name, nextLocationContext),
+        locationName: await resolveNearestPoiLocationName(originPoint, selectedLocation.name, nextLocationContext),
         locationContextText: nextLocationContext,
       };
     }
@@ -2077,8 +2090,13 @@ export default function App() {
           console.error('Refresh current geolocation context error:', error);
         }
       }
+      const originPoint = currentPosition
+        ? path.length > 0
+          ? { lat: path[0].lat, lng: path[0].lng }
+          : { lat: currentPosition.lat, lng: currentPosition.lng }
+        : null;
       return {
-        locationName: deriveDisplayLocationName(searchLocation.trim(), nextLocationContext),
+        locationName: await resolveNearestPoiLocationName(originPoint, searchLocation.trim(), nextLocationContext),
         locationContextText: nextLocationContext,
       };
     }
@@ -2093,6 +2111,27 @@ export default function App() {
       locationName: deriveDisplayLocationName('当前位置', locationContext),
       locationContextText: locationContext,
     };
+  };
+
+  const resolveNearestPoiLocationName = async (
+    coordinate: { lat: number; lng: number } | null,
+    fallbackName: string,
+    fallbackContextText: string,
+  ) => {
+    if (!coordinate) {
+      return deriveDisplayLocationName(fallbackName, fallbackContextText);
+    }
+
+    try {
+      const nearestPoiTitle = pickNearbyPoiTitle(await fetchNearbyPois(coordinate.lat, coordinate.lng));
+      if (nearestPoiTitle) {
+        return nearestPoiTitle;
+      }
+    } catch (error) {
+      console.error('Fetch nearby POIs for location name error:', error);
+    }
+
+    return deriveDisplayLocationName(fallbackName, fallbackContextText);
   };
 
   const handleSearchLocation = (query: string) => {
