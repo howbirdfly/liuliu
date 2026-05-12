@@ -39,7 +39,8 @@ import {
   getLocationContext,
   searchLocationContext,
 } from './services/themeService';
-import { createWalk, fetchMyWalks, fetchPublicWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
+import { fetchCommunityFeed, searchCommunityWalks, type CommunityFeedTab, type CommunityWalkItem } from './services/communityApi';
+import { createWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
@@ -1478,10 +1479,14 @@ export default function App() {
   const [myWalks, setMyWalks] = useState<WalkItem[]>([]);
   const [selectedProfileWalk, setSelectedProfileWalk] = useState<WalkItem | null>(null);
   const [profileViewMode, setProfileViewMode] = useState<'feed' | 'post'>('feed');
-  const [communityWalks, setCommunityWalks] = useState<WalkItem[]>([]);
-  const [selectedCommunityWalk, setSelectedCommunityWalk] = useState<WalkItem | null>(null);
+  const [communityWalks, setCommunityWalks] = useState<CommunityWalkItem[]>([]);
+  const [selectedCommunityWalk, setSelectedCommunityWalk] = useState<CommunityWalkItem | null>(null);
   const [communityViewMode, setCommunityViewMode] = useState<'feed' | 'post'>('feed');
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
+  const [communityFeedTab, setCommunityFeedTab] = useState<CommunityFeedTab>('recommend');
+  const [communitySearchInput, setCommunitySearchInput] = useState('');
+  const [communitySearchKeyword, setCommunitySearchKeyword] = useState('');
+  const [communityError, setCommunityError] = useState('');
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileNickname, setProfileNickname] = useState('');
@@ -1583,16 +1588,8 @@ export default function App() {
       return;
     }
 
-    setIsLoadingCommunity(true);
-    fetchPublicWalks(1, 50)
-      .then(setCommunityWalks)
-      .catch((error) => {
-        console.error('Error fetching community walks:', error);
-      })
-      .finally(() => {
-        setIsLoadingCommunity(false);
-      });
-  }, [activeTab]);
+    void loadCommunityWalks();
+  }, [activeTab, communityFeedTab]);
 
   useEffect(() => {
     setProfileNickname(user?.nickname || '');
@@ -1804,6 +1801,14 @@ export default function App() {
   }, [communityReferencePoint, communityWalks]);
   const communityPublisherName = user?.nickname?.trim() || '社区漫步者';
   const communityPublisherAvatar = user?.avatar?.trim() || '';
+  const displayedCommunityWalks = useMemo(() => {
+    if (!communityReferencePoint || communitySearchKeyword.trim() || communityFeedTab !== 'recommend') {
+      return communityWalks;
+    }
+
+    return visibleCommunityWalks;
+  }, [communityFeedTab, communityReferencePoint, communitySearchKeyword, communityWalks, visibleCommunityWalks]);
+  const resolvedCommunityPublisherName = communityPublisherName;
 
   const roomThemeSnapshot = useMemo(
     () =>
@@ -2024,6 +2029,35 @@ export default function App() {
       }
     } catch (error) {
       console.error('Fetch recent walks error:', error);
+    }
+  };
+
+  const loadCommunityWalks = async (options?: {
+    tab?: CommunityFeedTab;
+    keyword?: string;
+  }) => {
+    const nextTab = options?.tab ?? communityFeedTab;
+    const nextKeyword = (options?.keyword ?? communitySearchKeyword).trim();
+
+    setIsLoadingCommunity(true);
+    setCommunityError('');
+    try {
+      const data = nextKeyword
+        ? await searchCommunityWalks(nextKeyword, 1, 30)
+        : await fetchCommunityFeed(nextTab, 1, 30);
+      setCommunityWalks(data);
+      setSelectedCommunityWalk((prev) => {
+        if (!prev) {
+          return null;
+        }
+        return data.find((item) => item.id === prev.id) ?? null;
+      });
+    } catch (error) {
+      console.error('Error fetching community walks:', error);
+      setCommunityWalks([]);
+      setCommunityError(nextKeyword ? '社区搜索失败，请稍后再试。' : '社区内容加载失败，请稍后再试。');
+    } finally {
+      setIsLoadingCommunity(false);
     }
   };
 
@@ -2588,12 +2622,35 @@ export default function App() {
         setSelectedCommunityWalk(preview);
       }
       const detail = await fetchWalkDetail(walkId);
-      setSelectedCommunityWalk(detail);
+      setSelectedCommunityWalk((preview ? { ...preview, ...detail } : detail) as CommunityWalkItem);
     } catch (error) {
       console.error('Fetch community walk detail error:', error);
       setCommunityViewMode('feed');
     } finally {
       setIsLoadingCommunity(false);
+    }
+  };
+
+  const handleCommunitySearchSubmit = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const keyword = communitySearchInput.trim();
+    setCommunitySearchKeyword(keyword);
+    setCommunityViewMode('feed');
+    setSelectedCommunityWalk(null);
+
+    if (activeTab === 'community') {
+      await loadCommunityWalks({ keyword });
+    }
+  };
+
+  const handleCommunitySearchReset = async () => {
+    setCommunitySearchInput('');
+    setCommunitySearchKeyword('');
+    setCommunityViewMode('feed');
+    setSelectedCommunityWalk(null);
+
+    if (activeTab === 'community') {
+      await loadCommunityWalks({ keyword: '', tab: communityFeedTab });
     }
   };
 
@@ -3409,7 +3466,7 @@ export default function App() {
                       {communityPublisherAvatar ? (
                         <img
                           src={communityPublisherAvatar}
-                          alt={communityPublisherName}
+                          alt={resolvedCommunityPublisherName}
                           className="h-12 w-12 rounded-full object-cover"
                         />
                       ) : (
@@ -3418,7 +3475,7 @@ export default function App() {
                         </div>
                       )}
                       <div>
-                        <div className="font-medium text-slate-900">{communityPublisherName}</div>
+                        <div className="font-medium text-slate-900">{resolvedCommunityPublisherName}</div>
                         <div className="mt-1 text-xs text-slate-500">头像将显示为真实作者头像</div>
                       </div>
                     </div>
@@ -3531,6 +3588,15 @@ export default function App() {
                       <span className="rounded-full bg-slate-100 px-3 py-1.5">
                         距离 {(calculatePathDistance(selectedCommunityWalk.path || []) / 1000).toFixed(2)} km
                       </span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                        Likes {selectedCommunityWalk.likeCount || 0} · Saves {selectedCommunityWalk.favoriteCount || 0} ·
+                        {' '}Views {selectedCommunityWalk.viewCount || 0}
+                      </span>
+                      {selectedCommunityWalk.tags?.map((tag) => (
+                        <span key={tag} className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">
+                          #{tag}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
@@ -3596,16 +3662,88 @@ export default function App() {
                   </div>
                   {isLoadingCommunity && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
                 </div>
+                <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <form onSubmit={handleCommunitySearchSubmit} className="flex w-full max-w-2xl items-center gap-3">
+                    <label className="flex min-w-0 flex-1 items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 py-3">
+                      <Search className="h-4 w-4 text-slate-400" />
+                      <input
+                        value={communitySearchInput}
+                        onChange={(event) => setCommunitySearchInput(event.target.value)}
+                        placeholder="搜索主题、地点、作者或标签"
+                        className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-full bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
+                    >
+                      搜索
+                    </button>
+                    {communitySearchKeyword ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleCommunitySearchReset()}
+                        className="rounded-full border border-slate-200 px-4 py-3 text-sm text-slate-600 transition hover:bg-slate-50"
+                      >
+                        清空
+                      </button>
+                    ) : null}
+                  </form>
+
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ['recommend', '推荐'],
+                      ['latest', '最新'],
+                      ['hot', '热门'],
+                    ] as Array<[CommunityFeedTab, string]>).map(([tab, label]) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => {
+                          setCommunityFeedTab(tab);
+                          setCommunityViewMode('feed');
+                          setSelectedCommunityWalk(null);
+                        }}
+                        className={`rounded-full px-4 py-2 text-sm transition ${
+                          communityFeedTab === tab && !communitySearchKeyword
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {communitySearchKeyword ? (
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                      搜索 “{communitySearchKeyword}”
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                      当前频道：
+                      {communityFeedTab === 'recommend'
+                        ? '推荐'
+                        : communityFeedTab === 'latest'
+                        ? '最新'
+                        : '热门'}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-slate-100 px-3 py-1.5">共 {displayedCommunityWalks.length} 条内容</span>
+                </div>
               </section>
 
               <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                {visibleCommunityWalks.length === 0 ? (
+                {communityError ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-600">{communityError}</div>
+                ) : displayedCommunityWalks.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
                     暂时还没有社区内容，等你来发布第一条记录。
                   </div>
                 ) : (
                   <div className="columns-1 gap-5 md:columns-2 xl:columns-3">
-                    {visibleCommunityWalks.map((walk) => (
+                    {displayedCommunityWalks.map((walk) => (
                       <article
                         key={walk.id}
                         className="mb-5 break-inside-avoid overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
@@ -3646,6 +3784,11 @@ export default function App() {
                               </span>
                               <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
                               {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
+                              {walk.tags?.slice(0, 2).map((tag) => (
+                                <span key={tag} className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">
+                                  #{tag}
+                                </span>
+                              ))}
                             </div>
 
                             <div className="flex items-center justify-between pt-1">
@@ -3663,7 +3806,12 @@ export default function App() {
                                 )}
                                 <div className="text-sm text-slate-600">{walk.authorNickname || '社区漫步者'}</div>
                               </div>
-                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
+                              <div className="text-right">
+                                <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
+                                <div className="mt-1 text-[11px] text-slate-400">
+                                  赞 {walk.likeCount || 0} · 藏 {walk.favoriteCount || 0} · 看 {walk.viewCount || 0}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </button>

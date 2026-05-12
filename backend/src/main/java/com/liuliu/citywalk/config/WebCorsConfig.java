@@ -73,7 +73,8 @@ public class WebCorsConfig implements WebMvcConfigurer {
                         "/api/v1/auth/email/register",
                         "/api/v1/auth/email/login",
                         "/api/v1/auth/email/reset-password",
-                        "/api/v1/auth/wechat/**"
+                        "/api/v1/auth/wechat/**",
+                        "/api/v1/community/**"
                 );
     }
 

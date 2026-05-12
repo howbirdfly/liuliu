@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.CommunityMapper">
+
+    <resultMap id="CommunityWalkQueryRowMap" type="com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="themeTitle" column="theme_title"/>
+        <result property="themeSnapshot" column="theme_snapshot"/>
+        <result property="locationName" column="location_name"/>
+        <result property="routePoints" column="route_points"/>
+        <result property="missionsCompleted" column="missions_completed"/>
+        <result property="coverImage" column="cover_image"/>
+        <result property="noteText" column="note_text"/>
+        <result property="isPublic" column="is_public"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="authorNickname" column="author_nickname"/>
+        <result property="authorAvatar" column="author_avatar"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="favoriteCount" column="favorite_count"/>
+        <result property="viewCount" column="view_count"/>
+        <result property="tags" column="tags"/>
+    </resultMap>
+
+    <sql id="CommunityWalkSelect">
+        select
+            wr.id,
+            wr.user_id,
+            wr.theme_title,
+            wr.theme_snapshot,
+            wr.location_name,
+            wr.route_points,
+            wr.missions_completed,
+            wr.cover_image,
+            wr.note_text,
+            wr.is_public,
+            wr.created_at,
+            u.nickname as author_nickname,
+            u.avatar_url as author_avatar,
+            ifnull(wr.like_count, 0) as like_count,
+            ifnull(wr.favorite_count, 0) as favorite_count,
+            ifnull(wr.view_count, 0) as view_count,
+            group_concat(distinct wrt.tag_name order by wrt.tag_name separator '||') as tags
+        from walk_records wr
+        left join users u on u.id = wr.user_id
+        left join walk_record_tags wrt on wrt.walk_id = wr.id
+    </sql>
+
+    <sql id="CommunityWalkGroupBy">
+        group by
+            wr.id, wr.user_id, wr.theme_title, wr.theme_snapshot, wr.location_name,
+            wr.route_points, wr.missions_completed, wr.cover_image, wr.note_text,
+            wr.is_public, wr.created_at, u.nickname, u.avatar_url,
+            wr.like_count, wr.favorite_count, wr.view_count
+    </sql>
+
+    <select id="searchPublicWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        where wr.is_public = 1
+          and wr.status = 'active'
+          and (
+            wr.theme_title like concat('%', #{keyword}, '%')
+            or ifnull(wr.location_name, '') like concat('%', #{keyword}, '%')
+            or ifnull(wr.note_text, '') like concat('%', #{keyword}, '%')
+            or ifnull(u.nickname, '') like concat('%', #{keyword}, '%')
+            or exists (
+                select 1
+                from walk_record_tags wrt2
+                where wrt2.walk_id = wr.id
+                  and wrt2.tag_name like concat('%', #{keyword}, '%')
+            )
+          )
+        <include refid="CommunityWalkGroupBy"/>
+        order by wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="listLatestPublicWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        where wr.is_public = 1
+          and wr.status = 'active'
+        <include refid="CommunityWalkGroupBy"/>
+        order by wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="listHotPublicWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        where wr.is_public = 1
+          and wr.status = 'active'
+        <include refid="CommunityWalkGroupBy"/>
+        order by
+          (
+            ifnull(wr.like_count, 0) * 3
+            + ifnull(wr.favorite_count, 0) * 4
+            + ifnull(wr.view_count, 0) * 0.2
+            + case when ifnull(wr.cover_image, '') &lt;&gt; '' then 5 else 0 end
+            + case when ifnull(wr.route_points, '') &lt;&gt; '' and wr.route_points &lt;&gt; '[]' then 3 else 0 end
+          ) desc,
+          wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="listRecommendedPublicWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        where wr.is_public = 1
+          and wr.status = 'active'
+        <include refid="CommunityWalkGroupBy"/>
+        order by
+          (
+            ifnull(wr.like_count, 0) * 3
+            + ifnull(wr.favorite_count, 0) * 4
+            + ifnull(wr.view_count, 0) * 0.2
+            + case when ifnull(wr.cover_image, '') &lt;&gt; '' then 5 else 0 end
+            + case when ifnull(wr.route_points, '') &lt;&gt; '' and wr.route_points &lt;&gt; '[]' then 3 else 0 end
+            + case
+                when timestampdiff(hour, wr.created_at, now()) &lt;= 24 then 8
+                when timestampdiff(hour, wr.created_at, now()) &lt;= 72 then 4
+                else 0
+              end
+          ) desc,
+          wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+</mapper>
