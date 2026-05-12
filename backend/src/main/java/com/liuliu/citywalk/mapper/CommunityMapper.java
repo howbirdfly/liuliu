@@ -10,15 +10,27 @@ import java.util.List;
 public interface CommunityMapper {
 
     List<CommunityWalkQueryRow> searchPublicWalks(@Param("keyword") String keyword,
+                                                  @Param("currentUserId") Long currentUserId,
                                                   @Param("limit") int limit,
                                                   @Param("offset") int offset);
 
-    List<CommunityWalkQueryRow> listLatestPublicWalks(@Param("limit") int limit,
+    List<CommunityWalkQueryRow> listLatestPublicWalks(@Param("currentUserId") Long currentUserId,
+                                                      @Param("limit") int limit,
                                                       @Param("offset") int offset);
 
-    List<CommunityWalkQueryRow> listHotPublicWalks(@Param("limit") int limit,
+    List<CommunityWalkQueryRow> listHotPublicWalks(@Param("currentUserId") Long currentUserId,
+                                                   @Param("limit") int limit,
                                                    @Param("offset") int offset);
 
-    List<CommunityWalkQueryRow> listRecommendedPublicWalks(@Param("limit") int limit,
+    List<CommunityWalkQueryRow> listRecommendedPublicWalks(@Param("currentUserId") Long currentUserId,
+                                                           @Param("limit") int limit,
                                                            @Param("offset") int offset);
+
+    List<CommunityWalkQueryRow> listLikedWalks(@Param("currentUserId") Long currentUserId,
+                                               @Param("limit") int limit,
+                                               @Param("offset") int offset);
+
+    List<CommunityWalkQueryRow> listFavoritedWalks(@Param("currentUserId") Long currentUserId,
+                                                   @Param("limit") int limit,
+                                                   @Param("offset") int offset);
 }

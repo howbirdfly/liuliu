@@ -14,6 +14,9 @@ import {
   UserRound,
   Users,
   Check,
+  Heart,
+  Bookmark,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   AppUser,
@@ -39,7 +42,19 @@ import {
   getLocationContext,
   searchLocationContext,
 } from './services/themeService';
-import { fetchCommunityFeed, searchCommunityWalks, type CommunityFeedTab, type CommunityWalkItem } from './services/communityApi';
+import {
+  favoriteCommunityWalk,
+  fetchCommunityFeed,
+  fetchMyFavoritedCommunityWalks,
+  fetchMyLikedCommunityWalks,
+  likeCommunityWalk,
+  searchCommunityWalks,
+  unfavoriteCommunityWalk,
+  unlikeCommunityWalk,
+  type CommunityEngagementState,
+  type CommunityFeedTab,
+  type CommunityWalkItem,
+} from './services/communityApi';
 import { createWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
@@ -1477,8 +1492,11 @@ export default function App() {
   const [checkedMissions, setCheckedMissions] = useState<string[]>([]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
   const [myWalks, setMyWalks] = useState<WalkItem[]>([]);
+  const [likedWalks, setLikedWalks] = useState<CommunityWalkItem[]>([]);
+  const [favoritedWalks, setFavoritedWalks] = useState<CommunityWalkItem[]>([]);
   const [selectedProfileWalk, setSelectedProfileWalk] = useState<WalkItem | null>(null);
   const [profileViewMode, setProfileViewMode] = useState<'feed' | 'post'>('feed');
+  const [profileCollectionTab, setProfileCollectionTab] = useState<'mine' | 'favorited' | 'liked'>('mine');
   const [communityWalks, setCommunityWalks] = useState<CommunityWalkItem[]>([]);
   const [selectedCommunityWalk, setSelectedCommunityWalk] = useState<CommunityWalkItem | null>(null);
   const [communityViewMode, setCommunityViewMode] = useState<'feed' | 'post'>('feed');
@@ -1487,6 +1505,7 @@ export default function App() {
   const [communitySearchInput, setCommunitySearchInput] = useState('');
   const [communitySearchKeyword, setCommunitySearchKeyword] = useState('');
   const [communityError, setCommunityError] = useState('');
+  const [showCommunityFilterMenu, setShowCommunityFilterMenu] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileNickname, setProfileNickname] = useState('');
@@ -1796,8 +1815,7 @@ export default function App() {
         const leftCreatedAt = left.createdAt || 0;
         const rightCreatedAt = right.createdAt || 0;
         return rightCreatedAt - leftCreatedAt;
-      })
-      .slice(0, 10);
+      });
   }, [communityReferencePoint, communityWalks]);
   const communityPublisherName = user?.nickname?.trim() || '社区漫步者';
   const communityPublisherAvatar = user?.avatar?.trim() || '';
@@ -2010,21 +2028,30 @@ export default function App() {
     if (!currentUser) {
       setHistory([]);
       setMyWalks([]);
+      setLikedWalks([]);
+      setFavoritedWalks([]);
       setSelectedProfileWalk(null);
       return;
     }
     try {
-      const data = await fetchMyWalks(1, 10);
-      setMyWalks(data);
-      setHistory(data.map((item) => toThemeFromWalk(item)));
+      const [ownWalks, likedItems, favoritedItems] = await Promise.all([
+        fetchMyWalks(1, 10),
+        fetchMyLikedCommunityWalks(1, 20),
+        fetchMyFavoritedCommunityWalks(1, 20),
+      ]);
+      setMyWalks(ownWalks);
+      setLikedWalks(likedItems);
+      setFavoritedWalks(favoritedItems);
+      setHistory(ownWalks.map((item) => toThemeFromWalk(item)));
       setSelectedProfileWalk((prev) => {
         if (prev) {
-          const matched = data.find((item) => item.id === prev.id);
-          return matched ?? data[0] ?? null;
+          const mergedWalks = [...ownWalks, ...favoritedItems, ...likedItems];
+          const matched = mergedWalks.find((item) => item.id === prev.id);
+          return matched ?? ownWalks[0] ?? favoritedItems[0] ?? likedItems[0] ?? null;
         }
-        return data[0] ?? null;
+        return ownWalks[0] ?? null;
       });
-      if (data.length === 0) {
+      if (ownWalks.length === 0) {
         return;
       }
     } catch (error) {
@@ -2588,8 +2615,11 @@ export default function App() {
     } finally {
       setUser(null);
       setMyWalks([]);
+      setLikedWalks([]);
+      setFavoritedWalks([]);
       setSelectedProfileWalk(null);
       setProfileViewMode('feed');
+      setProfileCollectionTab('mine');
       setShowProfileEditor(false);
       setProfileMessage('');
     }
@@ -2599,12 +2629,12 @@ export default function App() {
     setIsLoadingProfile(true);
     setProfileViewMode('post');
     try {
-      const preview = myWalks.find((walk) => walk.id === walkId);
+      const preview = profileWalkSource.find((walk) => walk.id === walkId) || myWalks.find((walk) => walk.id === walkId);
       if (preview) {
         setSelectedProfileWalk(preview);
       }
       const detail = await fetchWalkDetail(walkId);
-      setSelectedProfileWalk(detail);
+      setSelectedProfileWalk(preview ? { ...preview, ...detail } : detail);
     } catch (error) {
       console.error('Fetch walk detail error:', error);
       setProfileViewMode('feed');
@@ -2631,12 +2661,137 @@ export default function App() {
     }
   };
 
+  const profileWalkSource = useMemo(() => {
+    if (profileCollectionTab === 'favorited') {
+      return favoritedWalks;
+    }
+    if (profileCollectionTab === 'liked') {
+      return likedWalks;
+    }
+    return myWalks;
+  }, [favoritedWalks, likedWalks, myWalks, profileCollectionTab]);
+  const profileCollectionMeta = useMemo(() => {
+    if (profileCollectionTab === 'favorited') {
+      return {
+        title: '我的收藏',
+        description: '把你收藏过的公开漫步帖子集中放在这里，方便随时回看和继续找灵感。',
+        empty: '你还没有收藏过帖子，去社区逛逛，把喜欢的路线先收进这里吧。',
+      };
+    }
+    if (profileCollectionTab === 'liked') {
+      return {
+        title: '我赞过的',
+        description: '这里会展示你点过赞的帖子，适合回头翻翻那些曾经打动你的漫步瞬间。',
+        empty: '你还没有点赞过帖子，看到喜欢的内容时可以先点个赞留痕。',
+      };
+    }
+    return {
+      title: '我的历史记录',
+      description: '这里像你的漫步帖子流。每一张卡片都可以点开，进入更完整的帖子详情页。',
+      empty: '还没有保存过漫步记录，先去探索页生成一条属于自己的城市帖子吧。',
+    };
+  }, [profileCollectionTab]);
+
+  const applyCommunityEngagementState = (nextState: CommunityEngagementState) => {
+    setCommunityWalks((prev) =>
+      prev.map((walk) =>
+        walk.id === nextState.walkId
+          ? {
+              ...walk,
+              likeCount: nextState.likeCount,
+              favoriteCount: nextState.favoriteCount,
+              liked: nextState.liked,
+              favorited: nextState.favorited,
+            }
+          : walk,
+      ),
+    );
+    setSelectedCommunityWalk((prev) =>
+      prev && prev.id === nextState.walkId
+        ? {
+            ...prev,
+            likeCount: nextState.likeCount,
+            favoriteCount: nextState.favoriteCount,
+            liked: nextState.liked,
+            favorited: nextState.favorited,
+          }
+        : prev,
+    );
+    setLikedWalks((prev) =>
+      prev
+        .map((walk) =>
+          walk.id === nextState.walkId
+            ? {
+                ...walk,
+                likeCount: nextState.likeCount,
+                favoriteCount: nextState.favoriteCount,
+                liked: nextState.liked,
+                favorited: nextState.favorited,
+              }
+            : walk,
+        )
+        .filter((walk) => walk.liked || walk.id !== nextState.walkId),
+    );
+    setFavoritedWalks((prev) =>
+      prev
+        .map((walk) =>
+          walk.id === nextState.walkId
+            ? {
+                ...walk,
+                likeCount: nextState.likeCount,
+                favoriteCount: nextState.favoriteCount,
+                liked: nextState.liked,
+                favorited: nextState.favorited,
+              }
+            : walk,
+        )
+        .filter((walk) => walk.favorited || walk.id !== nextState.walkId),
+    );
+  };
+
+  const handleToggleCommunityLike = async (walk: CommunityWalkItem, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    event?.preventDefault();
+    try {
+      const nextState = walk.liked ? await unlikeCommunityWalk(walk.id) : await likeCommunityWalk(walk.id);
+      applyCommunityEngagementState(nextState);
+      setCommunityError('');
+    } catch (error) {
+      console.error('Toggle community like error:', error);
+      setCommunityError('点赞失败，请先登录后重试。');
+    }
+  };
+
+  const handleToggleCommunityFavorite = async (walk: CommunityWalkItem, event?: React.MouseEvent) => {
+    event?.stopPropagation();
+    event?.preventDefault();
+    try {
+      const nextState = walk.favorited ? await unfavoriteCommunityWalk(walk.id) : await favoriteCommunityWalk(walk.id);
+      applyCommunityEngagementState(nextState);
+      setCommunityError('');
+    } catch (error) {
+      console.error('Toggle community favorite error:', error);
+      setCommunityError('收藏失败，请先登录后重试。');
+    }
+  };
+
+  const getCommunityFeedTabLabel = (tab: CommunityFeedTab) => {
+    if (tab === 'latest') {
+      return '最新';
+    }
+    if (tab === 'hot') {
+      return '最热';
+    }
+    return '推荐';
+  };
+
   const handleCommunitySearchSubmit = async (event?: React.FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
     const keyword = communitySearchInput.trim();
     setCommunitySearchKeyword(keyword);
     setCommunityViewMode('feed');
     setSelectedCommunityWalk(null);
+    setShowCommunityFilterMenu(false);
 
     if (activeTab === 'community') {
       await loadCommunityWalks({ keyword });
@@ -2648,6 +2803,7 @@ export default function App() {
     setCommunitySearchKeyword('');
     setCommunityViewMode('feed');
     setSelectedCommunityWalk(null);
+    setShowCommunityFilterMenu(false);
 
     if (activeTab === 'community') {
       await loadCommunityWalks({ keyword: '', tab: communityFeedTab });
@@ -3598,6 +3754,32 @@ export default function App() {
                         </span>
                       ))}
                     </div>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={(event) => void handleToggleCommunityLike(selectedCommunityWalk, event)}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
+                          selectedCommunityWalk.liked
+                            ? 'bg-rose-50 text-rose-600'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Heart className={`h-4 w-4 ${selectedCommunityWalk.liked ? 'fill-current' : ''}`} />
+                        <span>{selectedCommunityWalk.liked ? '已点赞' : '点赞'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => void handleToggleCommunityFavorite(selectedCommunityWalk, event)}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
+                          selectedCommunityWalk.favorited
+                            ? 'bg-amber-50 text-amber-700'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Bookmark className={`h-4 w-4 ${selectedCommunityWalk.favorited ? 'fill-current' : ''}`} />
+                        <span>{selectedCommunityWalk.favorited ? '已收藏' : '收藏'}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {selectedCommunityWalk.noteText ? (
@@ -3690,7 +3872,46 @@ export default function App() {
                     ) : null}
                   </form>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="relative self-start">
+                    <button
+                      type="button"
+                      onClick={() => setShowCommunityFilterMenu((value) => !value)}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 transition hover:bg-slate-50"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      筛选
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                        {getCommunityFeedTabLabel(communityFeedTab)}
+                      </span>
+                    </button>
+
+                    {showCommunityFilterMenu ? (
+                      <div className="absolute right-0 top-[calc(100%+10px)] z-20 w-44 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                        {(['recommend', 'latest', 'hot'] as CommunityFeedTab[]).map((tab) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => {
+                              setCommunityFeedTab(tab);
+                              setCommunityViewMode('feed');
+                              setSelectedCommunityWalk(null);
+                              setShowCommunityFilterMenu(false);
+                            }}
+                            className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm transition ${
+                              communityFeedTab === tab && !communitySearchKeyword
+                                ? 'bg-slate-900 text-white'
+                                : 'text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{getCommunityFeedTabLabel(tab)}</span>
+                            {communityFeedTab === tab && !communitySearchKeyword ? <Check className="h-4 w-4" /> : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="hidden flex-wrap gap-2">
                     {([
                       ['recommend', '推荐'],
                       ['latest', '最新'],
@@ -3716,6 +3937,16 @@ export default function App() {
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {communitySearchKeyword ? (
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5">搜索 “{communitySearchKeyword}”</span>
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-3 py-1.5">
+                      当前筛选：{getCommunityFeedTabLabel(communityFeedTab)}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-slate-100 px-3 py-1.5">共 {displayedCommunityWalks.length} 条内容</span>
+                </div>
+                <div className="hidden mt-4 flex flex-wrap gap-2 text-xs text-slate-500">
                   {communitySearchKeyword ? (
                     <span className="rounded-full bg-slate-100 px-3 py-1.5">
                       搜索 “{communitySearchKeyword}”
@@ -3813,6 +4044,29 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
+
+                            <div className="flex items-center gap-2 border-t border-slate-100 pt-3">
+                              <button
+                                type="button"
+                                onClick={(event) => void handleToggleCommunityLike(walk, event)}
+                                className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs transition ${
+                                  walk.liked ? 'bg-rose-50 text-rose-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                              >
+                                <Heart className={`h-3.5 w-3.5 ${walk.liked ? 'fill-current' : ''}`} />
+                                <span>{walk.liked ? '已点赞' : '点赞'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => void handleToggleCommunityFavorite(walk, event)}
+                                className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs transition ${
+                                  walk.favorited ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                              >
+                                <Bookmark className={`h-3.5 w-3.5 ${walk.favorited ? 'fill-current' : ''}`} />
+                                <span>{walk.favorited ? '已收藏' : '收藏'}</span>
+                              </button>
+                            </div>
                           </div>
                         </button>
                       </article>
@@ -3827,6 +4081,112 @@ export default function App() {
             {profileViewMode === 'post' && selectedProfileWalk ? (
               <main className="space-y-6">
                 <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-2xl font-semibold text-slate-900">{profileCollectionMeta.title}</h3>
+                      <p className="mt-2 text-sm leading-7 text-slate-500">{profileCollectionMeta.description}</p>
+                    </div>
+                    {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
+                  </div>
+
+                  <div className="mb-6 flex flex-wrap gap-2">
+                    {([
+                      ['mine', '我的记录'],
+                      ['favorited', '我的收藏'],
+                      ['liked', '我赞过的'],
+                    ] as Array<['mine' | 'favorited' | 'liked', string]>).map(([tab, label]) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setProfileCollectionTab(tab)}
+                        className={`rounded-full px-4 py-2 text-sm transition ${
+                          profileCollectionTab === tab
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {profileWalkSource.length === 0 ? (
+                    <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
+                      {profileCollectionMeta.empty}
+                    </div>
+                  ) : (
+                    <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
+                      {profileWalkSource.map((walk) => (
+                        <button
+                          key={walk.id}
+                          onClick={() => void handleOpenProfileWalk(walk.id)}
+                          className="group mb-5 block w-full break-inside-avoid rounded-[28px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                          {walk.photoUrl ? (
+                            <img
+                              src={walk.photoUrl}
+                              alt={walk.themeTitle}
+                              className={`${getProfilePostCoverHeightClass(walk)} w-full rounded-t-[28px] object-cover`}
+                            />
+                          ) : (
+                            <div
+                              className={`${getProfilePostGradient(walk)} ${getProfilePostCoverHeightClass(walk)} flex items-end rounded-t-[28px] px-5 py-5 text-white`}
+                            >
+                              <div>
+                                <div className="text-xs uppercase tracking-[0.2em] text-white/70">
+                                  {walk.themeCategory || '城市漫步'}
+                                </div>
+                                <div className="mt-2 text-2xl font-semibold leading-tight">{walk.themeTitle}</div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-3 px-5 py-4">
+                            <div>
+                              <div className="text-lg font-semibold text-slate-900">{walk.themeTitle}</div>
+                              <p className="mt-2 text-sm leading-7 text-slate-600">{buildProfilePostSummary(walk)}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
+                                <MapPin className="h-3.5 w-3.5" />
+                                {walk.locationName || '未填写地点'}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
+                              {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
+                              {'likeCount' in walk ? (
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
+                                  赞 {(walk as CommunityWalkItem).likeCount || 0}
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={
+                                    walk.authorAvatar ||
+                                    profileAvatarPreview ||
+                                    user?.avatar ||
+                                    'https://placehold.co/40x40?text=U'
+                                  }
+                                  alt="author avatar"
+                                  className="h-8 w-8 rounded-full object-cover"
+                                />
+                                <div className="text-sm text-slate-600">
+                                  {walk.authorNickname || user?.nickname || '我的记录'}
+                                </div>
+                              </div>
+                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="hidden rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                   <button
                     onClick={() => {
                       setProfileViewMode('feed');
@@ -3840,7 +4200,12 @@ export default function App() {
                   <article className="mx-auto max-w-3xl space-y-6">
                     <div className="flex items-center gap-3">
                       <img
-                        src={profileAvatarPreview || user?.avatar || 'https://placehold.co/80x80?text=U'}
+                        src={
+                          selectedProfileWalk.authorAvatar ||
+                          profileAvatarPreview ||
+                          user?.avatar ||
+                          'https://placehold.co/80x80?text=U'
+                        }
                         alt="author avatar"
                         className="h-12 w-12 rounded-full object-cover"
                       />

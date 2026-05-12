@@ -16,4 +16,6 @@ public interface WalkRecordMapper {
     List<WalkRecordEntity> findPublicActive(@Param("limit") int limit);
 
     WalkRecordEntity findActiveById(@Param("id") Long id);
+
+    WalkRecordEntity findPublicActiveById(@Param("id") Long id);
 }

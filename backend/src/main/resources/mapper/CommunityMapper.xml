@@ -21,6 +21,8 @@
         <result property="likeCount" column="like_count"/>
         <result property="favoriteCount" column="favorite_count"/>
         <result property="viewCount" column="view_count"/>
+        <result property="liked" column="liked"/>
+        <result property="favorited" column="favorited"/>
         <result property="tags" column="tags"/>
     </resultMap>
 
@@ -42,6 +44,18 @@
             ifnull(wr.like_count, 0) as like_count,
             ifnull(wr.favorite_count, 0) as favorite_count,
             ifnull(wr.view_count, 0) as view_count,
+            case
+                when #{currentUserId} is not null and exists (
+                    select 1 from walk_record_likes wrl where wrl.walk_id = wr.id and wrl.user_id = #{currentUserId}
+                ) then 1
+                else 0
+            end as liked,
+            case
+                when #{currentUserId} is not null and exists (
+                    select 1 from walk_record_favorites wrf where wrf.walk_id = wr.id and wrf.user_id = #{currentUserId}
+                ) then 1
+                else 0
+            end as favorited,
             group_concat(distinct wrt.tag_name order by wrt.tag_name separator '||') as tags
         from walk_records wr
         left join users u on u.id = wr.user_id
@@ -122,6 +136,28 @@
               end
           ) desc,
           wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="listLikedWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        inner join walk_record_likes profile_like on profile_like.walk_id = wr.id
+        where wr.is_public = 1
+          and wr.status = 'active'
+          and profile_like.user_id = #{currentUserId}
+        <include refid="CommunityWalkGroupBy"/>
+        order by profile_like.created_at desc, wr.created_at desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="listFavoritedWalks" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        inner join walk_record_favorites profile_favorite on profile_favorite.walk_id = wr.id
+        where wr.is_public = 1
+          and wr.status = 'active'
+          and profile_favorite.user_id = #{currentUserId}
+        <include refid="CommunityWalkGroupBy"/>
+        order by profile_favorite.created_at desc, wr.created_at desc
         limit #{limit} offset #{offset}
     </select>
 

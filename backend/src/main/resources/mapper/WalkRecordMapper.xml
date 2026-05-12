@@ -66,4 +66,11 @@
         limit 1
     </select>
 
+    <select id="findPublicActiveById" resultMap="WalkRecordEntityMap">
+        select <include refid="WalkRecordColumns"/>
+        from walk_records
+        where id = #{id} and is_public = 1 and status = 'active'
+        limit 1
+    </select>
+
 </mapper>

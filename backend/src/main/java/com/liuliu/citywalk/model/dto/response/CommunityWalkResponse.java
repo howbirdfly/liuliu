@@ -19,6 +19,8 @@ public record CommunityWalkResponse(
         Long likeCount,
         Long favoriteCount,
         Long viewCount,
+        Boolean liked,
+        Boolean favorited,
         List<String> tags,
         Long createdAt
 ) {

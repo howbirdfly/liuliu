@@ -20,6 +20,8 @@ public class CommunityWalkQueryRow {
     private Integer likeCount;
     private Integer favoriteCount;
     private Integer viewCount;
+    private Boolean liked;
+    private Boolean favorited;
     private String tags;
 
     public Long getId() {
@@ -148,6 +150,22 @@ public class CommunityWalkQueryRow {
 
     public void setViewCount(Integer viewCount) {
         this.viewCount = viewCount;
+    }
+
+    public Boolean getLiked() {
+        return liked;
+    }
+
+    public void setLiked(Boolean liked) {
+        this.liked = liked;
+    }
+
+    public Boolean getFavorited() {
+        return favorited;
+    }
+
+    public void setFavorited(Boolean favorited) {
+        this.favorited = favorited;
     }
 
     public String getTags() {

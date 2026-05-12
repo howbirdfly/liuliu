@@ -3,9 +3,13 @@ package com.liuliu.citywalk.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.mapper.CommunityMapper;
+import com.liuliu.citywalk.mapper.WalkInteractionMapper;
+import com.liuliu.citywalk.mapper.WalkRecordMapper;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
+import com.liuliu.citywalk.model.dto.response.CommunityEngagementResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityWalkResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.util.List;
@@ -18,39 +22,100 @@ public class CommunityService {
     private static final String DEFAULT_AUTHOR_NAME = "Community Walker";
 
     private final CommunityMapper communityMapper;
+    private final WalkRecordMapper walkRecordMapper;
+    private final WalkInteractionMapper walkInteractionMapper;
     private final ObjectMapper objectMapper;
 
-    public CommunityService(CommunityMapper communityMapper, ObjectMapper objectMapper) {
+    public CommunityService(
+            CommunityMapper communityMapper,
+            WalkRecordMapper walkRecordMapper,
+            WalkInteractionMapper walkInteractionMapper,
+            ObjectMapper objectMapper
+    ) {
         this.communityMapper = communityMapper;
+        this.walkRecordMapper = walkRecordMapper;
+        this.walkInteractionMapper = walkInteractionMapper;
         this.objectMapper = objectMapper;
     }
 
-    public List<CommunityWalkResponse> searchWalks(String keyword, int page, int pageSize) {
+    public List<CommunityWalkResponse> searchWalks(String keyword, Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
         String normalizedKeyword = keyword == null ? "" : keyword.trim();
         List<CommunityWalkQueryRow> rows = normalizedKeyword.isEmpty()
-                ? communityMapper.listLatestPublicWalks(limit, offset)
-                : communityMapper.searchPublicWalks(normalizedKeyword, limit, offset);
+                ? communityMapper.listLatestPublicWalks(currentUserId, limit, offset)
+                : communityMapper.searchPublicWalks(normalizedKeyword, currentUserId, limit, offset);
         return rows.stream().map(this::toResponse).toList();
     }
 
-    public List<CommunityWalkResponse> latestFeed(int page, int pageSize) {
+    public List<CommunityWalkResponse> latestFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listLatestPublicWalks(limit, offset).stream().map(this::toResponse).toList();
+        return communityMapper.listLatestPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
     }
 
-    public List<CommunityWalkResponse> hotFeed(int page, int pageSize) {
+    public List<CommunityWalkResponse> hotFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listHotPublicWalks(limit, offset).stream().map(this::toResponse).toList();
+        return communityMapper.listHotPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
     }
 
-    public List<CommunityWalkResponse> recommendFeed(int page, int pageSize) {
+    public List<CommunityWalkResponse> recommendFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listRecommendedPublicWalks(limit, offset).stream().map(this::toResponse).toList();
+        return communityMapper.listRecommendedPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+    }
+
+    public List<CommunityWalkResponse> likedWalks(Long currentUserId, int page, int pageSize) {
+        int limit = normalizePageSize(pageSize);
+        int offset = normalizeOffset(page, limit);
+        return communityMapper.listLikedWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+    }
+
+    public List<CommunityWalkResponse> favoritedWalks(Long currentUserId, int page, int pageSize) {
+        int limit = normalizePageSize(pageSize);
+        int offset = normalizeOffset(page, limit);
+        return communityMapper.listFavoritedWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+    }
+
+    @Transactional
+    public CommunityEngagementResponse likeWalk(Long walkId, Long userId) {
+        ensurePublicWalkExists(walkId);
+        if (!hasLike(walkId, userId)) {
+            walkInteractionMapper.insertLike(walkId, userId);
+            walkInteractionMapper.incrementLikeCount(walkId);
+        }
+        return buildEngagementResponse(walkId, userId);
+    }
+
+    @Transactional
+    public CommunityEngagementResponse unlikeWalk(Long walkId, Long userId) {
+        ensurePublicWalkExists(walkId);
+        if (hasLike(walkId, userId)) {
+            walkInteractionMapper.deleteLike(walkId, userId);
+            walkInteractionMapper.decrementLikeCount(walkId);
+        }
+        return buildEngagementResponse(walkId, userId);
+    }
+
+    @Transactional
+    public CommunityEngagementResponse favoriteWalk(Long walkId, Long userId) {
+        ensurePublicWalkExists(walkId);
+        if (!hasFavorite(walkId, userId)) {
+            walkInteractionMapper.insertFavorite(walkId, userId);
+            walkInteractionMapper.incrementFavoriteCount(walkId);
+        }
+        return buildEngagementResponse(walkId, userId);
+    }
+
+    @Transactional
+    public CommunityEngagementResponse unfavoriteWalk(Long walkId, Long userId) {
+        ensurePublicWalkExists(walkId);
+        if (hasFavorite(walkId, userId)) {
+            walkInteractionMapper.deleteFavorite(walkId, userId);
+            walkInteractionMapper.decrementFavoriteCount(walkId);
+        }
+        return buildEngagementResponse(walkId, userId);
     }
 
     private CommunityWalkResponse toResponse(CommunityWalkQueryRow row) {
@@ -97,8 +162,20 @@ public class CommunityService {
                 longValue(row.getLikeCount()),
                 longValue(row.getFavoriteCount()),
                 longValue(row.getViewCount()),
+                Boolean.TRUE.equals(row.getLiked()),
+                Boolean.TRUE.equals(row.getFavorited()),
                 parseTags(row.getTags()),
                 toEpochMilli(row.getCreatedAt())
+        );
+    }
+
+    private CommunityEngagementResponse buildEngagementResponse(Long walkId, Long userId) {
+        return new CommunityEngagementResponse(
+                walkId,
+                longValue(walkInteractionMapper.findLikeCount(walkId)),
+                longValue(walkInteractionMapper.findFavoriteCount(walkId)),
+                hasLike(walkId, userId),
+                hasFavorite(walkId, userId)
         );
     }
 
@@ -148,5 +225,21 @@ public class CommunityService {
 
     private Long toEpochMilli(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant().toEpochMilli();
+    }
+
+    private void ensurePublicWalkExists(Long walkId) {
+        if (walkId == null || walkId <= 0 || walkRecordMapper.findPublicActiveById(walkId) == null) {
+            throw new IllegalStateException("walk_not_found");
+        }
+    }
+
+    private boolean hasLike(Long walkId, Long userId) {
+        Integer count = walkInteractionMapper.countLike(walkId, userId);
+        return count != null && count > 0;
+    }
+
+    private boolean hasFavorite(Long walkId, Long userId) {
+        Integer count = walkInteractionMapper.countFavorite(walkId, userId);
+        return count != null && count > 0;
     }
 }

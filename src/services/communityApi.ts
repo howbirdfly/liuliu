@@ -7,7 +7,17 @@ export interface CommunityWalkItem extends WalkItem {
   likeCount: number;
   favoriteCount: number;
   viewCount: number;
+  liked?: boolean;
+  favorited?: boolean;
   tags?: string[];
+}
+
+export interface CommunityEngagementState {
+  walkId: number;
+  likeCount: number;
+  favoriteCount: number;
+  liked: boolean;
+  favorited: boolean;
 }
 
 export async function searchCommunityWalks(
@@ -26,4 +36,36 @@ export async function fetchCommunityFeed(
   pageSize = 10,
 ): Promise<CommunityWalkItem[]> {
   return apiRequest<CommunityWalkItem[]>(`/api/v1/community/feed/${tab}?page=${page}&pageSize=${pageSize}`);
+}
+
+export async function fetchMyLikedCommunityWalks(page = 1, pageSize = 20): Promise<CommunityWalkItem[]> {
+  return apiRequest<CommunityWalkItem[]>(`/api/v1/community/me/liked?page=${page}&pageSize=${pageSize}`);
+}
+
+export async function fetchMyFavoritedCommunityWalks(page = 1, pageSize = 20): Promise<CommunityWalkItem[]> {
+  return apiRequest<CommunityWalkItem[]>(`/api/v1/community/me/favorited?page=${page}&pageSize=${pageSize}`);
+}
+
+export async function likeCommunityWalk(walkId: number): Promise<CommunityEngagementState> {
+  return apiRequest<CommunityEngagementState>(`/api/v1/community/walks/${walkId}/like`, {
+    method: 'POST',
+  });
+}
+
+export async function unlikeCommunityWalk(walkId: number): Promise<CommunityEngagementState> {
+  return apiRequest<CommunityEngagementState>(`/api/v1/community/walks/${walkId}/like`, {
+    method: 'DELETE',
+  });
+}
+
+export async function favoriteCommunityWalk(walkId: number): Promise<CommunityEngagementState> {
+  return apiRequest<CommunityEngagementState>(`/api/v1/community/walks/${walkId}/favorite`, {
+    method: 'POST',
+  });
+}
+
+export async function unfavoriteCommunityWalk(walkId: number): Promise<CommunityEngagementState> {
+  return apiRequest<CommunityEngagementState>(`/api/v1/community/walks/${walkId}/favorite`, {
+    method: 'DELETE',
+  });
 }
