@@ -70,6 +70,8 @@ import {
   updateCoCreateRoomState,
   updateCoCreateRoomTheme,
 } from './services/roomApi';
+import { ProfileCommunityEngagementCard } from './components/ProfileCommunityEngagementCard';
+import { ProfileStatsGrid } from './components/ProfileStatsGrid';
 
 type SearchLocation = {
   name: string;
@@ -4293,52 +4295,11 @@ export default function App() {
 
                   <article className="mx-auto max-w-3xl space-y-6">
                     {selectedProfileCommunityWalk ? (
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
-                        <div className="flex flex-wrap gap-2 text-sm text-slate-500">
-                          <span className="rounded-full bg-white px-3 py-1.5">
-                            Likes {selectedProfileCommunityWalk.likeCount || 0}
-                          </span>
-                          <span className="rounded-full bg-white px-3 py-1.5">
-                            Saves {selectedProfileCommunityWalk.favoriteCount || 0}
-                          </span>
-                          <span className="rounded-full bg-white px-3 py-1.5">
-                            Views {selectedProfileCommunityWalk.viewCount || 0}
-                          </span>
-                          {selectedProfileCommunityWalk.tags?.map((tag) => (
-                            <span key={tag} className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-3">
-                          <button
-                            type="button"
-                            onClick={(event) => void handleToggleCommunityLike(selectedProfileCommunityWalk, event)}
-                            className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
-                              selectedProfileCommunityWalk.liked
-                                ? 'bg-rose-50 text-rose-600'
-                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            <Heart className={`h-4 w-4 ${selectedProfileCommunityWalk.liked ? 'fill-current' : ''}`} />
-                            <span>{selectedProfileCommunityWalk.liked ? 'Liked' : 'Like'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(event) => void handleToggleCommunityFavorite(selectedProfileCommunityWalk, event)}
-                            className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
-                              selectedProfileCommunityWalk.favorited
-                                ? 'bg-amber-50 text-amber-700'
-                                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                            }`}
-                          >
-                            <Bookmark
-                              className={`h-4 w-4 ${selectedProfileCommunityWalk.favorited ? 'fill-current' : ''}`}
-                            />
-                            <span>{selectedProfileCommunityWalk.favorited ? 'Saved' : 'Save'}</span>
-                          </button>
-                        </div>
-                      </div>
+                      <ProfileCommunityEngagementCard
+                        walk={selectedProfileCommunityWalk}
+                        onToggleLike={(event) => void handleToggleCommunityLike(selectedProfileCommunityWalk, event)}
+                        onToggleFavorite={(event) => void handleToggleCommunityFavorite(selectedProfileCommunityWalk, event)}
+                      />
                     ) : null}
                     <div className="flex items-center gap-3">
                       <img
@@ -4489,14 +4450,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                    {profileStats.map((item) => (
-                      <div key={item.label} className="rounded-2xl bg-slate-50 px-4 py-4">
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{item.label}</div>
-                        <div className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <ProfileStatsGrid items={profileStats} />
                 </section>
 
                 {showProfileEditor ? (
