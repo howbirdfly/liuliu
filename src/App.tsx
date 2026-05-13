@@ -2738,6 +2738,24 @@ export default function App() {
   }, [selectedProfileWalk]);
 
   const applyCommunityEngagementState = (nextState: CommunityEngagementState) => {
+    const matchedCommunityWalk =
+      (selectedCommunityWalk?.id === nextState.walkId ? selectedCommunityWalk : null) ||
+      (selectedProfileCommunityWalk?.id === nextState.walkId ? selectedProfileCommunityWalk : null) ||
+      communityWalks.find((walk) => walk.id === nextState.walkId) ||
+      likedWalks.find((walk) => walk.id === nextState.walkId) ||
+      favoritedWalks.find((walk) => walk.id === nextState.walkId) ||
+      null;
+
+    const nextWalkSnapshot = matchedCommunityWalk
+      ? {
+          ...matchedCommunityWalk,
+          likeCount: nextState.likeCount,
+          favoriteCount: nextState.favoriteCount,
+          liked: nextState.liked,
+          favorited: nextState.favorited,
+        }
+      : null;
+
     setCommunityWalks((prev) =>
       prev.map((walk) =>
         walk.id === nextState.walkId
@@ -2778,34 +2796,50 @@ export default function App() {
         : prev,
     );
     setLikedWalks((prev) =>
-      prev
-        .map((walk) =>
-          walk.id === nextState.walkId
-            ? {
-                ...walk,
-                likeCount: nextState.likeCount,
-                favoriteCount: nextState.favoriteCount,
-                liked: nextState.liked,
-                favorited: nextState.favorited,
-              }
-            : walk,
-        )
-        .filter((walk) => walk.liked || walk.id !== nextState.walkId),
+      {
+        const updated = prev
+          .map((walk) =>
+            walk.id === nextState.walkId
+              ? {
+                  ...walk,
+                  likeCount: nextState.likeCount,
+                  favoriteCount: nextState.favoriteCount,
+                  liked: nextState.liked,
+                  favorited: nextState.favorited,
+                }
+              : walk,
+          )
+          .filter((walk) => walk.liked || walk.id !== nextState.walkId);
+
+        if (!nextState.liked || !nextWalkSnapshot || updated.some((walk) => walk.id === nextState.walkId)) {
+          return updated;
+        }
+
+        return [nextWalkSnapshot, ...updated];
+      },
     );
     setFavoritedWalks((prev) =>
-      prev
-        .map((walk) =>
-          walk.id === nextState.walkId
-            ? {
-                ...walk,
-                likeCount: nextState.likeCount,
-                favoriteCount: nextState.favoriteCount,
-                liked: nextState.liked,
-                favorited: nextState.favorited,
-              }
-            : walk,
-        )
-        .filter((walk) => walk.favorited || walk.id !== nextState.walkId),
+      {
+        const updated = prev
+          .map((walk) =>
+            walk.id === nextState.walkId
+              ? {
+                  ...walk,
+                  likeCount: nextState.likeCount,
+                  favoriteCount: nextState.favoriteCount,
+                  liked: nextState.liked,
+                  favorited: nextState.favorited,
+                }
+              : walk,
+          )
+          .filter((walk) => walk.favorited || walk.id !== nextState.walkId);
+
+        if (!nextState.favorited || !nextWalkSnapshot || updated.some((walk) => walk.id === nextState.walkId)) {
+          return updated;
+        }
+
+        return [nextWalkSnapshot, ...updated];
+      },
     );
   };
 
