@@ -91,6 +91,15 @@
         limit #{limit} offset #{offset}
     </select>
 
+    <select id="findPublicWalkById" resultMap="CommunityWalkQueryRowMap">
+        <include refid="CommunityWalkSelect"/>
+        where wr.id = #{walkId}
+          and wr.is_public = 1
+          and wr.status = 'active'
+        <include refid="CommunityWalkGroupBy"/>
+        limit 1
+    </select>
+
     <select id="listLatestPublicWalks" resultMap="CommunityWalkQueryRowMap">
         <include refid="CommunityWalkSelect"/>
         where wr.is_public = 1

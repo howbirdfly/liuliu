@@ -79,6 +79,17 @@ public class CommunityService {
     }
 
     @Transactional
+    public CommunityWalkResponse getWalkDetail(Long walkId, Long currentUserId) {
+        ensurePublicWalkExists(walkId);
+        walkInteractionMapper.incrementViewCount(walkId);
+        CommunityWalkQueryRow row = communityMapper.findPublicWalkById(walkId, currentUserId);
+        if (row == null) {
+            throw new IllegalStateException("walk_not_found");
+        }
+        return toResponse(row);
+    }
+
+    @Transactional
     public CommunityEngagementResponse likeWalk(Long walkId, Long userId) {
         ensurePublicWalkExists(walkId);
         if (!hasLike(walkId, userId)) {

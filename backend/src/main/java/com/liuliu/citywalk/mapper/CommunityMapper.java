@@ -9,6 +9,9 @@ import java.util.List;
 @Mapper
 public interface CommunityMapper {
 
+    CommunityWalkQueryRow findPublicWalkById(@Param("walkId") Long walkId,
+                                             @Param("currentUserId") Long currentUserId);
+
     List<CommunityWalkQueryRow> searchPublicWalks(@Param("keyword") String keyword,
                                                   @Param("currentUserId") Long currentUserId,
                                                   @Param("limit") int limit,

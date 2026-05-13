@@ -39,6 +39,15 @@ public class CommunityController {
         return ApiResponse.success(communityService.searchWalks(keyword, resolveOptionalUserId(request), page, pageSize));
     }
 
+    @GetMapping("/walks/{walkId}")
+    public ApiResponse<CommunityWalkResponse> detail(HttpServletRequest request, @PathVariable Long walkId) {
+        try {
+            return ApiResponse.success(communityService.getWalkDetail(walkId, resolveOptionalUserId(request)));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
+        }
+    }
+
     @GetMapping("/feed/latest")
     public ApiResponse<List<CommunityWalkResponse>> latest(
             HttpServletRequest request,
@@ -75,7 +84,7 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.likedWalks(resolveRequiredUserId(request), page, pageSize));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
     }
 
@@ -88,7 +97,7 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.favoritedWalks(resolveRequiredUserId(request), page, pageSize));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
     }
 
@@ -97,7 +106,7 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.likeWalk(walkId, resolveRequiredUserId(request)));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
     }
 
@@ -106,7 +115,7 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.unlikeWalk(walkId, resolveRequiredUserId(request)));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
     }
 
@@ -115,7 +124,7 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.favoriteWalk(walkId, resolveRequiredUserId(request)));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
     }
 
@@ -124,8 +133,16 @@ public class CommunityController {
         try {
             return ApiResponse.success(communityService.unfavoriteWalk(walkId, resolveRequiredUserId(request)));
         } catch (IllegalStateException error) {
-            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
+    }
+
+    private int resolveBusinessErrorCode(IllegalStateException error) {
+        return switch (error.getMessage()) {
+            case "login_required" -> 401;
+            case "walk_not_found" -> 404;
+            default -> 400;
+        };
     }
 
     private Long resolveRequiredUserId(HttpServletRequest request) {

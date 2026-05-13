@@ -38,6 +38,10 @@ export async function fetchCommunityFeed(
   return apiRequest<CommunityWalkItem[]>(`/api/v1/community/feed/${tab}?page=${page}&pageSize=${pageSize}`);
 }
 
+export async function fetchCommunityWalkDetail(walkId: number): Promise<CommunityWalkItem> {
+  return apiRequest<CommunityWalkItem>(`/api/v1/community/walks/${walkId}`);
+}
+
 export async function fetchMyLikedCommunityWalks(page = 1, pageSize = 20): Promise<CommunityWalkItem[]> {
   return apiRequest<CommunityWalkItem[]>(`/api/v1/community/me/liked?page=${page}&pageSize=${pageSize}`);
 }

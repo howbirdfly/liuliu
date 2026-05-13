@@ -45,6 +45,7 @@ import {
 import {
   favoriteCommunityWalk,
   fetchCommunityFeed,
+  fetchCommunityWalkDetail,
   fetchMyFavoritedCommunityWalks,
   fetchMyLikedCommunityWalks,
   likeCommunityWalk,
@@ -2651,8 +2652,9 @@ export default function App() {
       if (preview) {
         setSelectedCommunityWalk(preview);
       }
-      const detail = await fetchWalkDetail(walkId);
-      setSelectedCommunityWalk((preview ? { ...preview, ...detail } : detail) as CommunityWalkItem);
+      const detail = await fetchCommunityWalkDetail(walkId);
+      setCommunityWalks((prev) => prev.map((walk) => (walk.id === walkId ? { ...walk, ...detail } : walk)));
+      setSelectedCommunityWalk(preview ? { ...preview, ...detail } : detail);
     } catch (error) {
       console.error('Fetch community walk detail error:', error);
       setCommunityViewMode('feed');
@@ -2691,6 +2693,27 @@ export default function App() {
       empty: '还没有保存过漫步记录，先去探索页生成一条属于自己的城市帖子吧。',
     };
   }, [profileCollectionTab]);
+  const profileStats = useMemo(() => {
+    if (profileCollectionTab === 'favorited') {
+      return [
+        { label: '收藏总数', value: favoritedWalks.length },
+        { label: '公开帖子', value: favoritedWalks.filter((item) => item.isPublic).length },
+        { label: '带照片帖子', value: favoritedWalks.filter((item) => Boolean(item.photoUrl)).length },
+      ];
+    }
+    if (profileCollectionTab === 'liked') {
+      return [
+        { label: '点赞总数', value: likedWalks.length },
+        { label: '公开帖子', value: likedWalks.filter((item) => item.isPublic).length },
+        { label: '带照片帖子', value: likedWalks.filter((item) => Boolean(item.photoUrl)).length },
+      ];
+    }
+    return [
+      { label: '记录总数', value: myWalks.length },
+      { label: '公开记录', value: myWalks.filter((item) => item.isPublic).length },
+      { label: '带照片记录', value: myWalks.filter((item) => Boolean(item.photoUrl)).length },
+    ];
+  }, [favoritedWalks, likedWalks, myWalks, profileCollectionTab]);
 
   const applyCommunityEngagementState = (nextState: CommunityEngagementState) => {
     setCommunityWalks((prev) =>
@@ -4348,22 +4371,12 @@ export default function App() {
                   </div>
 
                   <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">记录总数</div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">{myWalks.length}</div>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">公开记录</div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">
-                        {myWalks.filter((item) => item.isPublic).length}
+                    {profileStats.map((item) => (
+                      <div key={item.label} className="rounded-2xl bg-slate-50 px-4 py-4">
+                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{item.label}</div>
+                        <div className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</div>
                       </div>
-                    </div>
-                    <div className="rounded-2xl bg-slate-50 px-4 py-4">
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">带照片记录</div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">
-                        {myWalks.filter((item) => Boolean(item.photoUrl)).length}
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </section>
 
@@ -4468,21 +4481,40 @@ export default function App() {
                 <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                   <div className="mb-6 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-2xl font-semibold text-slate-900">我的历史记录</h3>
-                      <p className="mt-2 text-sm leading-7 text-slate-500">
-                        这里像你的漫步帖子流。每一张卡片都可以点开，进入更完整的帖子详情页。
-                      </p>
+                      <h3 className="text-2xl font-semibold text-slate-900">{profileCollectionMeta.title}</h3>
+                      <p className="mt-2 text-sm leading-7 text-slate-500">{profileCollectionMeta.description}</p>
                     </div>
                     {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
                   </div>
 
-                  {myWalks.length === 0 ? (
+                  <div className="mb-6 flex flex-wrap gap-2">
+                    {([
+                      ['mine', '我的记录'],
+                      ['favorited', '我的收藏'],
+                      ['liked', '我赞过的'],
+                    ] as Array<['mine' | 'favorited' | 'liked', string]>).map(([tab, label]) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => setProfileCollectionTab(tab)}
+                        className={`rounded-full px-4 py-2 text-sm transition ${
+                          profileCollectionTab === tab
+                            ? 'bg-slate-900 text-white'
+                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {profileWalkSource.length === 0 ? (
                     <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
-                      还没有保存过漫步记录，先去探索页生成一条属于自己的城市帖子吧。
+                      {profileCollectionMeta.empty}
                     </div>
                   ) : (
                     <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
-                      {myWalks.map((walk) => (
+                      {profileWalkSource.map((walk) => (
                         <button
                           key={walk.id}
                           onClick={() => void handleOpenProfileWalk(walk.id)}
@@ -4520,16 +4552,33 @@ export default function App() {
                               </span>
                               <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
                               {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
+                              {'likeCount' in walk ? (
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
+                                  赞 {(walk as CommunityWalkItem).likeCount || 0}
+                                </span>
+                              ) : null}
+                              {'favoriteCount' in walk ? (
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
+                                  藏 {(walk as CommunityWalkItem).favoriteCount || 0}
+                                </span>
+                              ) : null}
                             </div>
 
                             <div className="flex items-center justify-between pt-1">
                               <div className="flex items-center gap-2">
                                 <img
-                                  src={profileAvatarPreview || user?.avatar || 'https://placehold.co/40x40?text=U'}
+                                  src={
+                                    walk.authorAvatar ||
+                                    profileAvatarPreview ||
+                                    user?.avatar ||
+                                    'https://placehold.co/40x40?text=U'
+                                  }
                                   alt="author avatar"
                                   className="h-8 w-8 rounded-full object-cover"
                                 />
-                                <div className="text-sm text-slate-600">{user?.nickname || '我的记录'}</div>
+                                <div className="text-sm text-slate-600">
+                                  {walk.authorNickname || user?.nickname || '我的记录'}
+                                </div>
                               </div>
                               <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
                             </div>
