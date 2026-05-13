@@ -4011,6 +4011,9 @@ export default function App() {
                               <img
                                 src={
                                   comment.authorAvatar ||
+                                  (comment.authorId === selectedCommunityWalk.authorId
+                                    ? selectedCommunityWalk.authorAvatar
+                                    : undefined) ||
                                   (comment.authorId === user?.id ? user?.avatar : undefined) ||
                                   'https://placehold.co/64x64?text=U'
                                 }
@@ -4041,6 +4044,9 @@ export default function App() {
                                         <img
                                           src={
                                             reply.authorAvatar ||
+                                            (reply.authorId === selectedCommunityWalk.authorId
+                                              ? selectedCommunityWalk.authorAvatar
+                                              : undefined) ||
                                             (reply.authorId === user?.id ? user?.avatar : undefined) ||
                                             'https://placehold.co/64x64?text=U'
                                           }

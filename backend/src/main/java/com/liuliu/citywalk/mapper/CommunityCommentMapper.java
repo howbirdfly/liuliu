@@ -15,14 +15,14 @@ public interface CommunityCommentMapper {
 
     @Select("""
             select
-                c.id,
-                c.walk_id,
-                c.parent_id,
-                c.user_id,
-                c.content,
-                c.created_at,
-                u.nickname as author_nickname,
-                u.avatar_url as author_avatar
+                c.id as id,
+                c.walk_id as walkId,
+                c.parent_id as parentId,
+                c.user_id as userId,
+                c.content as content,
+                c.created_at as createdAt,
+                u.nickname as authorNickname,
+                u.avatar_url as authorAvatar
             from walk_record_comments c
             left join users u on u.id = c.user_id
             where c.walk_id = #{walkId}
@@ -33,14 +33,14 @@ public interface CommunityCommentMapper {
 
     @Select("""
             select
-                c.id,
-                c.walk_id,
-                c.parent_id,
-                c.user_id,
-                c.content,
-                c.created_at,
-                u.nickname as author_nickname,
-                u.avatar_url as author_avatar
+                c.id as id,
+                c.walk_id as walkId,
+                c.parent_id as parentId,
+                c.user_id as userId,
+                c.content as content,
+                c.created_at as createdAt,
+                u.nickname as authorNickname,
+                u.avatar_url as authorAvatar
             from walk_record_comments c
             left join users u on u.id = c.user_id
             where c.id = #{commentId}
