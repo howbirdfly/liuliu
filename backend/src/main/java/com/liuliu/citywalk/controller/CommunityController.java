@@ -1,12 +1,16 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.model.dto.request.CommunityCommentCreateRequest;
+import com.liuliu.citywalk.model.dto.response.CommunityCommentResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityEngagementResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityWalkResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
 import com.liuliu.citywalk.service.CommunityService;
+import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -43,6 +47,29 @@ public class CommunityController {
     public ApiResponse<CommunityWalkResponse> detail(HttpServletRequest request, @PathVariable Long walkId) {
         try {
             return ApiResponse.success(communityService.getWalkDetail(walkId, resolveOptionalUserId(request)));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
+        }
+    }
+
+    @GetMapping("/walks/{walkId}/comments")
+    public ApiResponse<List<CommunityCommentResponse>> comments(@PathVariable Long walkId) {
+        try {
+            return ApiResponse.success(communityService.listComments(walkId));
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
+        }
+    }
+
+    @PostMapping("/walks/{walkId}/comments")
+    public ApiResponse<CommunityCommentResponse> createComment(
+            HttpServletRequest request,
+            @PathVariable Long walkId,
+            @Valid @RequestBody CommunityCommentCreateRequest body
+    ) {
+        try {
+            Long userId = resolveRequiredUserId(request);
+            return ApiResponse.success(communityService.createComment(walkId, userId, body));
         } catch (IllegalStateException error) {
             return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }
@@ -141,6 +168,7 @@ public class CommunityController {
         return switch (error.getMessage()) {
             case "login_required" -> 401;
             case "walk_not_found" -> 404;
+            case "comment_not_found" -> 404;
             default -> 400;
         };
     }

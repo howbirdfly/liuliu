@@ -156,6 +156,41 @@ create index idx_walk_records_status
 create index idx_walk_records_user_id
     on walk_records (user_id);
 
+create table walk_record_comments
+(
+    id         bigint unsigned auto_increment
+        primary key,
+    walk_id    bigint unsigned                       not null comment '所属帖子ID',
+    parent_id  bigint unsigned                       null comment '父评论ID，空为顶级评论',
+    user_id    bigint unsigned                       not null comment '评论作者ID',
+    content    text                                  not null comment '评论内容',
+    status     varchar(32) default 'active'          not null comment 'active/deleted',
+    created_at datetime    default CURRENT_TIMESTAMP not null,
+    updated_at datetime    default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP,
+    constraint fk_walk_record_comments_walk_id
+        foreign key (walk_id) references walk_records (id)
+            on delete cascade,
+    constraint fk_walk_record_comments_parent_id
+        foreign key (parent_id) references walk_record_comments (id)
+            on delete cascade,
+    constraint fk_walk_record_comments_user_id
+        foreign key (user_id) references users (id)
+            on delete cascade
+)
+    comment '社区评论表' charset = utf8mb4;
+
+create index idx_walk_record_comments_walk_id
+    on walk_record_comments (walk_id);
+
+create index idx_walk_record_comments_parent_id
+    on walk_record_comments (parent_id);
+
+create index idx_walk_record_comments_user_id
+    on walk_record_comments (user_id);
+
+create index idx_walk_record_comments_created_at
+    on walk_record_comments (created_at);
+
 create table walk_themes
 (
     id          bigint unsigned auto_increment

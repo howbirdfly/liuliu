@@ -95,6 +95,32 @@ CREATE TABLE IF NOT EXISTS walk_records (
                                                     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='漫步记录表';
 
+-- 5. 社区评论表
+CREATE TABLE IF NOT EXISTS walk_record_comments (
+                                                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                                                 walk_id BIGINT UNSIGNED NOT NULL COMMENT '所属帖子ID',
+                                                 parent_id BIGINT UNSIGNED DEFAULT NULL COMMENT '父评论ID，空为顶级评论',
+                                                 user_id BIGINT UNSIGNED NOT NULL COMMENT '评论作者ID',
+                                                 content TEXT NOT NULL COMMENT '评论内容',
+                                                 status VARCHAR(32) NOT NULL DEFAULT 'active' COMMENT 'active/deleted',
+                                                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                                 PRIMARY KEY (id),
+                                                 KEY idx_walk_record_comments_walk_id (walk_id),
+                                                 KEY idx_walk_record_comments_parent_id (parent_id),
+                                                 KEY idx_walk_record_comments_user_id (user_id),
+                                                 KEY idx_walk_record_comments_created_at (created_at),
+                                                 CONSTRAINT fk_walk_record_comments_walk_id
+                                                     FOREIGN KEY (walk_id) REFERENCES walk_records(id)
+                                                         ON DELETE CASCADE,
+                                                 CONSTRAINT fk_walk_record_comments_parent_id
+                                                     FOREIGN KEY (parent_id) REFERENCES walk_record_comments(id)
+                                                         ON DELETE CASCADE,
+                                                 CONSTRAINT fk_walk_record_comments_user_id
+                                                     FOREIGN KEY (user_id) REFERENCES users(id)
+                                                         ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='社区评论表';
+
 -- 5. 主题表（可选，给后面社区主题/收藏主题留口子）
 CREATE TABLE IF NOT EXISTS walk_themes (
                                            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

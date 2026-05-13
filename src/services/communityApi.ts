@@ -20,6 +20,23 @@ export interface CommunityEngagementState {
   favorited: boolean;
 }
 
+export interface CommunityCommentItem {
+  id: number;
+  walkId: number;
+  parentId?: number | null;
+  authorId: number;
+  authorNickname: string;
+  authorAvatar?: string;
+  content: string;
+  createdAt?: number;
+  replies: CommunityCommentItem[];
+}
+
+export interface CreateCommunityCommentPayload {
+  content: string;
+  parentId?: number | null;
+}
+
 export async function searchCommunityWalks(
   keyword: string,
   page = 1,
@@ -40,6 +57,20 @@ export async function fetchCommunityFeed(
 
 export async function fetchCommunityWalkDetail(walkId: number): Promise<CommunityWalkItem> {
   return apiRequest<CommunityWalkItem>(`/api/v1/community/walks/${walkId}`);
+}
+
+export async function fetchCommunityComments(walkId: number): Promise<CommunityCommentItem[]> {
+  return apiRequest<CommunityCommentItem[]>(`/api/v1/community/walks/${walkId}/comments`);
+}
+
+export async function createCommunityComment(
+  walkId: number,
+  payload: CreateCommunityCommentPayload,
+): Promise<CommunityCommentItem> {
+  return apiRequest<CommunityCommentItem>(`/api/v1/community/walks/${walkId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchMyLikedCommunityWalks(page = 1, pageSize = 20): Promise<CommunityWalkItem[]> {

@@ -2,16 +2,24 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.mapper.CommunityCommentMapper;
 import com.liuliu.citywalk.mapper.CommunityMapper;
 import com.liuliu.citywalk.mapper.WalkInteractionMapper;
 import com.liuliu.citywalk.mapper.WalkRecordMapper;
+import com.liuliu.citywalk.mapper.entity.CommunityCommentEntity;
+import com.liuliu.citywalk.mapper.entity.CommunityCommentQueryRow;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
+import com.liuliu.citywalk.model.dto.request.CommunityCommentCreateRequest;
+import com.liuliu.citywalk.model.dto.response.CommunityCommentResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityEngagementResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityWalkResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -21,17 +29,20 @@ public class CommunityService {
     private static final String TAG_SEPARATOR = "\\|\\|";
     private static final String DEFAULT_AUTHOR_NAME = "Community Walker";
 
+    private final CommunityCommentMapper communityCommentMapper;
     private final CommunityMapper communityMapper;
     private final WalkRecordMapper walkRecordMapper;
     private final WalkInteractionMapper walkInteractionMapper;
     private final ObjectMapper objectMapper;
 
     public CommunityService(
+            CommunityCommentMapper communityCommentMapper,
             CommunityMapper communityMapper,
             WalkRecordMapper walkRecordMapper,
             WalkInteractionMapper walkInteractionMapper,
             ObjectMapper objectMapper
     ) {
+        this.communityCommentMapper = communityCommentMapper;
         this.communityMapper = communityMapper;
         this.walkRecordMapper = walkRecordMapper;
         this.walkInteractionMapper = walkInteractionMapper;
@@ -127,6 +138,43 @@ public class CommunityService {
             walkInteractionMapper.decrementFavoriteCount(walkId);
         }
         return buildEngagementResponse(walkId, userId);
+    }
+
+    public List<CommunityCommentResponse> listComments(Long walkId) {
+        ensurePublicWalkExists(walkId);
+        List<CommunityCommentQueryRow> rows = communityCommentMapper.findActiveByWalkId(walkId);
+        return buildCommentTree(rows);
+    }
+
+    @Transactional
+    public CommunityCommentResponse createComment(Long walkId, Long userId, CommunityCommentCreateRequest body) {
+        ensurePublicWalkExists(walkId);
+        String content = body.content() == null ? "" : body.content().trim();
+        if (content.isBlank()) {
+            throw new IllegalStateException("comment_content_invalid");
+        }
+
+        Long parentId = body.parentId();
+        if (parentId != null) {
+            CommunityCommentQueryRow parent = communityCommentMapper.findActiveById(parentId);
+            if (parent == null || !walkId.equals(parent.getWalkId())) {
+                throw new IllegalStateException("invalid_parent_comment");
+            }
+        }
+
+        CommunityCommentEntity entity = new CommunityCommentEntity();
+        entity.setWalkId(walkId);
+        entity.setParentId(parentId);
+        entity.setUserId(userId);
+        entity.setContent(content);
+        entity.setStatus("active");
+        communityCommentMapper.insert(entity);
+
+        CommunityCommentQueryRow created = communityCommentMapper.findActiveById(entity.getId());
+        if (created == null) {
+            throw new IllegalStateException("comment_not_found");
+        }
+        return toCommentResponse(created, List.of());
     }
 
     private CommunityWalkResponse toResponse(CommunityWalkQueryRow row) {
@@ -252,5 +300,55 @@ public class CommunityService {
     private boolean hasFavorite(Long walkId, Long userId) {
         Integer count = walkInteractionMapper.countFavorite(walkId, userId);
         return count != null && count > 0;
+    }
+
+    private List<CommunityCommentResponse> buildCommentTree(List<CommunityCommentQueryRow> rows) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, CommunityCommentResponse> byId = new LinkedHashMap<>();
+        List<CommunityCommentResponse> roots = new ArrayList<>();
+
+        for (CommunityCommentQueryRow row : rows) {
+            byId.put(row.getId(), toCommentResponse(row, new ArrayList<>()));
+        }
+
+        for (CommunityCommentQueryRow row : rows) {
+            CommunityCommentResponse current = byId.get(row.getId());
+            Long parentId = row.getParentId();
+            if (parentId == null) {
+                roots.add(current);
+                continue;
+            }
+
+            CommunityCommentResponse parent = byId.get(parentId);
+            if (parent == null) {
+                roots.add(current);
+                continue;
+            }
+
+            parent.replies().add(current);
+        }
+
+        for (CommunityCommentResponse item : byId.values()) {
+            item.replies().sort(Comparator.comparing(CommunityCommentResponse::createdAt).thenComparing(CommunityCommentResponse::id));
+        }
+        roots.sort(Comparator.comparing(CommunityCommentResponse::createdAt).thenComparing(CommunityCommentResponse::id));
+        return roots;
+    }
+
+    private CommunityCommentResponse toCommentResponse(CommunityCommentQueryRow row, List<CommunityCommentResponse> replies) {
+        return new CommunityCommentResponse(
+                row.getId(),
+                row.getWalkId(),
+                row.getParentId(),
+                row.getUserId(),
+                safeFallbackText(row.getAuthorNickname(), DEFAULT_AUTHOR_NAME),
+                safeText(row.getAuthorAvatar()),
+                safeText(row.getContent()),
+                toEpochMilli(row.getCreatedAt()),
+                replies
+        );
     }
 }

@@ -17,6 +17,7 @@ import {
   Heart,
   Bookmark,
   SlidersHorizontal,
+  MessageCircle,
 } from 'lucide-react';
 import {
   AppUser,
@@ -43,7 +44,9 @@ import {
   searchLocationContext,
 } from './services/themeService';
 import {
+  createCommunityComment,
   favoriteCommunityWalk,
+  fetchCommunityComments,
   fetchCommunityFeed,
   fetchCommunityWalkDetail,
   fetchMyFavoritedCommunityWalks,
@@ -52,6 +55,7 @@ import {
   searchCommunityWalks,
   unfavoriteCommunityWalk,
   unlikeCommunityWalk,
+  type CommunityCommentItem,
   type CommunityEngagementState,
   type CommunityFeedTab,
   type CommunityWalkItem,
@@ -70,8 +74,11 @@ import {
   updateCoCreateRoomState,
   updateCoCreateRoomTheme,
 } from './services/roomApi';
+import { ProfileCollectionTabs } from './components/ProfileCollectionTabs';
 import { ProfileCommunityEngagementCard } from './components/ProfileCommunityEngagementCard';
 import { ProfileStatsGrid } from './components/ProfileStatsGrid';
+import { ProfileWalkDetailBody } from './components/ProfileWalkDetailBody';
+import { ProfileWalkCardList } from './components/ProfileWalkCardList';
 
 type SearchLocation = {
   name: string;
@@ -83,6 +90,11 @@ type PathPoint = {
   lat: number;
   lng: number;
   timestamp: number;
+};
+
+type CommunityReplyTarget = {
+  id: number;
+  authorNickname: string;
 };
 
 type WalkRecordCard = {
@@ -1508,6 +1520,12 @@ export default function App() {
   const [communitySearchInput, setCommunitySearchInput] = useState('');
   const [communitySearchKeyword, setCommunitySearchKeyword] = useState('');
   const [communityError, setCommunityError] = useState('');
+  const [communityComments, setCommunityComments] = useState<CommunityCommentItem[]>([]);
+  const [isLoadingCommunityComments, setIsLoadingCommunityComments] = useState(false);
+  const [communityCommentInput, setCommunityCommentInput] = useState('');
+  const [communityReplyTarget, setCommunityReplyTarget] = useState<CommunityReplyTarget | null>(null);
+  const [isSubmittingCommunityComment, setIsSubmittingCommunityComment] = useState(false);
+  const [communityCommentError, setCommunityCommentError] = useState('');
   const [showCommunityFilterMenu, setShowCommunityFilterMenu] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -2091,6 +2109,21 @@ export default function App() {
     }
   };
 
+  const loadCommunityComments = async (walkId: number) => {
+    setIsLoadingCommunityComments(true);
+    setCommunityCommentError('');
+    try {
+      const data = await fetchCommunityComments(walkId);
+      setCommunityComments(data);
+    } catch (error) {
+      console.error('Error fetching community comments:', error);
+      setCommunityComments([]);
+      setCommunityCommentError('评论加载失败，请稍后再试。');
+    } finally {
+      setIsLoadingCommunityComments(false);
+    }
+  };
+
   const resolveBrowserLocation = async () => {
     if (!navigator.geolocation) {
       throw new Error('当前浏览器不支持定位。');
@@ -2659,6 +2692,10 @@ export default function App() {
   const handleOpenCommunityWalk = async (walkId: number) => {
     setIsLoadingCommunity(true);
     setCommunityViewMode('post');
+    setCommunityCommentInput('');
+    setCommunityReplyTarget(null);
+    setCommunityCommentError('');
+    setCommunityComments([]);
     try {
       const preview = communityWalks.find((walk) => walk.id === walkId);
       if (preview) {
@@ -2667,6 +2704,7 @@ export default function App() {
       const detail = await fetchCommunityWalkDetail(walkId);
       setCommunityWalks((prev) => prev.map((walk) => (walk.id === walkId ? { ...walk, ...detail } : walk)));
       setSelectedCommunityWalk(preview ? { ...preview, ...detail } : detail);
+      await loadCommunityComments(walkId);
     } catch (error) {
       console.error('Fetch community walk detail error:', error);
       setCommunityViewMode('feed');
@@ -2868,6 +2906,34 @@ export default function App() {
     } catch (error) {
       console.error('Toggle community favorite error:', error);
       setCommunityError('收藏失败，请先登录后重试。');
+    }
+  };
+
+  const handleSubmitCommunityComment = async () => {
+    if (!selectedCommunityWalk) {
+      return;
+    }
+    const content = communityCommentInput.trim();
+    if (!content) {
+      setCommunityCommentError('评论内容不能为空。');
+      return;
+    }
+
+    setIsSubmittingCommunityComment(true);
+    setCommunityCommentError('');
+    try {
+      await createCommunityComment(selectedCommunityWalk.id, {
+        content,
+        parentId: communityReplyTarget?.id ?? null,
+      });
+      setCommunityCommentInput('');
+      setCommunityReplyTarget(null);
+      await loadCommunityComments(selectedCommunityWalk.id);
+    } catch (error) {
+      console.error('Submit community comment error:', error);
+      setCommunityCommentError(error instanceof Error ? error.message : '评论发布失败，请先登录后重试。');
+    } finally {
+      setIsSubmittingCommunityComment(false);
     }
   };
 
@@ -3776,13 +3842,17 @@ export default function App() {
                   onClick={() => {
                     setCommunityViewMode('feed');
                     setSelectedCommunityWalk(null);
+                    setCommunityComments([]);
+                    setCommunityReplyTarget(null);
+                    setCommunityCommentInput('');
+                    setCommunityCommentError('');
                   }}
                   className="mb-6 rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
                 >
                   返回社区
                 </button>
 
-                <article className="mx-auto max-w-3xl space-y-6">
+                <article className="mx-auto flex max-w-3xl flex-col gap-6">
                   <div className="flex items-center gap-3">
                     {selectedCommunityWalk.authorAvatar ? (
                       <img
@@ -3877,6 +3947,120 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  <section className="order-last rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
+                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <MessageCircle className="h-4 w-4" />
+                      评论区
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {communityReplyTarget ? (
+                        <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2 text-xs text-slate-500">
+                          <span>回复 @{communityReplyTarget.authorNickname}</span>
+                          <button
+                            type="button"
+                            onClick={() => setCommunityReplyTarget(null)}
+                            className="rounded-full border border-slate-200 px-2 py-1 text-slate-500 transition hover:bg-slate-50"
+                          >
+                            取消回复
+                          </button>
+                        </div>
+                      ) : null}
+                      <textarea
+                        value={communityCommentInput}
+                        onChange={(event) => {
+                          setCommunityCommentInput(event.target.value);
+                          if (communityCommentError) {
+                            setCommunityCommentError('');
+                          }
+                        }}
+                        maxLength={500}
+                        rows={3}
+                        placeholder={communityReplyTarget ? `回复 ${communityReplyTarget.authorNickname}...` : '写下你的想法...'}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 text-slate-700 outline-none"
+                      />
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-slate-400">{communityCommentInput.trim().length}/500</div>
+                        <button
+                          type="button"
+                          onClick={() => void handleSubmitCommunityComment()}
+                          disabled={isSubmittingCommunityComment || communityCommentInput.trim().length === 0}
+                          className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          {isSubmittingCommunityComment ? '发布中...' : communityReplyTarget ? '发布回复' : '发布评论'}
+                        </button>
+                      </div>
+                      {communityCommentError ? (
+                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+                          {communityCommentError}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-5 space-y-3">
+                      {isLoadingCommunityComments ? (
+                        <div className="text-sm text-slate-500">评论加载中...</div>
+                      ) : communityComments.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">
+                          还没有评论，来抢个沙发吧。
+                        </div>
+                      ) : (
+                        communityComments.map((comment) => (
+                          <article key={comment.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={
+                                  comment.authorAvatar ||
+                                  (comment.authorId === user?.id ? user?.avatar : undefined) ||
+                                  'https://placehold.co/64x64?text=U'
+                                }
+                                alt={comment.authorNickname || '社区用户'}
+                                className="h-8 w-8 rounded-full object-cover"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-slate-800">{comment.authorNickname || '社区用户'}</div>
+                                <div className="text-xs text-slate-400">{formatProfilePostDate(comment.createdAt)}</div>
+                              </div>
+                            </div>
+                            <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{comment.content}</p>
+                            <div className="mt-3">
+                              <button
+                                type="button"
+                                onClick={() => setCommunityReplyTarget({ id: comment.id, authorNickname: comment.authorNickname || '社区用户' })}
+                                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
+                              >
+                                回复
+                              </button>
+                            </div>
+                            {comment.replies.length > 0 ? (
+                              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                                {comment.replies.map((reply) => (
+                                  <div key={reply.id} className="rounded-xl bg-slate-50 px-3 py-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="flex items-center gap-2">
+                                        <img
+                                          src={
+                                            reply.authorAvatar ||
+                                            (reply.authorId === user?.id ? user?.avatar : undefined) ||
+                                            'https://placehold.co/64x64?text=U'
+                                          }
+                                          alt={reply.authorNickname || '社区用户'}
+                                          className="h-6 w-6 rounded-full object-cover"
+                                        />
+                                        <div className="text-xs font-medium text-slate-700">{reply.authorNickname || '社区用户'}</div>
+                                      </div>
+                                      <div className="text-xs text-slate-400">{formatProfilePostDate(reply.createdAt)}</div>
+                                    </div>
+                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{reply.content}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  </section>
 
                   {selectedCommunityWalk.noteText ? (
                     <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
@@ -4185,100 +4369,23 @@ export default function App() {
                     {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
                   </div>
 
-                  <div className="mb-6 flex flex-wrap gap-2">
-                    {([
-                      ['mine', '我的记录'],
-                      ['favorited', '我的收藏'],
-                      ['liked', '我赞过的'],
-                    ] as Array<['mine' | 'favorited' | 'liked', string]>).map(([tab, label]) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setProfileCollectionTab(tab)}
-                        className={`rounded-full px-4 py-2 text-sm transition ${
-                          profileCollectionTab === tab
-                            ? 'bg-slate-900 text-white'
-                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  <ProfileCollectionTabs activeTab={profileCollectionTab} onChange={setProfileCollectionTab} />
 
                   {profileWalkSource.length === 0 ? (
                     <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
                       {profileCollectionMeta.empty}
                     </div>
                   ) : (
-                    <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
-                      {profileWalkSource.map((walk) => (
-                        <button
-                          key={walk.id}
-                          onClick={() => void handleOpenProfileWalk(walk.id)}
-                          className="group mb-5 block w-full break-inside-avoid rounded-[28px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                        >
-                          {walk.photoUrl ? (
-                            <img
-                              src={walk.photoUrl}
-                              alt={walk.themeTitle}
-                              className={`${getProfilePostCoverHeightClass(walk)} w-full rounded-t-[28px] object-cover`}
-                            />
-                          ) : (
-                            <div
-                              className={`${getProfilePostGradient(walk)} ${getProfilePostCoverHeightClass(walk)} flex items-end rounded-t-[28px] px-5 py-5 text-white`}
-                            >
-                              <div>
-                                <div className="text-xs uppercase tracking-[0.2em] text-white/70">
-                                  {walk.themeCategory || '城市漫步'}
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold leading-tight">{walk.themeTitle}</div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="space-y-3 px-5 py-4">
-                            <div>
-                              <div className="text-lg font-semibold text-slate-900">{walk.themeTitle}</div>
-                              <p className="mt-2 text-sm leading-7 text-slate-600">{buildProfilePostSummary(walk)}</p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
-                                <MapPin className="h-3.5 w-3.5" />
-                                {walk.locationName || '未填写地点'}
-                              </span>
-                              <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
-                              {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
-                              {'likeCount' in walk ? (
-                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
-                                  赞 {(walk as CommunityWalkItem).likeCount || 0}
-                                </span>
-                              ) : null}
-                            </div>
-
-                            <div className="flex items-center justify-between pt-1">
-                              <div className="flex items-center gap-2">
-                                <img
-                                  src={
-                                    walk.authorAvatar ||
-                                    profileAvatarPreview ||
-                                    user?.avatar ||
-                                    'https://placehold.co/40x40?text=U'
-                                  }
-                                  alt="author avatar"
-                                  className="h-8 w-8 rounded-full object-cover"
-                                />
-                                <div className="text-sm text-slate-600">
-                                  {walk.authorNickname || user?.nickname || '我的记录'}
-                                </div>
-                              </div>
-                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                    <ProfileWalkCardList
+                      walks={profileWalkSource}
+                      onOpenWalk={(walkId) => void handleOpenProfileWalk(walkId)}
+                      getCoverHeightClass={getProfilePostCoverHeightClass}
+                      getGradientClass={getProfilePostGradient}
+                      buildSummary={buildProfilePostSummary}
+                      formatDate={formatProfilePostDate}
+                      fallbackAvatarUrl={profileAvatarPreview || user?.avatar || undefined}
+                      fallbackNickname={user?.nickname || '我的记录'}
+                    />
                   )}
                 </section>
 
@@ -4301,113 +4408,25 @@ export default function App() {
                         onToggleFavorite={(event) => void handleToggleCommunityFavorite(selectedProfileCommunityWalk, event)}
                       />
                     ) : null}
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={
-                          selectedProfileWalk.authorAvatar ||
-                          profileAvatarPreview ||
-                          user?.avatar ||
-                          'https://placehold.co/80x80?text=U'
-                        }
-                        alt="author avatar"
-                        className="h-12 w-12 rounded-full object-cover"
-                      />
-                      <div>
-                        <div className="font-medium text-slate-900">{user?.nickname || '我的漫步记录'}</div>
-                        <div className="text-sm text-slate-500">{formatProfilePostDate(selectedProfileWalk.createdAt)}</div>
-                      </div>
-                    </div>
-
-                    <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-slate-50">
-                      {selectedProfileWalk.photoUrl ? (
-                        <img
-                          src={selectedProfileWalk.photoUrl}
-                          alt={selectedProfileWalk.themeTitle}
-                          className="h-[460px] w-full object-cover"
-                        />
-                      ) : (
-                        <div
-                          className={`${getProfilePostGradient(selectedProfileWalk)} flex h-[320px] flex-col justify-end px-8 py-8 text-white`}
-                        >
-                          <div className="text-xs uppercase tracking-[0.24em] text-white/70">
-                            {selectedProfileWalk.themeCategory || '城市漫步'}
-                          </div>
-                          <h3 className="mt-3 text-4xl font-semibold">{selectedProfileWalk.themeTitle}</h3>
-                          <p className="mt-4 max-w-2xl text-sm leading-7 text-white/90">
-                            {buildProfilePostSummary(selectedProfileWalk)}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.22em] text-slate-400">
-                        {selectedProfileWalk.themeCategory || '城市漫步'}
-                      </div>
-                      <h3 className="mt-2 text-3xl font-semibold text-slate-900">{selectedProfileWalk.themeTitle}</h3>
-                      <div className="mt-4 flex flex-wrap gap-2 text-sm text-slate-500">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5">
-                          <MapPin className="h-4 w-4" />
-                          {selectedProfileWalk.locationName || '未填写地点'}
-                        </span>
-                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
-                          {selectedProfileWalk.isPublic ? '已公开发布' : '仅自己可见'}
-                        </span>
-                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
-                          轨迹点 {selectedProfileWalk.path?.length || 0}
-                        </span>
-                        <span className="rounded-full bg-slate-100 px-3 py-1.5">
-                          距离 {(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)} km
-                        </span>
-                      </div>
-                    </div>
-
-                    {selectedProfileWalk.noteText ? (
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">我的记录</div>
-                        <p className="mt-4 text-base leading-8 text-slate-700">{selectedProfileWalk.noteText}</p>
-                      </div>
-                    ) : null}
-
-                    <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">轨迹地图</div>
-                      <div className="mt-3">
+                    <ProfileWalkDetailBody
+                      walk={selectedProfileWalk}
+                      authorAvatarUrl={
+                        selectedProfileWalk.authorAvatar || profileAvatarPreview || user?.avatar || 'https://placehold.co/80x80?text=U'
+                      }
+                      authorName={user?.nickname || '我的漫步记录'}
+                      formattedDate={formatProfilePostDate(selectedProfileWalk.createdAt)}
+                      coverGradientClassName={getProfilePostGradient(selectedProfileWalk)}
+                      summary={buildProfilePostSummary(selectedProfileWalk)}
+                      distanceKm={(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)}
+                      completedMissionLabels={normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions)}
+                      mapContent={
                         <WalkDetailMap
                           path={selectedProfileWalk.path || []}
                           locationLabel={selectedProfileWalk.locationName || selectedProfileWalk.themeTitle}
                           roomMembers={toRoomMapMembers(selectedProfileWalk.roomMembers)}
                         />
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">完成任务</div>
-                        <div className="mt-4 space-y-3">
-                          {normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).length > 0 ? (
-                            normalizeCompletedMissionLabels(selectedProfileWalk.completedMissions).map((mission, index) => (
-                              <div
-                                key={`${mission}-${index}`}
-                                className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-                              >
-                                {mission}
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-sm text-slate-500">这条记录里还没有单独保存任务完成项。</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
-                        <div className="text-xs uppercase tracking-[0.18em] text-slate-400">路线概览</div>
-                        <div className="mt-4 space-y-3 text-sm leading-7 text-slate-700">
-                          <div>记录单元：{selectedProfileWalk.recordUnit || 'event'}</div>
-                          <div>轨迹点数量：{selectedProfileWalk.path?.length || 0}</div>
-                          <div>累计距离：{(calculatePathDistance(selectedProfileWalk.path || []) / 1000).toFixed(2)} km</div>
-                        </div>
-                      </div>
-                    </div>
+                      }
+                    />
                   </article>
                 </section>
               </main>
@@ -4560,105 +4579,24 @@ export default function App() {
                     {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
                   </div>
 
-                  <div className="mb-6 flex flex-wrap gap-2">
-                    {([
-                      ['mine', '我的记录'],
-                      ['favorited', '我的收藏'],
-                      ['liked', '我赞过的'],
-                    ] as Array<['mine' | 'favorited' | 'liked', string]>).map(([tab, label]) => (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setProfileCollectionTab(tab)}
-                        className={`rounded-full px-4 py-2 text-sm transition ${
-                          profileCollectionTab === tab
-                            ? 'bg-slate-900 text-white'
-                            : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+                  <ProfileCollectionTabs activeTab={profileCollectionTab} onChange={setProfileCollectionTab} />
 
                   {profileWalkSource.length === 0 ? (
                     <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
                       {profileCollectionMeta.empty}
                     </div>
                   ) : (
-                    <div className="columns-1 gap-5 sm:columns-2 xl:columns-3">
-                      {profileWalkSource.map((walk) => (
-                        <button
-                          key={walk.id}
-                          onClick={() => void handleOpenProfileWalk(walk.id)}
-                          className="group mb-5 block w-full break-inside-avoid rounded-[28px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                        >
-                          {walk.photoUrl ? (
-                            <img
-                              src={walk.photoUrl}
-                              alt={walk.themeTitle}
-                              className={`${getProfilePostCoverHeightClass(walk)} w-full rounded-t-[28px] object-cover`}
-                            />
-                          ) : (
-                            <div
-                              className={`${getProfilePostGradient(walk)} ${getProfilePostCoverHeightClass(walk)} flex items-end rounded-t-[28px] px-5 py-5 text-white`}
-                            >
-                              <div>
-                                <div className="text-xs uppercase tracking-[0.2em] text-white/70">
-                                  {walk.themeCategory || '城市漫步'}
-                                </div>
-                                <div className="mt-2 text-2xl font-semibold leading-tight">{walk.themeTitle}</div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="space-y-3 px-5 py-4">
-                            <div>
-                              <div className="text-lg font-semibold text-slate-900">{walk.themeTitle}</div>
-                              <p className="mt-2 text-sm leading-7 text-slate-600">{buildProfilePostSummary(walk)}</p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
-                                <MapPin className="h-3.5 w-3.5" />
-                                {walk.locationName || '未填写地点'}
-                              </span>
-                              <span className="rounded-full bg-slate-100 px-2.5 py-1">轨迹点 {walk.path?.length || 0}</span>
-                              {walk.photoUrl ? <span className="rounded-full bg-slate-100 px-2.5 py-1">有照片</span> : null}
-                              {'likeCount' in walk ? (
-                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
-                                  赞 {(walk as CommunityWalkItem).likeCount || 0}
-                                </span>
-                              ) : null}
-                              {'favoriteCount' in walk ? (
-                                <span className="rounded-full bg-slate-100 px-2.5 py-1">
-                                  藏 {(walk as CommunityWalkItem).favoriteCount || 0}
-                                </span>
-                              ) : null}
-                            </div>
-
-                            <div className="flex items-center justify-between pt-1">
-                              <div className="flex items-center gap-2">
-                                <img
-                                  src={
-                                    walk.authorAvatar ||
-                                    profileAvatarPreview ||
-                                    user?.avatar ||
-                                    'https://placehold.co/40x40?text=U'
-                                  }
-                                  alt="author avatar"
-                                  className="h-8 w-8 rounded-full object-cover"
-                                />
-                                <div className="text-sm text-slate-600">
-                                  {walk.authorNickname || user?.nickname || '我的记录'}
-                                </div>
-                              </div>
-                              <div className="text-xs text-slate-400">{formatProfilePostDate(walk.createdAt)}</div>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                    <ProfileWalkCardList
+                      walks={profileWalkSource}
+                      onOpenWalk={(walkId) => void handleOpenProfileWalk(walkId)}
+                      getCoverHeightClass={getProfilePostCoverHeightClass}
+                      getGradientClass={getProfilePostGradient}
+                      buildSummary={buildProfilePostSummary}
+                      formatDate={formatProfilePostDate}
+                      fallbackAvatarUrl={profileAvatarPreview || user?.avatar || undefined}
+                      fallbackNickname={user?.nickname || '我的记录'}
+                      showFavoriteCount
+                    />
                   )}
                 </section>
               </main>
