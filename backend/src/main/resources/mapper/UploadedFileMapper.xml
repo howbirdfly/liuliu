@@ -9,4 +9,14 @@
         values (#{userId}, #{bizType}, #{fileKey}, #{fileName}, #{fileUrl}, #{contentType}, #{fileSize}, 'oss', now())
     </insert>
 
+    <delete id="deleteByUserId">
+        delete from uploaded_files where user_id = #{userId}
+    </delete>
+
+    <select id="listFileKeysByUserId" resultType="java.lang.String">
+        select file_key
+        from uploaded_files
+        where user_id = #{userId}
+    </select>
+
 </mapper>

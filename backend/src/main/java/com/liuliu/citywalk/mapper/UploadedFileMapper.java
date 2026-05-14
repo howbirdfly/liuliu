@@ -3,6 +3,8 @@ package com.liuliu.citywalk.mapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.util.List;
+
 @Mapper
 public interface UploadedFileMapper {
 
@@ -13,4 +15,8 @@ public interface UploadedFileMapper {
                    @Param("fileUrl") String fileUrl,
                    @Param("contentType") String contentType,
                    @Param("fileSize") Long fileSize);
+
+    int deleteByUserId(@Param("userId") Long userId);
+
+    List<String> listFileKeysByUserId(@Param("userId") Long userId);
 }

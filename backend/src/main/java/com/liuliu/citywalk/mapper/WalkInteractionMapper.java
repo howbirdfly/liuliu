@@ -28,6 +28,12 @@ public interface WalkInteractionMapper {
     @Delete("delete from walk_record_favorites where walk_id = #{walkId} and user_id = #{userId}")
     int deleteFavorite(@Param("walkId") Long walkId, @Param("userId") Long userId);
 
+    @Delete("delete from walk_record_likes where user_id = #{userId}")
+    int deleteLikesByUserId(@Param("userId") Long userId);
+
+    @Delete("delete from walk_record_favorites where user_id = #{userId}")
+    int deleteFavoritesByUserId(@Param("userId") Long userId);
+
     @Update("update walk_records set like_count = ifnull(like_count, 0) + 1 where id = #{walkId}")
     int incrementLikeCount(@Param("walkId") Long walkId);
 
@@ -48,4 +54,20 @@ public interface WalkInteractionMapper {
 
     @Select("select ifnull(favorite_count, 0) from walk_records where id = #{walkId}")
     Integer findFavoriteCount(@Param("walkId") Long walkId);
+
+    @Update("""
+            update walk_records wr
+            set wr.like_count = (
+                select count(1) from walk_record_likes wrl where wrl.walk_id = wr.id
+            )
+            """)
+    int recomputeLikeCounts();
+
+    @Update("""
+            update walk_records wr
+            set wr.favorite_count = (
+                select count(1) from walk_record_favorites wrf where wrf.walk_id = wr.id
+            )
+            """)
+    int recomputeFavoriteCounts();
 }

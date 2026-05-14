@@ -8,6 +8,7 @@ import com.liuliu.citywalk.mapper.entity.UserCredentialEntity;
 import com.liuliu.citywalk.mapper.entity.UserEntity;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -86,15 +87,26 @@ public class EmailAuthService {
 
         consumeVerificationCode(normalizedEmail, code);
 
-        String nickname = buildNickname(normalizedEmail);
-        userMapper.insertWebUser(normalizedEmail, nickname, "", "");
         UserEntity user = userMapper.findByOpenid(normalizedEmail);
+        if (user == null) {
+            String nickname = buildNickname(normalizedEmail);
+            try {
+                userMapper.insertWebUser(normalizedEmail, nickname, "", "");
+            } catch (DuplicateKeyException error) {
+                // 并发注册或历史脏数据导致用户已存在时，回查复用用户记录。
+            }
+            user = userMapper.findByOpenid(normalizedEmail);
+        }
         if (user == null || user.getId() == null) {
             throw new IllegalStateException("created_user_not_found");
         }
 
         String passwordHash = hashPassword(password);
-        userCredentialMapper.insertCredential(user.getId(), normalizedEmail, passwordHash);
+        try {
+            userCredentialMapper.insertCredential(user.getId(), normalizedEmail, passwordHash);
+        } catch (DuplicateKeyException error) {
+            throw new IllegalStateException("email_already_registered");
+        }
         return buildLoginResponse(user);
     }
 

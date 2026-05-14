@@ -40,4 +40,8 @@
         update email_verification_codes set used_at = now(), updated_at = now() where id = #{id}
     </update>
 
+    <delete id="deleteByEmail">
+        delete from email_verification_codes where email = #{email}
+    </delete>
+
 </mapper>

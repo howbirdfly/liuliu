@@ -66,4 +66,24 @@ public class AliOssUtil {
 
         return stringBuilder.toString();
     }
+
+    public void delete(String objectName) {
+        if (objectName == null || objectName.isBlank()) {
+            return;
+        }
+
+        OSS ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        try {
+            ossClient.deleteObject(bucketName, objectName);
+            log.info("OSS object deleted: {}", objectName);
+        } catch (OSSException oe) {
+            throw new IllegalStateException("oss_delete_failed", oe);
+        } catch (ClientException ce) {
+            throw new IllegalStateException("oss_delete_failed", ce);
+        } finally {
+            if (ossClient != null) {
+                ossClient.shutdown();
+            }
+        }
+    }
 }

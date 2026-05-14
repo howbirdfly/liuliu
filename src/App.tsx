@@ -22,6 +22,7 @@ import {
 import {
   AppUser,
   consumeLoginCallback,
+  deleteAccountFromServer,
   getStoredToken,
   loadCurrentUser,
   logoutFromServer,
@@ -2661,6 +2662,32 @@ export default function App() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm('注销后会删除该账号的个人资料、漫步记录、评论、点赞与收藏，且无法恢复。确定继续吗？');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteAccountFromServer();
+    } catch (error) {
+      console.error('Delete account error:', error);
+      const message = error instanceof Error ? error.message : '注销失败，请稍后重试。';
+      setProfileMessage(message.includes('login_required') ? '登录状态已失效，请重新登录后再试。' : `注销失败：${message}`);
+      return;
+    }
+
+    setUser(null);
+    setMyWalks([]);
+    setLikedWalks([]);
+    setFavoritedWalks([]);
+    setSelectedProfileWalk(null);
+    setProfileViewMode('feed');
+    setProfileCollectionTab('mine');
+    setShowProfileEditor(false);
+    setProfileMessage('账号已注销。');
+  };
+
   const handleOpenProfileWalk = async (walkId: number) => {
     setIsLoadingProfile(true);
     setProfileViewMode('post');
@@ -4465,12 +4492,20 @@ export default function App() {
                         {showProfileEditor ? '收起资料编辑' : '编辑主页资料'}
                       </button>
                       {user ? (
-                        <button
-                          onClick={handleSignOut}
+                        <>
+                          <button
+                            onClick={handleSignOut}
                           className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
                         >
                           退出登录
                         </button>
+                          <button
+                            onClick={() => void handleDeleteAccount()}
+                            className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-100"
+                          >
+                            注销账号
+                          </button>
+                        </>
                       ) : null}
                     </div>
                   </div>

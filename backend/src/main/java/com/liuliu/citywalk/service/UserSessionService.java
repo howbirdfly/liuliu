@@ -1,15 +1,23 @@
 package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.context.MiniappUserContext;
+import com.liuliu.citywalk.mapper.EmailVerificationMapper;
+import com.liuliu.citywalk.mapper.UploadedFileMapper;
+import com.liuliu.citywalk.mapper.UserCredentialMapper;
 import com.liuliu.citywalk.mapper.UserMapper;
+import com.liuliu.citywalk.mapper.WalkInteractionMapper;
+import com.liuliu.citywalk.mapper.entity.UserCredentialEntity;
 import com.liuliu.citywalk.mapper.entity.UserEntity;
 import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
 import com.liuliu.citywalk.model.dto.response.MiniappUserResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
+import com.liuliu.citywalk.util.AliOssUtil;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 @Service
@@ -17,14 +25,29 @@ public class UserSessionService {
 
     private final AuthTokenService authTokenService;
     private final UserMapper userMapper;
+    private final UserCredentialMapper userCredentialMapper;
+    private final EmailVerificationMapper emailVerificationMapper;
+    private final UploadedFileMapper uploadedFileMapper;
+    private final WalkInteractionMapper walkInteractionMapper;
+    private final AliOssUtil aliOssUtil;
     private final StoredUser guestUser = new StoredUser(0L, "guest", "游客", "", "", "guest", 0L, 0L);
 
     public UserSessionService(
             AuthTokenService authTokenService,
-            UserMapper userMapper
+            UserMapper userMapper,
+            UserCredentialMapper userCredentialMapper,
+            EmailVerificationMapper emailVerificationMapper,
+            UploadedFileMapper uploadedFileMapper,
+            WalkInteractionMapper walkInteractionMapper,
+            AliOssUtil aliOssUtil
     ) {
         this.authTokenService = authTokenService;
         this.userMapper = userMapper;
+        this.userCredentialMapper = userCredentialMapper;
+        this.emailVerificationMapper = emailVerificationMapper;
+        this.uploadedFileMapper = uploadedFileMapper;
+        this.walkInteractionMapper = walkInteractionMapper;
+        this.aliOssUtil = aliOssUtil;
     }
 
     @Transactional
@@ -77,6 +100,41 @@ public class UserSessionService {
                 updatedUser.avatarUrl(),
                 updatedUser.bio()
         );
+    }
+
+    @Transactional
+    public void deleteCurrentUser(String authorizationHeader) {
+        StoredUser currentUser = resolveUser(authorizationHeader);
+        if (currentUser == null || currentUser.isGuest()) {
+            throw new IllegalStateException("login_required");
+        }
+
+        Long userId = currentUser.id();
+        UserCredentialEntity credential = userCredentialMapper.findByUserId(userId);
+
+        walkInteractionMapper.deleteLikesByUserId(userId);
+        walkInteractionMapper.deleteFavoritesByUserId(userId);
+        walkInteractionMapper.recomputeLikeCounts();
+        walkInteractionMapper.recomputeFavoriteCounts();
+
+        List<String> fileKeys = uploadedFileMapper.listFileKeysByUserId(userId);
+        for (String fileKey : fileKeys) {
+            if (fileKey != null && !fileKey.isBlank()) {
+                aliOssUtil.delete(fileKey.trim());
+            }
+        }
+
+        uploadedFileMapper.deleteByUserId(userId);
+        userCredentialMapper.deleteByUserId(userId);
+
+        if (credential != null && credential.getEmail() != null && !credential.getEmail().isBlank()) {
+            emailVerificationMapper.deleteByEmail(credential.getEmail().trim().toLowerCase(Locale.ROOT));
+        }
+
+        int deletedRows = userMapper.deleteById(userId);
+        if (deletedRows <= 0) {
+            throw new IllegalStateException("user_not_found");
+        }
     }
 
     public StoredUser resolveUser(String authorizationHeader) {

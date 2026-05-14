@@ -18,4 +18,6 @@ public interface EmailVerificationMapper {
                      @Param("expiresAt") Timestamp expiresAt);
 
     int markUsed(@Param("id") Long id);
+
+    int deleteByEmail(@Param("email") String email);
 }

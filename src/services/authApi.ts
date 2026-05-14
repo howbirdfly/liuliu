@@ -168,3 +168,11 @@ export async function logoutFromServer(): Promise<void> {
     clearToken();
   }
 }
+
+export async function deleteAccountFromServer(): Promise<void> {
+  try {
+    await apiRequest('/api/v1/auth/account', { method: 'DELETE' });
+  } finally {
+    clearToken();
+  }
+}

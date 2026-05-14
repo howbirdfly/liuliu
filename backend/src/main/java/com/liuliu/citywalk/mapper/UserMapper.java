@@ -38,5 +38,7 @@ public interface UserMapper {
                       @Param("avatarUrl") String avatarUrl,
                       @Param("bio") String bio);
 
+    int deleteById(@Param("id") Long id);
+
     Integer countById(@Param("id") Long id);
 }

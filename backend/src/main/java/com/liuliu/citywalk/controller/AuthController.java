@@ -19,6 +19,7 @@ import com.liuliu.citywalk.service.WechatAuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -179,5 +180,17 @@ public class AuthController {
     @PostMapping("/logout")
     public ApiResponse<Boolean> logout() {
         return ApiResponse.success(Boolean.TRUE);
+    }
+
+    @DeleteMapping("/account")
+    public ApiResponse<Boolean> deleteAccount(
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
+    ) {
+        try {
+            userSessionService.deleteCurrentUser(authorizationHeader);
+            return ApiResponse.success(Boolean.TRUE);
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(400, error.getMessage());
+        }
     }
 }

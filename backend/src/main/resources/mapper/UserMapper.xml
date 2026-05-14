@@ -29,12 +29,12 @@
         limit 1
     </select>
 
-    <insert id="insertMiniappUser" useGeneratedKeys="true" keyProperty="id">
+    <insert id="insertMiniappUser">
         insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
         values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'miniapp', now(), now(), now())
     </insert>
 
-    <insert id="insertWebUser" useGeneratedKeys="true" keyProperty="id">
+    <insert id="insertWebUser">
         insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
         values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'web', now(), now(), now())
     </insert>
@@ -56,6 +56,10 @@
         set nickname = #{nickname}, avatar_url = #{avatarUrl}, bio = #{bio}, updated_at = now()
         where id = #{id}
     </update>
+
+    <delete id="deleteById">
+        delete from users where id = #{id}
+    </delete>
 
     <select id="countById" resultType="java.lang.Integer">
         select count(1) from users where id = #{id}
