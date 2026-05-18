@@ -11,9 +11,54 @@ function getApiBaseUrl(): string {
   return value ? value.replace(/\/$/, '') : DEFAULT_API_BASE_URL;
 }
 
+function getAuthStorage(): Storage | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.sessionStorage;
+}
+
+export function readAuthToken(): string | null {
+  const storage = getAuthStorage();
+  if (!storage) {
+    return null;
+  }
+
+  const sessionToken = storage.getItem(AUTH_TOKEN_KEY);
+  if (sessionToken) {
+    return sessionToken;
+  }
+
+  const legacyToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!legacyToken) {
+    return null;
+  }
+
+  storage.setItem(AUTH_TOKEN_KEY, legacyToken);
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  return legacyToken;
+}
+
+export function writeAuthToken(token: string): void {
+  const storage = getAuthStorage();
+  if (!storage) {
+    return;
+  }
+  storage.setItem(AUTH_TOKEN_KEY, token);
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+export function clearAuthToken(): void {
+  const storage = getAuthStorage();
+  storage?.removeItem(AUTH_TOKEN_KEY);
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  }
+}
+
 export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promise<T> {
   const { skipAuth, headers, ...requestInit } = init ?? {};
-  const token = typeof window !== 'undefined' ? window.localStorage.getItem(AUTH_TOKEN_KEY) : null;
+  const token = readAuthToken();
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     ...requestInit,
     headers: {
@@ -35,7 +80,7 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
 
   if (!response.ok) {
     if (response.status === 401 && typeof window !== 'undefined') {
-      window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      clearAuthToken();
       window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
     }
     throw new Error(json?.message || `Request failed: ${response.status}`);
@@ -47,7 +92,7 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
 
   if (json?.code !== 0) {
     if (json?.code === 401 && typeof window !== 'undefined') {
-      window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      clearAuthToken();
       window.dispatchEvent(new CustomEvent(AUTH_REQUIRED_EVENT));
     }
     throw new Error(json?.message || 'API request failed');

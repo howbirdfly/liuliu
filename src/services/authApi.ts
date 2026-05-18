@@ -1,4 +1,4 @@
-import { apiRequest, getApiBaseUrlForDebug, getAuthTokenStorageKey } from './apiClient';
+import { apiRequest, clearAuthToken, getApiBaseUrlForDebug, readAuthToken, writeAuthToken } from './apiClient';
 
 export interface AppUser {
   id: number;
@@ -16,7 +16,6 @@ interface LoginCallbackPayload {
   refreshToken?: string;
 }
 
-const TOKEN_KEY = getAuthTokenStorageKey();
 const MOCK_LOGIN_FLAG = import.meta.env.VITE_USE_MOCK_LOGIN === 'true';
 
 function buildCallbackUrl(): string {
@@ -29,15 +28,15 @@ function buildCallbackUrl(): string {
 }
 
 export function getStoredToken(): string | null {
-  return window.localStorage.getItem(TOKEN_KEY);
+  return readAuthToken();
 }
 
 export function saveToken(token: string): void {
-  window.localStorage.setItem(TOKEN_KEY, token);
+  writeAuthToken(token);
 }
 
 export function clearToken(): void {
-  window.localStorage.removeItem(TOKEN_KEY);
+  clearAuthToken();
 }
 
 export function consumeLoginCallback(): LoginCallbackPayload | null {

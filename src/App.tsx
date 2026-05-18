@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Bell,
   Compass,
   History,
   ImagePlus,
@@ -61,6 +62,13 @@ import {
   type CommunityFeedTab,
   type CommunityWalkItem,
 } from './services/communityApi';
+import {
+  fetchNotificationUnreadCount,
+  fetchNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type UserNotificationItem,
+} from './services/notificationApi';
 import { createWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
@@ -76,6 +84,7 @@ import {
   updateCoCreateRoomTheme,
 } from './services/roomApi';
 import { ProfileCollectionTabs } from './components/ProfileCollectionTabs';
+import { NotificationCenter } from './components/NotificationCenter';
 import { ProfileCommunityEngagementCard } from './components/ProfileCommunityEngagementCard';
 import { ProfileStatsGrid } from './components/ProfileStatsGrid';
 import { ProfileWalkDetailBody } from './components/ProfileWalkDetailBody';
@@ -1536,6 +1545,10 @@ export default function App() {
   const [profileBio, setProfileBio] = useState('');
   const [profileMessage, setProfileMessage] = useState('');
   const [showProfileEditor, setShowProfileEditor] = useState(false);
+  const [notifications, setNotifications] = useState<UserNotificationItem[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [mood, setMood] = useState('好奇');
@@ -1592,6 +1605,9 @@ export default function App() {
     setRoomCodeInput('');
     setRoomError('');
     setRoomMessage('');
+    setNotifications([]);
+    setNotificationUnreadCount(0);
+    setShowNotificationCenter(false);
   }, [user]);
 
   useEffect(() => {
@@ -1638,6 +1654,18 @@ export default function App() {
     setProfileAvatarName('');
     setProfileBio(user?.bio || '');
   }, [user]);
+
+  useEffect(() => {
+    void loadNotificationUnreadStatus();
+  }, [user]);
+
+  useEffect(() => {
+    if (!showNotificationCenter) {
+      return;
+    }
+    void loadNotifications();
+    void loadNotificationUnreadStatus();
+  }, [showNotificationCenter, user]);
 
   useEffect(() => {
     if (sendCodeCooldown <= 0) {
@@ -2107,6 +2135,41 @@ export default function App() {
       setCommunityError(nextKeyword ? '社区搜索失败，请稍后再试。' : '社区内容加载失败，请稍后再试。');
     } finally {
       setIsLoadingCommunity(false);
+    }
+  };
+
+  const loadNotificationUnreadStatus = async (overrideUser?: AppUser | null) => {
+    const currentUser = overrideUser ?? user;
+    if (!currentUser) {
+      setNotificationUnreadCount(0);
+      return;
+    }
+
+    try {
+      const unreadCount = await fetchNotificationUnreadCount();
+      setNotificationUnreadCount(unreadCount);
+    } catch (error) {
+      console.error('Fetch notification unread count error:', error);
+      setNotificationUnreadCount(0);
+    }
+  };
+
+  const loadNotifications = async (overrideUser?: AppUser | null) => {
+    const currentUser = overrideUser ?? user;
+    if (!currentUser) {
+      setNotifications([]);
+      return;
+    }
+
+    setIsLoadingNotifications(true);
+    try {
+      const data = await fetchNotifications(1, 30);
+      setNotifications(data);
+    } catch (error) {
+      console.error('Fetch notifications error:', error);
+      setNotifications([]);
+    } finally {
+      setIsLoadingNotifications(false);
     }
   };
 
@@ -2936,6 +2999,37 @@ export default function App() {
     }
   };
 
+  const handleOpenNotification = async (notification: UserNotificationItem) => {
+    if (!notification.read) {
+      try {
+        await markNotificationRead(notification.id);
+      } catch (error) {
+        console.error('Mark notification read error:', error);
+      }
+
+      setNotifications((prev) => prev.map((item) => (item.id === notification.id ? { ...item, read: true } : item)));
+      setNotificationUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
+    setShowNotificationCenter(false);
+    if (!notification.walkId) {
+      return;
+    }
+
+    setActiveTab('community');
+    await handleOpenCommunityWalk(notification.walkId);
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await markAllNotificationsRead();
+      setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+      setNotificationUnreadCount(0);
+    } catch (error) {
+      console.error('Mark all notifications read error:', error);
+    }
+  };
+
   const handleSubmitCommunityComment = async () => {
     if (!selectedCommunityWalk) {
       return;
@@ -3170,6 +3264,16 @@ export default function App() {
           </div>
         </div>
       )}
+      <NotificationCenter
+        open={showNotificationCenter}
+        notifications={notifications}
+        unreadCount={notificationUnreadCount}
+        isLoading={isLoadingNotifications}
+        onClose={() => setShowNotificationCenter(false)}
+        onOpenNotification={(item) => void handleOpenNotification(item)}
+        onMarkAllRead={() => void handleMarkAllNotificationsRead()}
+        formatDate={formatProfilePostDate}
+      />
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-4 py-6 md:px-8">
         <header className="flex flex-col gap-4 rounded-[32px] border border-amber-100 bg-white/80 p-5 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -3212,6 +3316,19 @@ export default function App() {
 
             {user ? (
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationCenter(true)}
+                  className="relative rounded-full border border-slate-200 bg-white p-3 text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+                  aria-label="打开通知中心"
+                >
+                  <Bell className="h-4 w-4" />
+                  {notificationUnreadCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                      {notificationUnreadCount > 99 ? '99+' : notificationUnreadCount}
+                    </span>
+                  ) : null}
+                </button>
                 <button
                   onClick={() => setActiveTab('profile')}
                   className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2"

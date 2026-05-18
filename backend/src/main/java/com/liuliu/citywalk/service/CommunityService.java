@@ -33,6 +33,7 @@ public class CommunityService {
     private final CommunityMapper communityMapper;
     private final WalkRecordMapper walkRecordMapper;
     private final WalkInteractionMapper walkInteractionMapper;
+    private final NotificationService notificationService;
     private final ObjectMapper objectMapper;
 
     public CommunityService(
@@ -40,12 +41,14 @@ public class CommunityService {
             CommunityMapper communityMapper,
             WalkRecordMapper walkRecordMapper,
             WalkInteractionMapper walkInteractionMapper,
+            NotificationService notificationService,
             ObjectMapper objectMapper
     ) {
         this.communityCommentMapper = communityCommentMapper;
         this.communityMapper = communityMapper;
         this.walkRecordMapper = walkRecordMapper;
         this.walkInteractionMapper = walkInteractionMapper;
+        this.notificationService = notificationService;
         this.objectMapper = objectMapper;
     }
 
@@ -106,6 +109,7 @@ public class CommunityService {
         if (!hasLike(walkId, userId)) {
             walkInteractionMapper.insertLike(walkId, userId);
             walkInteractionMapper.incrementLikeCount(walkId);
+            notificationService.notifyWalkLiked(walkId, userId);
         }
         return buildEngagementResponse(walkId, userId);
     }
@@ -126,6 +130,7 @@ public class CommunityService {
         if (!hasFavorite(walkId, userId)) {
             walkInteractionMapper.insertFavorite(walkId, userId);
             walkInteractionMapper.incrementFavoriteCount(walkId);
+            notificationService.notifyWalkFavorited(walkId, userId);
         }
         return buildEngagementResponse(walkId, userId);
     }
@@ -155,8 +160,9 @@ public class CommunityService {
         }
 
         Long parentId = body.parentId();
+        CommunityCommentQueryRow parent = null;
         if (parentId != null) {
-            CommunityCommentQueryRow parent = communityCommentMapper.findActiveById(parentId);
+            parent = communityCommentMapper.findActiveById(parentId);
             if (parent == null || !walkId.equals(parent.getWalkId())) {
                 throw new IllegalStateException("invalid_parent_comment");
             }
@@ -169,6 +175,7 @@ public class CommunityService {
         entity.setContent(content);
         entity.setStatus("active");
         communityCommentMapper.insert(entity);
+        notificationService.notifyCommentCreated(walkId, userId, entity.getId(), parentId);
 
         CommunityCommentQueryRow created = communityCommentMapper.findActiveById(entity.getId());
         if (created == null) {
