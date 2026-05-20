@@ -81,4 +81,36 @@
           and status = 'active'
     </update>
 
+    <update id="updateEditableFields">
+        update walk_records
+        set theme_title = #{themeTitle},
+            theme_snapshot = #{themeSnapshot},
+            note_text = #{noteText},
+            is_public = #{isPublic},
+            updated_at = now()
+        where id = #{id}
+          and status = 'active'
+    </update>
+
+    <select id="listTagsByWalkId" resultType="java.lang.String">
+        select tag_name
+        from walk_record_tags
+        where walk_id = #{walkId}
+        order by tag_name
+    </select>
+
+    <delete id="deleteTagsByWalkId">
+        delete from walk_record_tags
+        where walk_id = #{walkId}
+    </delete>
+
+    <insert id="insertTags">
+        insert into walk_record_tags (walk_id, tag_name, created_at)
+        values
+        <foreach collection="tags" item="tag" separator=",">
+            (#{walkId}, #{tag}, now())
+        </foreach>
+        on duplicate key update tag_name = values(tag_name)
+    </insert>
+
 </mapper>

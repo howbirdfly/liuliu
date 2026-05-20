@@ -19,5 +19,17 @@ public interface WalkRecordMapper {
 
     WalkRecordEntity findPublicActiveById(@Param("id") Long id);
 
+    int updateEditableFields(@Param("id") Long id,
+                             @Param("themeTitle") String themeTitle,
+                             @Param("themeSnapshot") String themeSnapshot,
+                             @Param("noteText") String noteText,
+                             @Param("isPublic") Boolean isPublic);
+
     int softDeleteById(@Param("id") Long id);
+
+    List<String> listTagsByWalkId(@Param("walkId") Long walkId);
+
+    int deleteTagsByWalkId(@Param("walkId") Long walkId);
+
+    int insertTags(@Param("walkId") Long walkId, @Param("tags") List<String> tags);
 }

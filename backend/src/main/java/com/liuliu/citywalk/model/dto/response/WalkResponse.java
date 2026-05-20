@@ -20,6 +20,7 @@ public record WalkResponse(
         List<?> completedMissions,
         String roomCode,
         List<RoomMemberTrackResponse> roomMembers,
+        List<String> tags,
         Long createdAt
 ) {
 }

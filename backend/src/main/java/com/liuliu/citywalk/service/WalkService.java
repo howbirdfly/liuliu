@@ -11,6 +11,7 @@ import com.liuliu.citywalk.model.dto.request.CompletedMissionRequest;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
 import com.liuliu.citywalk.model.dto.request.PathPointRequest;
 import com.liuliu.citywalk.model.dto.request.RoomMemberTrackRequest;
+import com.liuliu.citywalk.model.dto.request.UpdateWalkRequest;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.model.dto.response.RoomMemberTrackResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
@@ -98,6 +99,44 @@ public class WalkService {
         return new OperationResultResponse(Boolean.TRUE);
     }
 
+    @Transactional
+    public WalkResponse updateWalk(Long walkId, Long userId, UpdateWalkRequest request) {
+        WalkRecordEntity walk = walkRecordMapper.findActiveById(walkId);
+        if (walk == null) {
+            throw new IllegalStateException("walk_not_found");
+        }
+        if (!equalsLong(walk.getUserId(), userId)) {
+            throw new IllegalStateException("walk_forbidden");
+        }
+
+        String nextTitle = safeText(request.themeTitle(), walk.getThemeTitle());
+        String nextNote = request.noteText() == null ? "" : request.noteText().trim();
+        Boolean nextPublic = Boolean.TRUE.equals(request.isPublic());
+        List<String> nextTags = normalizeTags(request.tags());
+
+        Map<String, Object> snapshot = new LinkedHashMap<>(
+                parseJson(walk.getThemeSnapshot(), new TypeReference<Map<String, Object>>() { }, Map.of())
+        );
+        snapshot.put("title", nextTitle);
+        snapshot.put("description", nextNote);
+        snapshot.put("category", safeText(request.themeCategory(), ""));
+        snapshot.put("tags", nextTags);
+
+        walkRecordMapper.updateEditableFields(
+                walkId,
+                nextTitle,
+                writeJson(snapshot),
+                nextNote,
+                nextPublic
+        );
+        walkRecordMapper.deleteTagsByWalkId(walkId);
+        if (!nextTags.isEmpty()) {
+            walkRecordMapper.insertTags(walkId, nextTags);
+        }
+
+        return getDetail(walkId);
+    }
+
     private WalkResponse toWalkResponse(WalkRecordEntity entity) {
         Map<String, Object> snapshot = parseJson(entity.getThemeSnapshot(), new TypeReference<Map<String, Object>>() { }, Map.of());
         String themeCategory = snapshot.get("category") instanceof String value ? value : null;
@@ -129,6 +168,7 @@ public class WalkService {
                 completedMissions,
                 snapshot.get("roomCode") instanceof String roomCode ? roomCode : null,
                 parseRoomMembers(snapshot.get("roomMembers")),
+                walkRecordMapper.listTagsByWalkId(entity.getId()),
                 toEpochMilli(entity.getCreatedAt())
         );
     }
@@ -247,6 +287,20 @@ public class WalkService {
                 .filter(item -> item != null && !item.isBlank())
                 .map(String::trim)
                 .distinct()
+                .toList();
+    }
+
+    private List<String> normalizeTags(List<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return List.of();
+        }
+        return tags.stream()
+                .filter(tag -> tag != null && !tag.isBlank())
+                .map(tag -> tag.trim().replaceFirst("^#+", ""))
+                .filter(tag -> !tag.isBlank())
+                .map(tag -> tag.length() > 20 ? tag.substring(0, 20) : tag)
+                .distinct()
+                .limit(8)
                 .toList();
     }
 

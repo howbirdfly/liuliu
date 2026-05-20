@@ -19,6 +19,8 @@ import {
   Bookmark,
   SlidersHorizontal,
   MessageCircle,
+  Pencil,
+  X,
 } from 'lucide-react';
 import {
   AppUser,
@@ -72,7 +74,7 @@ import {
   type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
-import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
+import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, updateWalk, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
@@ -1528,6 +1530,13 @@ export default function App() {
   const [communityWalks, setCommunityWalks] = useState<CommunityWalkItem[]>([]);
   const [selectedCommunityWalk, setSelectedCommunityWalk] = useState<CommunityWalkItem | null>(null);
   const [communityViewMode, setCommunityViewMode] = useState<'feed' | 'post'>('feed');
+  const [editingWalk, setEditingWalk] = useState<WalkItem | null>(null);
+  const [editWalkTitle, setEditWalkTitle] = useState('');
+  const [editWalkNote, setEditWalkNote] = useState('');
+  const [editWalkTags, setEditWalkTags] = useState('');
+  const [editWalkIsPublic, setEditWalkIsPublic] = useState(true);
+  const [isSavingWalkEdit, setIsSavingWalkEdit] = useState(false);
+  const [walkEditError, setWalkEditError] = useState('');
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
   const [communityFeedTab, setCommunityFeedTab] = useState<CommunityFeedTab>('recommend');
   const [communitySearchInput, setCommunitySearchInput] = useState('');
@@ -3040,6 +3049,100 @@ export default function App() {
     setSelectedProfileWalk((prev) => (prev?.id === walkId ? null : prev));
   };
 
+  const mergeUpdatedWalk = <T extends WalkItem>(walk: T, updated: WalkItem): T => ({
+    ...walk,
+    ...updated,
+    tags: updated.tags ?? walk.tags,
+  } as T);
+
+  const applyUpdatedWalk = (updated: WalkItem) => {
+    setMyWalks((prev) => prev.map((walk) => (walk.id === updated.id ? mergeUpdatedWalk(walk, updated) : walk)));
+    setCommunityWalks((prev) =>
+      updated.isPublic
+        ? prev.map((walk) => (walk.id === updated.id ? mergeUpdatedWalk(walk, updated) : walk))
+        : prev.filter((walk) => walk.id !== updated.id),
+    );
+    setLikedWalks((prev) =>
+      updated.isPublic
+        ? prev.map((walk) => (walk.id === updated.id ? mergeUpdatedWalk(walk, updated) : walk))
+        : prev.filter((walk) => walk.id !== updated.id),
+    );
+    setFavoritedWalks((prev) =>
+      updated.isPublic
+        ? prev.map((walk) => (walk.id === updated.id ? mergeUpdatedWalk(walk, updated) : walk))
+        : prev.filter((walk) => walk.id !== updated.id),
+    );
+    setSelectedProfileWalk((prev) => (prev?.id === updated.id ? mergeUpdatedWalk(prev, updated) : prev));
+    setSelectedCommunityWalk((prev) => {
+      if (prev?.id !== updated.id) {
+        return prev;
+      }
+      return updated.isPublic ? mergeUpdatedWalk(prev, updated) : null;
+    });
+  };
+
+  const parseWalkEditTags = (value: string) =>
+    value
+      .split(/[#,，、\s]+/)
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+  const openWalkEditor = (walk: WalkItem) => {
+    setEditingWalk(walk);
+    setEditWalkTitle(walk.themeTitle || '');
+    setEditWalkNote(walk.noteText || '');
+    setEditWalkTags((walk.tags || []).map((tag) => `#${tag}`).join(' '));
+    setEditWalkIsPublic(Boolean(walk.isPublic));
+    setWalkEditError('');
+  };
+
+  const closeWalkEditor = () => {
+    if (isSavingWalkEdit) {
+      return;
+    }
+    setEditingWalk(null);
+    setWalkEditError('');
+  };
+
+  const handleSaveWalkEdit = async () => {
+    if (!editingWalk) {
+      return;
+    }
+    const nextTitle = editWalkTitle.trim();
+    if (!nextTitle) {
+      setWalkEditError('帖子标题不能为空。');
+      return;
+    }
+
+    setIsSavingWalkEdit(true);
+    setWalkEditError('');
+    try {
+      const updated = await updateWalk(editingWalk.id, {
+        themeTitle: nextTitle,
+        themeCategory: editingWalk.themeCategory || '',
+        noteText: editWalkNote.trim(),
+        isPublic: editWalkIsPublic,
+        tags: parseWalkEditTags(editWalkTags),
+      });
+      applyUpdatedWalk(updated);
+      if (!updated.isPublic && selectedCommunityWalk?.id === updated.id) {
+        setCommunityViewMode('feed');
+        setCommunityComments([]);
+        setCommunityReplyTarget(null);
+        setCommunityCommentInput('');
+      }
+      setEditingWalk(null);
+      setProfileMessage('帖子已更新。');
+      setCommunityError('');
+    } catch (error) {
+      console.error('Update walk error:', error);
+      setWalkEditError(error instanceof Error ? error.message : '帖子更新失败，请稍后再试。');
+    } finally {
+      setIsSavingWalkEdit(false);
+    }
+  };
+
   const handleToggleCommunityLike = async (walk: CommunityWalkItem, event?: React.MouseEvent) => {
     event?.stopPropagation();
     event?.preventDefault();
@@ -3396,6 +3499,96 @@ export default function App() {
         onMarkAllRead={() => void handleMarkAllNotificationsRead()}
         formatDate={formatProfilePostDate}
       />
+      {editingWalk ? (
+        <div className="fixed inset-0 z-50 flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveWalkEdit();
+            }}
+            className="w-full rounded-[26px] bg-white p-4 shadow-2xl sm:max-w-lg"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Edit Post</div>
+                <h3 className="mt-1 text-lg font-semibold text-slate-900">编辑帖子</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeWalkEditor}
+                className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
+                aria-label="关闭编辑器"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">标题</span>
+                <input
+                  value={editWalkTitle}
+                  onChange={(event) => setEditWalkTitle(event.target.value)}
+                  maxLength={60}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                  placeholder="给这篇笔记起个标题"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">正文</span>
+                <textarea
+                  value={editWalkNote}
+                  onChange={(event) => setEditWalkNote(event.target.value)}
+                  rows={5}
+                  maxLength={500}
+                  className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-800 outline-none focus:border-slate-400"
+                  placeholder="补充这次 citywalk 的感受、路线亮点或避坑提醒"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-medium text-slate-500">标签</span>
+                <input
+                  value={editWalkTags}
+                  onChange={(event) => setEditWalkTags(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                  placeholder="#周末去哪儿 #拍照路线 #城市漫步"
+                />
+              </label>
+
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <span>公开到社区</span>
+                <input
+                  type="checkbox"
+                  checked={editWalkIsPublic}
+                  onChange={(event) => setEditWalkIsPublic(event.target.checked)}
+                  className="h-4 w-4 accent-slate-900"
+                />
+              </label>
+
+              {walkEditError ? <div className="rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-600">{walkEditError}</div> : null}
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={closeWalkEditor}
+                className="flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingWalkEdit}
+                className="flex-1 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-wait disabled:opacity-70"
+              >
+                {isSavingWalkEdit ? '保存中...' : '保存'}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-4 py-6 md:px-8">
         <header className="flex flex-col gap-4 rounded-[32px] border border-amber-100 bg-white/80 p-5 shadow-sm backdrop-blur md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -4212,13 +4405,23 @@ export default function App() {
                         <span>{selectedCommunityWalk.favorited ? '已收藏' : '收藏'}</span>
                       </button>
                       {selectedCommunityWalk.authorId === user?.id ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteWalk(selectedCommunityWalk.id, { source: 'community' })}
-                          className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 transition hover:bg-rose-100 sm:px-4 sm:py-2.5 sm:text-sm"
-                        >
-                          删除帖子
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openWalkEditor(selectedCommunityWalk)}
+                            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 transition hover:bg-slate-50 sm:px-4 sm:py-2.5 sm:text-sm"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            编辑帖子
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteWalk(selectedCommunityWalk.id, { source: 'community' })}
+                            className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600 transition hover:bg-rose-100 sm:px-4 sm:py-2.5 sm:text-sm"
+                          >
+                            删除帖子
+                          </button>
+                        </>
                       ) : null}
                     </div>
                   </div>
@@ -4708,6 +4911,15 @@ export default function App() {
                   </button>
 
                   {selectedProfileWalk.authorId === user?.id ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openWalkEditor(selectedProfileWalk)}
+                        className="mb-3 mr-2 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                      >
+                        <Pencil className="h-4 w-4" />
+                        编辑帖子
+                      </button>
                     <button
                       type="button"
                       onClick={() => void handleDeleteWalk(selectedProfileWalk.id, { source: 'profile' })}
@@ -4715,6 +4927,7 @@ export default function App() {
                     >
                       删除帖子
                     </button>
+                    </>
                   ) : null}
 
                   <article className="mx-auto max-w-3xl space-y-6">

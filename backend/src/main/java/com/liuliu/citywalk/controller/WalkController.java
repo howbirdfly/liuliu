@@ -2,6 +2,7 @@ package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
+import com.liuliu.citywalk.model.dto.request.UpdateWalkRequest;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -63,6 +65,24 @@ public class WalkController {
         try {
             Long userId = resolveUserId(request);
             return ApiResponse.success(walkService.deleteWalk(walkId, userId));
+        } catch (IllegalStateException error) {
+            int code = switch (error.getMessage()) {
+                case "login_required" -> 401;
+                case "walk_not_found" -> 404;
+                case "walk_forbidden" -> 403;
+                default -> 400;
+            };
+            return ApiResponse.fail(code, error.getMessage());
+        }
+    }
+
+    @PutMapping("/{walkId}")
+    public ApiResponse<WalkResponse> update(HttpServletRequest request,
+                                            @PathVariable Long walkId,
+                                            @Valid @RequestBody UpdateWalkRequest body) {
+        try {
+            Long userId = resolveUserId(request);
+            return ApiResponse.success(walkService.updateWalk(walkId, userId, body));
         } catch (IllegalStateException error) {
             int code = switch (error.getMessage()) {
                 case "login_required" -> 401;

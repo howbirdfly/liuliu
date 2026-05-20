@@ -40,6 +40,14 @@ export interface CreateWalkPayload {
   audioUrl?: string;
 }
 
+export interface UpdateWalkPayload {
+  themeTitle: string;
+  themeCategory?: string;
+  isPublic: boolean;
+  noteText?: string;
+  tags?: string[];
+}
+
 export interface WalkItem {
   id: number;
   themeTitle: string;
@@ -58,6 +66,7 @@ export interface WalkItem {
   completedMissions?: CompletedMissionPayload[];
   roomCode?: string;
   roomMembers?: RoomMemberTrack[];
+  tags?: string[];
   createdAt?: number;
 }
 
@@ -83,5 +92,12 @@ export async function fetchWalkDetail(walkId: number): Promise<WalkItem> {
 export async function deleteWalk(walkId: number): Promise<{ success: boolean }> {
   return apiRequest<{ success: boolean }>(`/api/v1/walks/${walkId}`, {
     method: 'DELETE',
+  });
+}
+
+export async function updateWalk(walkId: number, payload: UpdateWalkPayload): Promise<WalkItem> {
+  return apiRequest<WalkItem>(`/api/v1/walks/${walkId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   });
 }
