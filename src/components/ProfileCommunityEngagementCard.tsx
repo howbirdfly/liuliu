@@ -14,13 +14,13 @@ export function ProfileCommunityEngagementCard({
   onToggleFavorite,
 }: ProfileCommunityEngagementCardProps) {
   return (
-    <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
-      <div className="flex flex-wrap gap-2 text-sm text-slate-500">
-        <span className="rounded-full bg-white px-3 py-1.5">Likes {walk.likeCount || 0}</span>
-        <span className="rounded-full bg-white px-3 py-1.5">Saves {walk.favoriteCount || 0}</span>
-        <span className="rounded-full bg-white px-3 py-1.5">Views {walk.viewCount || 0}</span>
+    <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 sm:rounded-[28px] sm:px-5 sm:py-5">
+      <div className="flex flex-wrap gap-2 text-xs text-slate-500 sm:text-sm">
+        <span className="rounded-full bg-white px-2.5 py-1 sm:px-3 sm:py-1.5">Likes {walk.likeCount || 0}</span>
+        <span className="rounded-full bg-white px-2.5 py-1 sm:px-3 sm:py-1.5">Saves {walk.favoriteCount || 0}</span>
+        <span className="rounded-full bg-white px-2.5 py-1 sm:px-3 sm:py-1.5">Views {walk.viewCount || 0}</span>
         {walk.tags?.map((tag) => (
-          <span key={tag} className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">
+          <span key={tag} className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700 sm:px-3 sm:py-1.5">
             #{tag}
           </span>
         ))}
@@ -29,7 +29,7 @@ export function ProfileCommunityEngagementCard({
         <button
           type="button"
           onClick={onToggleLike}
-          className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
+          className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs transition sm:px-4 sm:py-2.5 sm:text-sm ${
             walk.liked ? 'bg-rose-50 text-rose-600' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
           }`}
         >
@@ -39,7 +39,7 @@ export function ProfileCommunityEngagementCard({
         <button
           type="button"
           onClick={onToggleFavorite}
-          className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm transition ${
+          className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs transition sm:px-4 sm:py-2.5 sm:text-sm ${
             walk.favorited
               ? 'bg-amber-50 text-amber-700'
               : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
