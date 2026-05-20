@@ -75,6 +75,17 @@ public class CommunityController {
         }
     }
 
+    @DeleteMapping("/comments/{commentId}")
+    public ApiResponse<Boolean> deleteComment(HttpServletRequest request, @PathVariable Long commentId) {
+        try {
+            Long userId = resolveRequiredUserId(request);
+            communityService.deleteComment(commentId, userId);
+            return ApiResponse.success(Boolean.TRUE);
+        } catch (IllegalStateException error) {
+            return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
+        }
+    }
+
     @GetMapping("/feed/latest")
     public ApiResponse<List<CommunityWalkResponse>> latest(
             HttpServletRequest request,
@@ -169,6 +180,7 @@ public class CommunityController {
             case "login_required" -> 401;
             case "walk_not_found" -> 404;
             case "comment_not_found" -> 404;
+            case "comment_forbidden", "walk_forbidden" -> 403;
             default -> 400;
         };
     }

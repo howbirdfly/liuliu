@@ -66,6 +66,29 @@ public interface UserNotificationMapper {
                                                          @Param("offset") int offset);
 
     @Select("""
+            select
+                n.id as id,
+                n.recipient_user_id as recipientUserId,
+                n.actor_user_id as actorUserId,
+                n.type as type,
+                n.walk_id as walkId,
+                n.comment_id as commentId,
+                n.is_read as isRead,
+                n.created_at as createdAt,
+                u.nickname as actorNickname,
+                u.avatar_url as actorAvatar,
+                wr.theme_title as walkTitle,
+                c.content as commentContent
+            from user_notifications n
+            left join users u on u.id = n.actor_user_id
+            left join walk_records wr on wr.id = n.walk_id
+            left join walk_record_comments c on c.id = n.comment_id
+            where n.id = #{notificationId}
+            limit 1
+            """)
+    UserNotificationQueryRow findById(@Param("notificationId") Long notificationId);
+
+    @Select("""
             select count(1)
             from user_notifications
             where recipient_user_id = #{userId}

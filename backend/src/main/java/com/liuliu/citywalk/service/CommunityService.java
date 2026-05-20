@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 public class CommunityService {
@@ -147,7 +148,7 @@ public class CommunityService {
 
     public List<CommunityCommentResponse> listComments(Long walkId) {
         ensurePublicWalkExists(walkId);
-        List<CommunityCommentQueryRow> rows = communityCommentMapper.findActiveByWalkId(walkId);
+        List<CommunityCommentQueryRow> rows = communityCommentMapper.findVisibleByWalkId(walkId);
         return buildCommentTree(rows);
     }
 
@@ -182,6 +183,22 @@ public class CommunityService {
             throw new IllegalStateException("comment_not_found");
         }
         return toCommentResponse(created, List.of());
+    }
+
+    @Transactional
+    public void deleteComment(Long commentId, Long userId) {
+        CommunityCommentQueryRow comment = communityCommentMapper.findById(commentId);
+        if (comment == null) {
+            throw new IllegalStateException("comment_not_found");
+        }
+        if (!Objects.equals(comment.getUserId(), userId)) {
+            throw new IllegalStateException("comment_forbidden");
+        }
+        if ("deleted".equalsIgnoreCase(comment.getStatus())) {
+            return;
+        }
+
+        communityCommentMapper.softDelete(commentId);
     }
 
     private CommunityWalkResponse toResponse(CommunityWalkQueryRow row) {
@@ -353,9 +370,14 @@ public class CommunityService {
                 row.getUserId(),
                 safeFallbackText(row.getAuthorNickname(), DEFAULT_AUTHOR_NAME),
                 safeText(row.getAuthorAvatar()),
-                safeText(row.getContent()),
+                isDeleted(row) ? "该评论已删除" : safeText(row.getContent()),
+                isDeleted(row),
                 toEpochMilli(row.getCreatedAt()),
                 replies
         );
+    }
+
+    private boolean isDeleted(CommunityCommentQueryRow row) {
+        return row != null && "deleted".equalsIgnoreCase(safeText(row.getStatus()));
     }
 }

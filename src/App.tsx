@@ -47,6 +47,7 @@ import {
 } from './services/themeService';
 import {
   createCommunityComment,
+  deleteCommunityComment,
   favoriteCommunityWalk,
   fetchCommunityComments,
   fetchCommunityFeed,
@@ -67,9 +68,11 @@ import {
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  openNotificationStream,
+  type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
-import { createWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
+import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
@@ -1577,6 +1580,8 @@ export default function App() {
   const hasAutoLocatedRef = useRef(false);
   const roomSyncTimeoutRef = useRef<number | null>(null);
   const roomThemeSyncTimeoutRef = useRef<number | null>(null);
+  const notificationStreamRef = useRef<EventSource | null>(null);
+  const showNotificationCenterRef = useRef(false);
 
   useEffect(() => {
     setCheckedMissions([]);
@@ -1653,6 +1658,59 @@ export default function App() {
     setProfileAvatarPreview(user?.avatar || null);
     setProfileAvatarName('');
     setProfileBio(user?.bio || '');
+  }, [user]);
+
+  useEffect(() => {
+    showNotificationCenterRef.current = showNotificationCenter;
+  }, [showNotificationCenter]);
+
+  useEffect(() => {
+    notificationStreamRef.current?.close();
+    notificationStreamRef.current = null;
+
+    if (!user) {
+      return;
+    }
+
+    const token = getStoredToken();
+    if (!token) {
+      return;
+    }
+
+    const stream = openNotificationStream(token);
+    notificationStreamRef.current = stream;
+
+    stream.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as NotificationStreamEvent;
+        setNotificationUnreadCount(payload.unreadCount || 0);
+
+        if (payload.type === 'notification' && payload.notification) {
+          setNotifications((prev) => {
+            const nextItems = [payload.notification!, ...prev.filter((item) => item.id !== payload.notification!.id)];
+            return nextItems.slice(0, 30);
+          });
+          return;
+        }
+
+        if (payload.type === 'unread_count' && showNotificationCenterRef.current) {
+          void loadNotifications();
+        }
+      } catch (error) {
+        console.error('Notification stream parse error:', error);
+      }
+    };
+
+    stream.onerror = () => {
+      console.error('Notification stream connection error');
+    };
+
+    return () => {
+      stream.close();
+      if (notificationStreamRef.current === stream) {
+        notificationStreamRef.current = null;
+      }
+    };
   }, [user]);
 
   useEffect(() => {
@@ -2973,6 +3031,15 @@ export default function App() {
     );
   };
 
+  const removeWalkFromLocalState = (walkId: number) => {
+    setMyWalks((prev) => prev.filter((walk) => walk.id !== walkId));
+    setCommunityWalks((prev) => prev.filter((walk) => walk.id !== walkId));
+    setLikedWalks((prev) => prev.filter((walk) => walk.id !== walkId));
+    setFavoritedWalks((prev) => prev.filter((walk) => walk.id !== walkId));
+    setSelectedCommunityWalk((prev) => (prev?.id === walkId ? null : prev));
+    setSelectedProfileWalk((prev) => (prev?.id === walkId ? null : prev));
+  };
+
   const handleToggleCommunityLike = async (walk: CommunityWalkItem, event?: React.MouseEvent) => {
     event?.stopPropagation();
     event?.preventDefault();
@@ -3055,6 +3122,61 @@ export default function App() {
       setCommunityCommentError(error instanceof Error ? error.message : '评论发布失败，请先登录后重试。');
     } finally {
       setIsSubmittingCommunityComment(false);
+    }
+  };
+
+  const handleDeleteCommunityComment = async (commentId: number) => {
+    if (!selectedCommunityWalk) {
+      return;
+    }
+    const confirmed = window.confirm('删除后评论内容会变成“该评论已删除”，但楼层结构会保留。确定继续吗？');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteCommunityComment(commentId);
+      await loadCommunityComments(selectedCommunityWalk.id);
+    } catch (error) {
+      console.error('Delete community comment error:', error);
+      setCommunityCommentError(error instanceof Error ? error.message : '删除评论失败，请稍后再试。');
+    }
+  };
+
+  const handleDeleteWalk = async (walkId: number, options?: { source?: 'community' | 'profile' }) => {
+    const confirmed = window.confirm('删除后这条帖子将不会再出现在社区和个人主页中。确定继续吗？');
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteWalk(walkId);
+      removeWalkFromLocalState(walkId);
+
+      if (options?.source === 'community') {
+        setCommunityViewMode('feed');
+        setSelectedCommunityWalk(null);
+        setCommunityComments([]);
+        setCommunityReplyTarget(null);
+        setCommunityCommentInput('');
+      }
+
+      if (options?.source === 'profile') {
+        setProfileViewMode('feed');
+        setSelectedProfileWalk(null);
+      }
+
+      await refreshRecentWalks();
+      setCommunityError('');
+      setProfileMessage('帖子已删除。');
+    } catch (error) {
+      console.error('Delete walk error:', error);
+      const message = error instanceof Error ? error.message : '删除帖子失败，请稍后再试。';
+      if (options?.source === 'community') {
+        setCommunityError(message);
+      } else {
+        setProfileMessage(message);
+      }
     }
   };
 
@@ -4089,6 +4211,15 @@ export default function App() {
                         <Bookmark className={`h-4 w-4 ${selectedCommunityWalk.favorited ? 'fill-current' : ''}`} />
                         <span>{selectedCommunityWalk.favorited ? '已收藏' : '收藏'}</span>
                       </button>
+                      {selectedCommunityWalk.authorId === user?.id ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteWalk(selectedCommunityWalk.id, { source: 'community' })}
+                          className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-600 transition hover:bg-rose-100"
+                        >
+                          删除帖子
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -4169,15 +4300,28 @@ export default function App() {
                                 <div className="text-xs text-slate-400">{formatProfilePostDate(comment.createdAt)}</div>
                               </div>
                             </div>
-                            <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{comment.content}</p>
-                            <div className="mt-3">
-                              <button
-                                type="button"
-                                onClick={() => setCommunityReplyTarget({ id: comment.id, authorNickname: comment.authorNickname || '社区用户' })}
-                                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
-                              >
-                                回复
-                              </button>
+                            <p className={`mt-3 whitespace-pre-wrap text-sm leading-7 ${comment.deleted ? 'italic text-slate-400' : 'text-slate-700'}`}>
+                              {comment.content}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {!comment.deleted ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setCommunityReplyTarget({ id: comment.id, authorNickname: comment.authorNickname || '社区用户' })}
+                                  className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
+                                >
+                                  回复
+                                </button>
+                              ) : null}
+                              {!comment.deleted && comment.authorId === user?.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteCommunityComment(comment.id)}
+                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-100"
+                                >
+                                  删除
+                                </button>
+                              ) : null}
                             </div>
                             {comment.replies.length > 0 ? (
                               <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
@@ -4201,7 +4345,20 @@ export default function App() {
                                       </div>
                                       <div className="text-xs text-slate-400">{formatProfilePostDate(reply.createdAt)}</div>
                                     </div>
-                                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{reply.content}</p>
+                                    <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${reply.deleted ? 'italic text-slate-400' : 'text-slate-700'}`}>
+                                      {reply.content}
+                                    </p>
+                                    {!reply.deleted && reply.authorId === user?.id ? (
+                                      <div className="mt-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => void handleDeleteCommunityComment(reply.id)}
+                                          className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
+                                        >
+                                          删除
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 ))}
                               </div>
@@ -4549,6 +4706,16 @@ export default function App() {
                   >
                     返回个人主页
                   </button>
+
+                  {selectedProfileWalk.authorId === user?.id ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteWalk(selectedProfileWalk.id, { source: 'profile' })}
+                      className="mb-6 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-100"
+                    >
+                      删除帖子
+                    </button>
+                  ) : null}
 
                   <article className="mx-auto max-w-3xl space-y-6">
                     {selectedProfileCommunityWalk ? (

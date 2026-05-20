@@ -11,9 +11,11 @@ import com.liuliu.citywalk.model.dto.request.CompletedMissionRequest;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
 import com.liuliu.citywalk.model.dto.request.PathPointRequest;
 import com.liuliu.citywalk.model.dto.request.RoomMemberTrackRequest;
+import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.model.dto.response.RoomMemberTrackResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.util.LinkedHashMap;
@@ -80,6 +82,20 @@ public class WalkService {
 
     public WalkResponse getDetail(Long id) {
         return Optional.ofNullable(walkRecordMapper.findActiveById(id)).map(this::toWalkResponse).orElse(null);
+    }
+
+    @Transactional
+    public OperationResultResponse deleteWalk(Long walkId, Long userId) {
+        WalkRecordEntity walk = walkRecordMapper.findActiveById(walkId);
+        if (walk == null) {
+            throw new IllegalStateException("walk_not_found");
+        }
+        if (!equalsLong(walk.getUserId(), userId)) {
+            throw new IllegalStateException("walk_forbidden");
+        }
+
+        walkRecordMapper.softDeleteById(walkId);
+        return new OperationResultResponse(Boolean.TRUE);
     }
 
     private WalkResponse toWalkResponse(WalkRecordEntity entity) {
@@ -281,5 +297,9 @@ public class WalkService {
 
     private Long toEpochMilli(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant().toEpochMilli();
+    }
+
+    private boolean equalsLong(Long left, Long right) {
+        return left != null && left.equals(right);
     }
 }

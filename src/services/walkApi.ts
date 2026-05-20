@@ -79,3 +79,9 @@ export async function fetchPublicWalks(page = 1, pageSize = 20): Promise<WalkIte
 export async function fetchWalkDetail(walkId: number): Promise<WalkItem> {
   return apiRequest<WalkItem>(`/api/v1/walks/${walkId}`);
 }
+
+export async function deleteWalk(walkId: number): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>(`/api/v1/walks/${walkId}`, {
+    method: 'DELETE',
+  });
+}

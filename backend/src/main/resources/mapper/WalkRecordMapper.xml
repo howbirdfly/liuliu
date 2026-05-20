@@ -73,4 +73,12 @@
         limit 1
     </select>
 
+    <update id="softDeleteById">
+        update walk_records
+        set status = 'deleted',
+            updated_at = now()
+        where id = #{id}
+          and status = 'active'
+    </update>
+
 </mapper>

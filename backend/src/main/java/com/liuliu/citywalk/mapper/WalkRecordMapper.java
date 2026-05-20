@@ -18,4 +18,6 @@ public interface WalkRecordMapper {
     WalkRecordEntity findActiveById(@Param("id") Long id);
 
     WalkRecordEntity findPublicActiveById(@Param("id") Long id);
+
+    int softDeleteById(@Param("id") Long id);
 }

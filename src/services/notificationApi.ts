@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { apiRequest, getApiBaseUrlForDebug } from './apiClient';
 
 export type UserNotificationType =
   | 'post_commented'
@@ -24,6 +24,12 @@ interface NotificationUnreadCountPayload {
   unreadCount: number;
 }
 
+export interface NotificationStreamEvent {
+  type: 'snapshot' | 'notification' | 'unread_count';
+  unreadCount: number;
+  notification?: UserNotificationItem | null;
+}
+
 export async function fetchNotifications(page = 1, pageSize = 20): Promise<UserNotificationItem[]> {
   return apiRequest<UserNotificationItem[]>(`/api/v1/notifications?page=${page}&pageSize=${pageSize}`);
 }
@@ -43,4 +49,9 @@ export async function markAllNotificationsRead(): Promise<void> {
   await apiRequest('/api/v1/notifications/read-all', {
     method: 'POST',
   });
+}
+
+export function openNotificationStream(token: string): EventSource {
+  const streamUrl = `${getApiBaseUrlForDebug()}/api/v1/notifications/stream?token=${encodeURIComponent(token)}`;
+  return new EventSource(streamUrl);
 }

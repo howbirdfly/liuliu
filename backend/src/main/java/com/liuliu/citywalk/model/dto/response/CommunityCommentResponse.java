@@ -10,6 +10,7 @@ public record CommunityCommentResponse(
         String authorNickname,
         String authorAvatar,
         String content,
+        Boolean deleted,
         Long createdAt,
         List<CommunityCommentResponse> replies
 ) {

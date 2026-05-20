@@ -28,6 +28,7 @@ export interface CommunityCommentItem {
   authorNickname: string;
   authorAvatar?: string;
   content: string;
+  deleted?: boolean;
   createdAt?: number;
   replies: CommunityCommentItem[];
 }
@@ -70,6 +71,12 @@ export async function createCommunityComment(
   return apiRequest<CommunityCommentItem>(`/api/v1/community/walks/${walkId}/comments`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteCommunityComment(commentId: number): Promise<boolean> {
+  return apiRequest<boolean>(`/api/v1/community/comments/${commentId}`, {
+    method: 'DELETE',
   });
 }
 
