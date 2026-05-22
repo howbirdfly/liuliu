@@ -8,6 +8,7 @@ import com.liuliu.citywalk.service.UserSessionService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,15 +34,20 @@ public class NotificationController {
     }
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(
+    public ResponseEntity<SseEmitter> stream(
             @RequestParam(required = false) String token,
+            @RequestParam(required = false) Long sinceId,
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventIdHeader,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
     ) {
         UserSessionService.StoredUser currentUser = resolveStreamUser(token, authorizationHeader);
         if (currentUser == null || currentUser.isGuest()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login_required");
         }
-        return notificationService.subscribe(currentUser.id());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header("X-Accel-Buffering", "no")
+                .body(notificationService.subscribe(currentUser.id(), resolveLastEventId(lastEventIdHeader, sinceId)));
     }
 
     @GetMapping
@@ -117,5 +123,18 @@ public class NotificationController {
             return userSessionService.resolveUserByToken(token.trim());
         }
         return userSessionService.resolveUser(authorizationHeader);
+    }
+
+    private Long resolveLastEventId(String lastEventIdHeader, Long sinceId) {
+        String normalizedHeader = lastEventIdHeader == null ? "" : lastEventIdHeader.trim();
+        if (!normalizedHeader.isBlank()) {
+            try {
+                long value = Long.parseLong(normalizedHeader);
+                return value > 0 ? value : null;
+            } catch (NumberFormatException ignored) {
+                return sinceId != null && sinceId > 0 ? sinceId : null;
+            }
+        }
+        return sinceId != null && sinceId > 0 ? sinceId : null;
     }
 }

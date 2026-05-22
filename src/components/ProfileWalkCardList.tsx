@@ -33,29 +33,29 @@ export function ProfileWalkCardList({
         <button
           key={walk.id}
           onClick={() => onOpenWalk(walk.id)}
-          className="group overflow-hidden rounded-[16px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+          className="group overflow-hidden rounded-[14px] border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
         >
           {walk.photoUrl ? (
             <img
               src={walk.photoUrl}
               alt={walk.themeTitle}
-              className={`${getCoverHeightClass(walk)} w-full rounded-t-[16px] object-cover`}
+              className={`${getCoverHeightClass(walk)} w-full rounded-t-[14px] object-cover`}
             />
           ) : (
             <div
-              className={`${getGradientClass(walk)} ${getCoverHeightClass(walk)} flex items-end rounded-t-[16px] px-3 py-3 text-white`}
+              className={`${getGradientClass(walk)} ${getCoverHeightClass(walk)} flex items-end rounded-t-[14px] px-2.5 py-2.5 text-white`}
             >
               <div>
-                <div className="text-xs uppercase tracking-[0.2em] text-white/70">{walk.themeCategory || '城市漫步'}</div>
-                <div className="mt-2 text-sm font-semibold leading-tight">{walk.themeTitle}</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/70">{walk.themeCategory || '城市漫步'}</div>
+                <div className="mt-1.5 text-[13px] font-semibold leading-tight">{walk.themeTitle}</div>
               </div>
             </div>
           )}
 
-          <div className="space-y-2 px-2.5 py-2.5">
+          <div className="space-y-1.5 px-2 py-2">
             <div>
-              <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900">{walk.themeTitle}</div>
-              <p className="mt-1 truncate text-xs text-slate-500">{buildSummary(walk)}</p>
+              <div className="line-clamp-2 text-[13px] font-semibold leading-4 text-slate-900">{walk.themeTitle}</div>
+              <p className="mt-1 truncate text-[11px] text-slate-500">{buildSummary(walk)}</p>
             </div>
 
             <div className="hidden flex-wrap gap-2 text-xs text-slate-500">
@@ -72,17 +72,17 @@ export function ProfileWalkCardList({
             </div>
 
             <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <img
                   src={walk.authorAvatar || fallbackAvatarUrl || 'https://placehold.co/40x40?text=U'}
                   alt="author avatar"
-                  className="h-5 w-5 rounded-full object-cover"
+                  className="h-4 w-4 rounded-full object-cover"
                 />
-                <div className="max-w-[4.5rem] truncate text-xs text-slate-600">
+                <div className="max-w-[4rem] truncate text-[11px] text-slate-600">
                   {walk.authorNickname || fallbackNickname || '我的记录'}
                 </div>
               </div>
-              <div className="text-xs text-slate-400">{formatDate(walk.createdAt)}</div>
+              <div className="shrink-0 text-[10px] text-slate-400">{formatDate(walk.createdAt)}</div>
             </div>
           </div>
         </button>

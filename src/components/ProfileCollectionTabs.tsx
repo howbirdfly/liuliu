@@ -13,13 +13,13 @@ const PROFILE_COLLECTION_TABS: Array<{ id: ProfileCollectionTab; label: string }
 
 export function ProfileCollectionTabs({ activeTab, onChange }: ProfileCollectionTabsProps) {
   return (
-    <div className="mb-6 flex flex-wrap gap-2">
+    <div className="mb-3 grid grid-cols-3 gap-2">
       {PROFILE_COLLECTION_TABS.map((tab) => (
         <button
           key={tab.id}
           type="button"
           onClick={() => onChange(tab.id)}
-          className={`rounded-full px-4 py-2 text-sm transition ${
+          className={`rounded-full px-2 py-2 text-xs transition ${
             activeTab === tab.id ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
           }`}
         >

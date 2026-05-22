@@ -9,6 +9,7 @@ import com.liuliu.citywalk.mapper.WalkRecordMapper;
 import com.liuliu.citywalk.mapper.entity.CommunityCommentEntity;
 import com.liuliu.citywalk.mapper.entity.CommunityCommentQueryRow;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
+import com.liuliu.citywalk.mapper.entity.WalkRecordEntity;
 import com.liuliu.citywalk.model.dto.request.CommunityCommentCreateRequest;
 import com.liuliu.citywalk.model.dto.response.CommunityCommentResponse;
 import com.liuliu.citywalk.model.dto.response.CommunityEngagementResponse;
@@ -146,15 +147,15 @@ public class CommunityService {
         return buildEngagementResponse(walkId, userId);
     }
 
-    public List<CommunityCommentResponse> listComments(Long walkId) {
-        ensurePublicWalkExists(walkId);
+    public List<CommunityCommentResponse> listComments(Long walkId, Long currentUserId) {
+        ensureCommentableWalkExists(walkId, currentUserId);
         List<CommunityCommentQueryRow> rows = communityCommentMapper.findVisibleByWalkId(walkId);
         return buildCommentTree(rows);
     }
 
     @Transactional
     public CommunityCommentResponse createComment(Long walkId, Long userId, CommunityCommentCreateRequest body) {
-        ensurePublicWalkExists(walkId);
+        ensureCommentableWalkExists(walkId, userId);
         String content = body.content() == null ? "" : body.content().trim();
         if (content.isBlank()) {
             throw new IllegalStateException("comment_content_invalid");
@@ -314,6 +315,23 @@ public class CommunityService {
         if (walkId == null || walkId <= 0 || walkRecordMapper.findPublicActiveById(walkId) == null) {
             throw new IllegalStateException("walk_not_found");
         }
+    }
+
+    private void ensureCommentableWalkExists(Long walkId, Long currentUserId) {
+        if (walkId == null || walkId <= 0) {
+            throw new IllegalStateException("walk_not_found");
+        }
+        WalkRecordEntity walk = walkRecordMapper.findActiveById(walkId);
+        if (walk == null) {
+            throw new IllegalStateException("walk_not_found");
+        }
+        if (Boolean.TRUE.equals(walk.getIsPublic())) {
+            return;
+        }
+        if (currentUserId != null && Objects.equals(walk.getUserId(), currentUserId)) {
+            return;
+        }
+        throw new IllegalStateException("walk_not_found");
     }
 
     private boolean hasLike(Long walkId, Long userId) {

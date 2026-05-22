@@ -10,6 +10,7 @@ import com.liuliu.citywalk.mapper.entity.WalkRecordEntity;
 import com.liuliu.citywalk.model.dto.response.NotificationUnreadCountResponse;
 import com.liuliu.citywalk.model.dto.response.NotificationStreamEventResponse;
 import com.liuliu.citywalk.model.dto.response.UserNotificationResponse;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -19,6 +20,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class NotificationService {
@@ -30,23 +34,44 @@ public class NotificationService {
     private static final String DEFAULT_ACTOR_NAME = "Community Walker";
     private static final long SSE_TIMEOUT_MS = 30L * 60L * 1000L;
     private static final long SSE_RETRY_MS = 3000L;
+    private static final long HEARTBEAT_INTERVAL_MS = 25_000L;
+    private static final int REPLAY_LIMIT = 100;
 
     private final UserNotificationMapper userNotificationMapper;
     private final WalkRecordMapper walkRecordMapper;
     private final CommunityCommentMapper communityCommentMapper;
+    private final NotificationUnreadCountCache notificationUnreadCountCache;
     private final Map<Long, Map<String, SseEmitter>> emittersByUserId = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "notification-sse-heartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public NotificationService(
             UserNotificationMapper userNotificationMapper,
             WalkRecordMapper walkRecordMapper,
-            CommunityCommentMapper communityCommentMapper
+            CommunityCommentMapper communityCommentMapper,
+            NotificationUnreadCountCache notificationUnreadCountCache
     ) {
         this.userNotificationMapper = userNotificationMapper;
         this.walkRecordMapper = walkRecordMapper;
         this.communityCommentMapper = communityCommentMapper;
+        this.notificationUnreadCountCache = notificationUnreadCountCache;
+        this.heartbeatExecutor.scheduleWithFixedDelay(
+                this::broadcastHeartbeatSafely,
+                HEARTBEAT_INTERVAL_MS,
+                HEARTBEAT_INTERVAL_MS,
+                TimeUnit.MILLISECONDS
+        );
     }
 
-    public SseEmitter subscribe(Long userId) {
+    @PreDestroy
+    public void shutdownHeartbeat() {
+        heartbeatExecutor.shutdownNow();
+    }
+
+    public SseEmitter subscribe(Long userId, Long lastEventId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
         String emitterId = UUID.randomUUID().toString();
 
@@ -61,11 +86,13 @@ public class NotificationService {
         });
         emitter.onError(error -> removeEmitter(userId, emitterId));
 
+        replayMissedNotifications(userId, lastEventId, emitterId, emitter);
+
         sendEvent(userId, emitterId, emitter, new NotificationStreamEventResponse(
                 "snapshot",
                 unreadCountValue(userId),
                 null
-        ), true);
+        ), true, null);
 
         return emitter;
     }
@@ -79,13 +106,13 @@ public class NotificationService {
     }
 
     public NotificationUnreadCountResponse unreadCount(Long userId) {
-        Integer count = userNotificationMapper.countUnreadByRecipientUserId(userId);
-        return new NotificationUnreadCountResponse(count == null ? 0L : count.longValue());
+        return new NotificationUnreadCountResponse(unreadCountValue(userId));
     }
 
     public void markRead(Long notificationId, Long userId) {
         int updatedRows = userNotificationMapper.markRead(notificationId, userId);
         if (updatedRows > 0) {
+            notificationUnreadCountCache.incrementIfPresent(userId, -updatedRows);
             pushUnreadCount(userId);
         }
     }
@@ -93,6 +120,7 @@ public class NotificationService {
     public void markAllRead(Long userId) {
         int updatedRows = userNotificationMapper.markAllRead(userId);
         if (updatedRows > 0) {
+            notificationUnreadCountCache.put(userId, 0L);
             pushUnreadCount(userId);
         }
     }
@@ -159,6 +187,7 @@ public class NotificationService {
         entity.setCommentId(commentId);
         entity.setIsRead(Boolean.FALSE);
         userNotificationMapper.insert(entity);
+        notificationUnreadCountCache.incrementIfPresent(recipientUserId, 1L);
         pushNotification(recipientUserId, entity.getId());
     }
 
@@ -210,7 +239,7 @@ public class NotificationService {
                 "notification",
                 unreadCountValue(recipientUserId),
                 toResponse(row)
-        ));
+        ), notificationId);
     }
 
     private void pushUnreadCount(Long userId) {
@@ -218,21 +247,69 @@ public class NotificationService {
                 "unread_count",
                 unreadCountValue(userId),
                 null
-        ));
+        ), null);
     }
 
     private Long unreadCountValue(Long userId) {
+        Long cachedValue = notificationUnreadCountCache.get(userId);
+        if (cachedValue != null) {
+            return Math.max(0L, cachedValue);
+        }
+
         Integer count = userNotificationMapper.countUnreadByRecipientUserId(userId);
-        return count == null ? 0L : count.longValue();
+        long unreadCount = count == null ? 0L : count.longValue();
+        notificationUnreadCountCache.put(userId, unreadCount);
+        return unreadCount;
     }
 
-    private void broadcast(Long userId, NotificationStreamEventResponse payload) {
+    private void broadcast(Long userId, NotificationStreamEventResponse payload, Long eventId) {
         Map<String, SseEmitter> emitters = emittersByUserId.get(userId);
         if (emitters == null || emitters.isEmpty()) {
             return;
         }
 
-        emitters.forEach((emitterId, emitter) -> sendEvent(userId, emitterId, emitter, payload, false));
+        emitters.forEach((emitterId, emitter) -> sendEvent(userId, emitterId, emitter, payload, false, eventId));
+    }
+
+    private void replayMissedNotifications(Long userId, Long lastEventId, String emitterId, SseEmitter emitter) {
+        if (lastEventId == null || lastEventId <= 0) {
+            return;
+        }
+
+        List<UserNotificationQueryRow> missedRows = userNotificationMapper.findByRecipientUserIdAfterId(userId, lastEventId, REPLAY_LIMIT);
+        for (UserNotificationQueryRow row : missedRows) {
+            if (row.getId() == null) {
+                continue;
+            }
+            sendEvent(
+                    userId,
+                    emitterId,
+                    emitter,
+                    new NotificationStreamEventResponse("notification", null, toResponse(row)),
+                    false,
+                    row.getId()
+            );
+        }
+    }
+
+    private void broadcastHeartbeatSafely() {
+        try {
+            emittersByUserId.forEach((userId, emitters) -> {
+                if (emitters == null || emitters.isEmpty()) {
+                    return;
+                }
+                emitters.forEach((emitterId, emitter) -> sendEvent(
+                        userId,
+                        emitterId,
+                        emitter,
+                        new NotificationStreamEventResponse("ping", null, null),
+                        false,
+                        null
+                ));
+            });
+        } catch (Exception ignored) {
+            // Heartbeat should never take down the notification service.
+        }
     }
 
     private void sendEvent(
@@ -240,11 +317,15 @@ public class NotificationService {
             String emitterId,
             SseEmitter emitter,
             NotificationStreamEventResponse payload,
-            boolean includeReconnectHint
+            boolean includeReconnectHint,
+            Long eventId
     ) {
         try {
             SseEmitter.SseEventBuilder eventBuilder = SseEmitter.event()
                     .data(payload, org.springframework.http.MediaType.APPLICATION_JSON);
+            if (eventId != null && eventId > 0) {
+                eventBuilder.id(String.valueOf(eventId));
+            }
             if (includeReconnectHint) {
                 eventBuilder.reconnectTime(SSE_RETRY_MS);
             }

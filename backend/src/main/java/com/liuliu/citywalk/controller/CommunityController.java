@@ -53,9 +53,9 @@ public class CommunityController {
     }
 
     @GetMapping("/walks/{walkId}/comments")
-    public ApiResponse<List<CommunityCommentResponse>> comments(@PathVariable Long walkId) {
+    public ApiResponse<List<CommunityCommentResponse>> comments(HttpServletRequest request, @PathVariable Long walkId) {
         try {
-            return ApiResponse.success(communityService.listComments(walkId));
+            return ApiResponse.success(communityService.listComments(walkId, resolveOptionalUserId(request)));
         } catch (IllegalStateException error) {
             return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
         }

@@ -18,7 +18,6 @@ import {
   Heart,
   Bookmark,
   SlidersHorizontal,
-  MessageCircle,
   Pencil,
   X,
 } from 'lucide-react';
@@ -94,6 +93,7 @@ import { ProfileCommunityEngagementCard } from './components/ProfileCommunityEng
 import { ProfileStatsGrid } from './components/ProfileStatsGrid';
 import { ProfileWalkDetailBody } from './components/ProfileWalkDetailBody';
 import { ProfileWalkCardList } from './components/ProfileWalkCardList';
+import { WalkCommentSection } from './components/WalkCommentSection';
 
 type SearchLocation = {
   name: string;
@@ -1480,9 +1480,9 @@ function buildProfilePostSummary(walk: WalkItem) {
 function getProfilePostCoverHeightClass(walk: WalkItem) {
   const seed = (walk.id || 0) % 3;
   if (walk.photoUrl) {
-    return seed === 0 ? 'h-36' : seed === 1 ? 'h-40' : 'h-32';
+    return seed === 0 ? 'h-28' : seed === 1 ? 'h-32' : 'h-24';
   }
-  return seed === 0 ? 'h-32' : seed === 1 ? 'h-36' : 'h-34';
+  return seed === 1 ? 'h-28' : 'h-24';
 }
 
 function getProfilePostGradient(walk: WalkItem) {
@@ -1692,7 +1692,13 @@ export default function App() {
     stream.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data) as NotificationStreamEvent;
-        setNotificationUnreadCount(payload.unreadCount || 0);
+        if (typeof payload.unreadCount === 'number') {
+          setNotificationUnreadCount(payload.unreadCount);
+        }
+
+        if (payload.type === 'ping') {
+          return;
+        }
 
         if (payload.type === 'notification' && payload.notification) {
           setNotifications((prev) => {
@@ -2821,6 +2827,10 @@ export default function App() {
   const handleOpenProfileWalk = async (walkId: number) => {
     setIsLoadingProfile(true);
     setProfileViewMode('post');
+    setCommunityCommentInput('');
+    setCommunityReplyTarget(null);
+    setCommunityCommentError('');
+    setCommunityComments([]);
     try {
       const preview = profileWalkSource.find((walk) => walk.id === walkId) || myWalks.find((walk) => walk.id === walkId);
       if (preview) {
@@ -2829,6 +2839,7 @@ export default function App() {
       if (profileCollectionTab === 'mine') {
         const detail = await fetchWalkDetail(walkId);
         setSelectedProfileWalk(preview ? { ...preview, ...detail } : detail);
+        await loadCommunityComments(walkId);
         return;
       }
 
@@ -2838,6 +2849,7 @@ export default function App() {
       setFavoritedWalks((prev) => prev.map((walk) => (walk.id === walkId ? { ...walk, ...detail } : walk)));
       setSelectedCommunityWalk((prev) => (prev && prev.id === walkId ? { ...prev, ...detail } : prev));
       setSelectedProfileWalk(preview ? { ...preview, ...detail } : detail);
+      await loadCommunityComments(walkId);
     } catch (error) {
       console.error('Fetch walk detail error:', error);
       setProfileViewMode('feed');
@@ -2933,6 +2945,13 @@ export default function App() {
     }
     return null;
   }, [selectedProfileWalk]);
+
+  const activeCommentWalk =
+    activeTab === 'profile' && profileViewMode === 'post'
+      ? selectedProfileWalk
+      : activeTab === 'community' && communityViewMode === 'post'
+      ? selectedCommunityWalk
+      : null;
 
   const applyCommunityEngagementState = (nextState: CommunityEngagementState) => {
     const matchedCommunityWalk =
@@ -3201,7 +3220,7 @@ export default function App() {
   };
 
   const handleSubmitCommunityComment = async () => {
-    if (!selectedCommunityWalk) {
+    if (!activeCommentWalk) {
       return;
     }
     const content = communityCommentInput.trim();
@@ -3213,13 +3232,13 @@ export default function App() {
     setIsSubmittingCommunityComment(true);
     setCommunityCommentError('');
     try {
-      await createCommunityComment(selectedCommunityWalk.id, {
+      await createCommunityComment(activeCommentWalk.id, {
         content,
         parentId: communityReplyTarget?.id ?? null,
       });
       setCommunityCommentInput('');
       setCommunityReplyTarget(null);
-      await loadCommunityComments(selectedCommunityWalk.id);
+      await loadCommunityComments(activeCommentWalk.id);
     } catch (error) {
       console.error('Submit community comment error:', error);
       setCommunityCommentError(error instanceof Error ? error.message : '评论发布失败，请先登录后重试。');
@@ -3229,7 +3248,7 @@ export default function App() {
   };
 
   const handleDeleteCommunityComment = async (commentId: number) => {
-    if (!selectedCommunityWalk) {
+    if (!activeCommentWalk) {
       return;
     }
     const confirmed = window.confirm('删除后评论内容会变成“该评论已删除”，但楼层结构会保留。确定继续吗？');
@@ -3239,7 +3258,7 @@ export default function App() {
 
     try {
       await deleteCommunityComment(commentId);
-      await loadCommunityComments(selectedCommunityWalk.id);
+      await loadCommunityComments(activeCommentWalk.id);
     } catch (error) {
       console.error('Delete community comment error:', error);
       setCommunityCommentError(error instanceof Error ? error.message : '删除评论失败，请稍后再试。');
@@ -3267,6 +3286,9 @@ export default function App() {
       if (options?.source === 'profile') {
         setProfileViewMode('feed');
         setSelectedProfileWalk(null);
+        setCommunityComments([]);
+        setCommunityReplyTarget(null);
+        setCommunityCommentInput('');
       }
 
       await refreshRecentWalks();
@@ -4426,151 +4448,28 @@ export default function App() {
                     </div>
                   </div>
 
-                  <section className="order-last rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 sm:rounded-[28px] sm:px-5 sm:py-5">
-                    <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                      <MessageCircle className="h-4 w-4" />
-                      评论区
-                    </div>
-                    <div className="mt-4 space-y-3">
-                      {communityReplyTarget ? (
-                        <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2 text-xs text-slate-500">
-                          <span>回复 @{communityReplyTarget.authorNickname}</span>
-                          <button
-                            type="button"
-                            onClick={() => setCommunityReplyTarget(null)}
-                            className="rounded-full border border-slate-200 px-2 py-1 text-slate-500 transition hover:bg-slate-50"
-                          >
-                            取消回复
-                          </button>
-                        </div>
-                      ) : null}
-                      <textarea
-                        value={communityCommentInput}
-                        onChange={(event) => {
-                          setCommunityCommentInput(event.target.value);
-                          if (communityCommentError) {
-                            setCommunityCommentError('');
-                          }
-                        }}
-                        maxLength={500}
-                        rows={3}
-                        placeholder={communityReplyTarget ? `回复 ${communityReplyTarget.authorNickname}...` : '写下你的想法...'}
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 text-slate-700 outline-none"
-                      />
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs text-slate-400">{communityCommentInput.trim().length}/500</div>
-                        <button
-                          type="button"
-                          onClick={() => void handleSubmitCommunityComment()}
-                          disabled={isSubmittingCommunityComment || communityCommentInput.trim().length === 0}
-                          className="rounded-full bg-slate-900 px-4 py-2 text-sm text-white transition hover:bg-slate-800 disabled:opacity-60"
-                        >
-                          {isSubmittingCommunityComment ? '发布中...' : communityReplyTarget ? '发布回复' : '发布评论'}
-                        </button>
-                      </div>
-                      {communityCommentError ? (
-                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
-                          {communityCommentError}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {isLoadingCommunityComments ? (
-                        <div className="text-sm text-slate-500">评论加载中...</div>
-                      ) : communityComments.length === 0 ? (
-                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">
-                          还没有评论，来抢个沙发吧。
-                        </div>
-                      ) : (
-                        communityComments.map((comment) => (
-                          <article key={comment.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                            <div className="flex items-center gap-2">
-                              <img
-                                src={
-                                  comment.authorAvatar ||
-                                  (comment.authorId === selectedCommunityWalk.authorId
-                                    ? selectedCommunityWalk.authorAvatar
-                                    : undefined) ||
-                                  (comment.authorId === user?.id ? user?.avatar : undefined) ||
-                                  'https://placehold.co/64x64?text=U'
-                                }
-                                alt={comment.authorNickname || '社区用户'}
-                                className="h-8 w-8 rounded-full object-cover"
-                              />
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium text-slate-800">{comment.authorNickname || '社区用户'}</div>
-                                <div className="text-xs text-slate-400">{formatProfilePostDate(comment.createdAt)}</div>
-                              </div>
-                            </div>
-                            <p className={`mt-3 whitespace-pre-wrap text-sm leading-7 ${comment.deleted ? 'italic text-slate-400' : 'text-slate-700'}`}>
-                              {comment.content}
-                            </p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {!comment.deleted ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setCommunityReplyTarget({ id: comment.id, authorNickname: comment.authorNickname || '社区用户' })}
-                                  className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
-                                >
-                                  回复
-                                </button>
-                              ) : null}
-                              {!comment.deleted && comment.authorId === user?.id ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDeleteCommunityComment(comment.id)}
-                                  className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-100"
-                                >
-                                  删除
-                                </button>
-                              ) : null}
-                            </div>
-                            {comment.replies.length > 0 ? (
-                              <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-                                {comment.replies.map((reply) => (
-                                  <div key={reply.id} className="rounded-xl bg-slate-50 px-3 py-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div className="flex items-center gap-2">
-                                        <img
-                                          src={
-                                            reply.authorAvatar ||
-                                            (reply.authorId === selectedCommunityWalk.authorId
-                                              ? selectedCommunityWalk.authorAvatar
-                                              : undefined) ||
-                                            (reply.authorId === user?.id ? user?.avatar : undefined) ||
-                                            'https://placehold.co/64x64?text=U'
-                                          }
-                                          alt={reply.authorNickname || '社区用户'}
-                                          className="h-6 w-6 rounded-full object-cover"
-                                        />
-                                        <div className="text-xs font-medium text-slate-700">{reply.authorNickname || '社区用户'}</div>
-                                      </div>
-                                      <div className="text-xs text-slate-400">{formatProfilePostDate(reply.createdAt)}</div>
-                                    </div>
-                                    <p className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${reply.deleted ? 'italic text-slate-400' : 'text-slate-700'}`}>
-                                      {reply.content}
-                                    </p>
-                                    {!reply.deleted && reply.authorId === user?.id ? (
-                                      <div className="mt-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => void handleDeleteCommunityComment(reply.id)}
-                                          className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
-                                        >
-                                          删除
-                                        </button>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </article>
-                        ))
-                      )}
-                    </div>
-                  </section>
+                  <WalkCommentSection
+                    comments={communityComments}
+                    isLoading={isLoadingCommunityComments}
+                    inputValue={communityCommentInput}
+                    replyTarget={communityReplyTarget}
+                    isSubmitting={isSubmittingCommunityComment}
+                    error={communityCommentError}
+                    walkAuthorId={selectedCommunityWalk.authorId}
+                    walkAuthorAvatar={selectedCommunityWalk.authorAvatar}
+                    currentUserId={user?.id}
+                    currentUserAvatar={user?.avatar}
+                    formatDate={formatProfilePostDate}
+                    onInputChange={(value) => {
+                      setCommunityCommentInput(value);
+                      if (communityCommentError) {
+                        setCommunityCommentError('');
+                      }
+                    }}
+                    onReplyChange={setCommunityReplyTarget}
+                    onSubmit={() => void handleSubmitCommunityComment()}
+                    onDelete={(commentId) => void handleDeleteCommunityComment(commentId)}
+                  />
 
                   {selectedCommunityWalk.noteText ? (
                     <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
@@ -4869,7 +4768,7 @@ export default function App() {
         ) : (
           <>
             {profileViewMode === 'post' && selectedProfileWalk ? (
-              <main className="space-y-6">
+              <main className="space-y-3">
                 <section className="hidden rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
                   <div className="mb-6 flex items-start justify-between gap-4">
                     <div>
@@ -4899,38 +4798,44 @@ export default function App() {
                   )}
                 </section>
 
-                <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                  <button
-                    onClick={() => {
-                      setProfileViewMode('feed');
-                      setSelectedProfileWalk(null);
-                    }}
-                    className="mb-6 rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
-                  >
-                    返回个人主页
-                  </button>
+                <section className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => {
+                        setProfileViewMode('feed');
+                        setSelectedProfileWalk(null);
+                        setCommunityComments([]);
+                        setCommunityReplyTarget(null);
+                        setCommunityCommentInput('');
+                        setCommunityCommentError('');
+                      }}
+                      className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
+                    >
+                      返回个人主页
+                    </button>
 
-                  {selectedProfileWalk.authorId === user?.id ? (
-                    <>
+                    {selectedProfileWalk.authorId === user?.id ? (
+                      <>
                       <button
                         type="button"
                         onClick={() => openWalkEditor(selectedProfileWalk)}
-                        className="mb-3 mr-2 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
                       >
-                        <Pencil className="h-4 w-4" />
+                        <Pencil className="h-3.5 w-3.5" />
                         编辑帖子
                       </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteWalk(selectedProfileWalk.id, { source: 'profile' })}
-                      className="mb-6 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-100"
-                    >
-                      删除帖子
-                    </button>
-                    </>
-                  ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteWalk(selectedProfileWalk.id, { source: 'profile' })}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-100"
+                      >
+                        删除帖子
+                      </button>
+                      </>
+                    ) : null}
+                  </div>
 
-                  <article className="mx-auto max-w-3xl space-y-6">
+                  <article className="mx-auto max-w-3xl space-y-4">
                     {selectedProfileCommunityWalk ? (
                       <ProfileCommunityEngagementCard
                         walk={selectedProfileCommunityWalk}
@@ -4957,34 +4862,56 @@ export default function App() {
                         />
                       }
                     />
+                    <WalkCommentSection
+                      comments={communityComments}
+                      isLoading={isLoadingCommunityComments}
+                      inputValue={communityCommentInput}
+                      replyTarget={communityReplyTarget}
+                      isSubmitting={isSubmittingCommunityComment}
+                      error={communityCommentError}
+                      walkAuthorId={selectedProfileWalk.authorId}
+                      walkAuthorAvatar={selectedProfileWalk.authorAvatar || profileAvatarPreview || user?.avatar || undefined}
+                      currentUserId={user?.id}
+                      currentUserAvatar={user?.avatar}
+                      formatDate={formatProfilePostDate}
+                      onInputChange={(value) => {
+                        setCommunityCommentInput(value);
+                        if (communityCommentError) {
+                          setCommunityCommentError('');
+                        }
+                      }}
+                      onReplyChange={setCommunityReplyTarget}
+                      onSubmit={() => void handleSubmitCommunityComment()}
+                      onDelete={(commentId) => void handleDeleteCommunityComment(commentId)}
+                    />
                   </article>
                 </section>
               </main>
             ) : (
-              <main className="space-y-6">
-                <section className="rounded-[32px] border border-slate-200 bg-white px-6 py-7 shadow-sm sm:px-8">
-                  <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                    <div className="flex items-center gap-4">
+              <main className="space-y-3">
+                <section className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
                       <img
                         src={profileAvatarPreview || user?.avatar || 'https://placehold.co/120x120?text=U'}
                         alt="profile avatar"
-                        className="h-24 w-24 rounded-[28px] object-cover"
+                        className="h-16 w-16 rounded-[18px] object-cover"
                       />
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-slate-400">My Citywalk Notes</p>
-                        <h2 className="mt-2 text-3xl font-semibold text-slate-900">{user?.nickname || '还未登录'}</h2>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">My Citywalk Notes</p>
+                        <h2 className="mt-1 truncate text-2xl font-semibold text-slate-900">{user?.nickname || '还未登录'}</h2>
                         {user?.bio?.trim() ? (
-                          <p className="mt-3 max-w-2xl whitespace-pre-line text-sm leading-7 text-slate-500">
+                          <p className="mt-1.5 line-clamp-2 whitespace-pre-line text-xs leading-5 text-slate-500">
                             {user.bio.trim()}
                           </p>
                         ) : null}
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-3">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setShowProfileEditor((value) => !value)}
-                        className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                        className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
                       >
                         {showProfileEditor ? '收起资料编辑' : '编辑主页资料'}
                       </button>
@@ -4992,13 +4919,13 @@ export default function App() {
                         <>
                           <button
                             onClick={handleSignOut}
-                          className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+                          className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
                         >
                           退出登录
                         </button>
                           <button
                             onClick={() => void handleDeleteAccount()}
-                            className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-600 transition hover:bg-rose-100"
+                            className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-600 transition hover:bg-rose-100"
                           >
                             注销账号
                           </button>
@@ -5011,15 +4938,15 @@ export default function App() {
                 </section>
 
                 {showProfileEditor ? (
-                  <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="text-lg font-semibold text-slate-900">编辑个人资料</h3>
+                  <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-base font-semibold text-slate-900">编辑个人资料</h3>
                       {isSavingProfile && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
                     </div>
 
-                    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+                    <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
                       <label className="block">
-                        <span className="mb-2 block text-sm font-medium text-slate-700">昵称</span>
+                        <span className="mb-1.5 block text-xs font-medium text-slate-700">昵称</span>
                         <input
                           value={profileNickname}
                           onChange={(event) => {
@@ -5027,20 +4954,20 @@ export default function App() {
                             setProfileMessage('');
                           }}
                           placeholder="给自己起一个更喜欢的名字"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
                         />
                       </label>
 
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4">
-                        <div className="flex items-center justify-between gap-4">
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
                           <div>
-                            <div className="text-sm font-medium text-slate-700">头像</div>
-                            <div className="mt-1 text-xs text-slate-500">
+                            <div className="text-xs font-medium text-slate-700">头像</div>
+                            <div className="mt-1 line-clamp-2 text-xs text-slate-500">
                               换一张你喜欢的照片，让这页更像自己的城市漫步主页。
                             </div>
                             {profileAvatarName ? <div className="mt-2 text-xs text-slate-400">{profileAvatarName}</div> : null}
                           </div>
-                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                          <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600">
                             <ImagePlus className="h-4 w-4" />
                             选择头像
                             <input
@@ -5068,8 +4995,8 @@ export default function App() {
                       </div>
                     </div>
 
-                    <label className="mt-5 block">
-                      <span className="mb-2 block text-sm font-medium text-slate-700">个人简介</span>
+                    <label className="mt-3 block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-700">个人简介</span>
                       <textarea
                         value={profileBio}
                         onChange={(event) => {
@@ -5077,9 +5004,9 @@ export default function App() {
                           setProfileMessage('');
                         }}
                         maxLength={120}
-                        rows={4}
+                        rows={3}
                         placeholder="写一句介绍自己或你的漫步偏好"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 outline-none"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-6 outline-none"
                       />
                       <div className="mt-2 text-xs text-slate-400">{profileBio.trim().length}/120</div>
                     </label>
@@ -5090,17 +5017,17 @@ export default function App() {
                       </div>
                     ) : null}
 
-                    <div className="mt-5 flex flex-wrap gap-3">
+                    <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         onClick={handleSaveProfile}
                         disabled={!user || isSavingProfile}
-                        className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white disabled:opacity-60"
+                        className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
                       >
                         保存个人资料
                       </button>
                       <button
                         onClick={() => setShowProfileEditor(false)}
-                        className="rounded-2xl border border-slate-200 px-5 py-3 text-sm text-slate-600 transition hover:bg-slate-50"
+                        className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
                       >
                         先不修改
                       </button>
@@ -5108,11 +5035,11 @@ export default function App() {
                   </section>
                 ) : null}
 
-                <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                  <div className="mb-6 flex items-start justify-between gap-4">
+                <section className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-2xl font-semibold text-slate-900">{profileCollectionMeta.title}</h3>
-                      <p className="mt-2 text-sm leading-7 text-slate-500">{profileCollectionMeta.description}</p>
+                      <h3 className="text-lg font-semibold text-slate-900">{profileCollectionMeta.title}</h3>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{profileCollectionMeta.description}</p>
                     </div>
                     {isLoadingProfile && <LoaderCircle className="mt-1 h-5 w-5 animate-spin text-amber-500" />}
                   </div>
@@ -5120,7 +5047,7 @@ export default function App() {
                   <ProfileCollectionTabs activeTab={profileCollectionTab} onChange={setProfileCollectionTab} />
 
                   {profileWalkSource.length === 0 ? (
-                    <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-sm text-slate-500">
+                    <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
                       {profileCollectionMeta.empty}
                     </div>
                   ) : (

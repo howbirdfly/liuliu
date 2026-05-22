@@ -25,8 +25,8 @@ interface NotificationUnreadCountPayload {
 }
 
 export interface NotificationStreamEvent {
-  type: 'snapshot' | 'notification' | 'unread_count';
-  unreadCount: number;
+  type: 'snapshot' | 'notification' | 'unread_count' | 'ping';
+  unreadCount: number | null;
   notification?: UserNotificationItem | null;
 }
 

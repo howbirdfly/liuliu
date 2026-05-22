@@ -9,11 +9,11 @@ type ProfileStatsGridProps = {
 
 export function ProfileStatsGrid({ items }: ProfileStatsGridProps) {
   return (
-    <div className="mt-6 grid gap-3 sm:grid-cols-3">
+    <div className="mt-4 grid grid-cols-3 gap-2">
       {items.map((item) => (
-        <div key={item.label} className="rounded-2xl bg-slate-50 px-4 py-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{item.label}</div>
-          <div className="mt-2 text-2xl font-semibold text-slate-900">{item.value}</div>
+        <div key={item.label} className="rounded-[16px] bg-slate-50 px-3 py-3">
+          <div className="truncate text-[11px] text-slate-400">{item.label}</div>
+          <div className="mt-1 text-lg font-semibold leading-none text-slate-900">{item.value}</div>
         </div>
       ))}
     </div>
