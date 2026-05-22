@@ -88,8 +88,17 @@ public class UserSessionService {
             throw new IllegalStateException("login_required");
         }
 
+        return updateProfileByUserId(currentUser.id(), nickName, avatarUrl, bio);
+    }
+
+    @Transactional
+    public UserProfileResponse updateProfileByUserId(Long userId, String nickName, String avatarUrl, String bio) {
+        if (userId == null || userId <= 0) {
+            throw new IllegalStateException("login_required");
+        }
+
         UserRecord updatedUser = updateProfile(
-                currentUser.id(),
+                userId,
                 normalizeNickName(nickName),
                 normalizeAvatar(avatarUrl),
                 normalizeBio(bio)
@@ -109,7 +118,15 @@ public class UserSessionService {
             throw new IllegalStateException("login_required");
         }
 
-        Long userId = currentUser.id();
+        deleteCurrentUserByUserId(currentUser.id());
+    }
+
+    @Transactional
+    public void deleteCurrentUserByUserId(Long userId) {
+        if (userId == null || userId <= 0) {
+            throw new IllegalStateException("login_required");
+        }
+
         UserCredentialEntity credential = userCredentialMapper.findByUserId(userId);
 
         walkInteractionMapper.deleteLikesByUserId(userId);

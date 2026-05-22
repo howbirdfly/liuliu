@@ -2,8 +2,8 @@ package com.liuliu.citywalk.interceptor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.service.AuthTokenService;
-import com.liuliu.citywalk.service.UserSessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
@@ -18,16 +18,13 @@ import java.nio.charset.StandardCharsets;
 public class WebJwtInterceptor implements HandlerInterceptor {
 
     private final AuthTokenService authTokenService;
-    private final UserSessionService userSessionService;
     private final ObjectMapper objectMapper;
 
     public WebJwtInterceptor(
             AuthTokenService authTokenService,
-            UserSessionService userSessionService,
             ObjectMapper objectMapper
     ) {
         this.authTokenService = authTokenService;
-        this.userSessionService = userSessionService;
         this.objectMapper = objectMapper;
     }
 
@@ -49,11 +46,17 @@ public class WebJwtInterceptor implements HandlerInterceptor {
                 writeUnauthorized(response, "invalid_token");
                 return false;
             }
+            BaseContext.setCurrentUserId(claims.userId());
             return true;
         } catch (Exception error) {
             writeUnauthorized(response, "invalid_token");
             return false;
         }
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        BaseContext.clear();
     }
 
     private String extractBearerToken(String authorizationHeader) {

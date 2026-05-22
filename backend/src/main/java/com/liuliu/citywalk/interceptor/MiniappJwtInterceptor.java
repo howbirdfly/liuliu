@@ -2,6 +2,7 @@ package com.liuliu.citywalk.interceptor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.context.MiniappUserContext;
 import com.liuliu.citywalk.service.AuthTokenService;
 import com.liuliu.citywalk.service.UserSessionService;
@@ -59,6 +60,7 @@ public class MiniappJwtInterceptor implements HandlerInterceptor {
             }
 
             MiniappUserContext.setCurrentUserId(user.id());
+            BaseContext.setCurrentUserId(user.id());
             return true;
         } catch (Exception error) {
             writeUnauthorized(response, "invalid_token");
@@ -69,6 +71,7 @@ public class MiniappJwtInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         MiniappUserContext.clear();
+        BaseContext.clear();
     }
 
     private String extractBearerToken(String authorizationHeader) {

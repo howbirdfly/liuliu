@@ -1,19 +1,17 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.request.FileUploadCompleteRequest;
 import com.liuliu.citywalk.model.dto.request.FileUploadInitRequest;
 import com.liuliu.citywalk.model.dto.response.FileUploadSignatureResponse;
 import com.liuliu.citywalk.model.dto.response.FileUploadResponse;
 import com.liuliu.citywalk.config.AliOssProperties;
 import com.liuliu.citywalk.mapper.UploadedFileMapper;
-import com.liuliu.citywalk.service.UserSessionService;
 import com.liuliu.citywalk.util.AliOssUtil;
 import jakarta.validation.Valid;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -35,7 +33,6 @@ import javax.crypto.spec.SecretKeySpec;
 public class FileController {
 
     private final UploadedFileMapper uploadedFileMapper;
-    private final UserSessionService userSessionService;
     private final AliOssUtil aliOssUtil;
     private final AliOssProperties aliOssProperties;
 
@@ -44,11 +41,9 @@ public class FileController {
     private static final String SUCCESS_ACTION_STATUS = "200";
 
     public FileController(UploadedFileMapper uploadedFileMapper,
-                          UserSessionService userSessionService,
                           AliOssUtil aliOssUtil,
                           AliOssProperties aliOssProperties) {
         this.uploadedFileMapper = uploadedFileMapper;
-        this.userSessionService = userSessionService;
         this.aliOssUtil = aliOssUtil;
         this.aliOssProperties = aliOssProperties;
     }
@@ -87,13 +82,11 @@ public class FileController {
 
     @PostMapping("/upload/complete")
     public ApiResponse<FileUploadResponse> completeUpload(
-            @Valid @RequestBody FileUploadCompleteRequest request,
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
+            @Valid @RequestBody FileUploadCompleteRequest request
         ) {
         String safeBizType = normalizeSegment(request.bizType(), "common");
-        UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
         uploadedFileMapper.insertFile(
-                user == null || user.isGuest() ? null : user.id(),
+                BaseContext.requireCurrentUserId(),
                 safeBizType,
                 request.objectName(),
                 request.fileName(),
@@ -112,8 +105,7 @@ public class FileController {
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<FileUploadResponse> upload(@RequestPart("file") MultipartFile file,
-                                                  @RequestParam("bizType") String bizType,
-                                                  @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader) throws IOException {
+                                                  @RequestParam("bizType") String bizType) throws IOException {
         String safeBizType = normalizeSegment(bizType, "common");
         String originalName = file.getOriginalFilename() == null ? "file" : file.getOriginalFilename();
         String extension = extractExtension(originalName);
@@ -122,9 +114,8 @@ public class FileController {
         String objectName = safeBizType + "/" + fileName;
         String url = aliOssUtil.upload(file.getBytes(), objectName);
 
-        UserSessionService.StoredUser user = userSessionService.resolveUser(authorizationHeader);
         uploadedFileMapper.insertFile(
-                user == null || user.isGuest() ? null : user.id(),
+                BaseContext.requireCurrentUserId(),
                 safeBizType,
                 objectName,
                 originalName,

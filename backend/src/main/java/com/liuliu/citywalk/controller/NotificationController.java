@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.response.NotificationUnreadCountResponse;
 import com.liuliu.citywalk.model.dto.response.UserNotificationResponse;
 import com.liuliu.citywalk.service.NotificationService;
@@ -52,12 +53,11 @@ public class NotificationController {
 
     @GetMapping
     public ApiResponse<List<UserNotificationResponse>> list(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "20") Integer pageSize
     ) {
         try {
-            Long userId = resolveRequiredUserId(authorizationHeader);
+            Long userId = resolveRequiredUserId();
             return ApiResponse.success(notificationService.listNotifications(userId, page, pageSize));
         } catch (IllegalStateException error) {
             return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
@@ -65,11 +65,9 @@ public class NotificationController {
     }
 
     @GetMapping("/unread-count")
-    public ApiResponse<NotificationUnreadCountResponse> unreadCount(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
-    ) {
+    public ApiResponse<NotificationUnreadCountResponse> unreadCount() {
         try {
-            Long userId = resolveRequiredUserId(authorizationHeader);
+            Long userId = resolveRequiredUserId();
             return ApiResponse.success(notificationService.unreadCount(userId));
         } catch (IllegalStateException error) {
             return ApiResponse.fail(resolveBusinessErrorCode(error), error.getMessage());
@@ -78,11 +76,10 @@ public class NotificationController {
 
     @PostMapping("/{notificationId}/read")
     public ApiResponse<Boolean> markRead(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
             @PathVariable Long notificationId
     ) {
         try {
-            Long userId = resolveRequiredUserId(authorizationHeader);
+            Long userId = resolveRequiredUserId();
             notificationService.markRead(notificationId, userId);
             return ApiResponse.success(Boolean.TRUE);
         } catch (IllegalStateException error) {
@@ -91,11 +88,9 @@ public class NotificationController {
     }
 
     @PostMapping("/read-all")
-    public ApiResponse<Boolean> markAllRead(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
-    ) {
+    public ApiResponse<Boolean> markAllRead() {
         try {
-            Long userId = resolveRequiredUserId(authorizationHeader);
+            Long userId = resolveRequiredUserId();
             notificationService.markAllRead(userId);
             return ApiResponse.success(Boolean.TRUE);
         } catch (IllegalStateException error) {
@@ -110,12 +105,8 @@ public class NotificationController {
         return 400;
     }
 
-    private Long resolveRequiredUserId(String authorizationHeader) {
-        UserSessionService.StoredUser currentUser = userSessionService.resolveUser(authorizationHeader);
-        if (currentUser == null || currentUser.isGuest()) {
-            throw new IllegalStateException("login_required");
-        }
-        return currentUser.id();
+    private Long resolveRequiredUserId() {
+        return BaseContext.requireCurrentUserId();
     }
 
     private UserSessionService.StoredUser resolveStreamUser(String token, String authorizationHeader) {

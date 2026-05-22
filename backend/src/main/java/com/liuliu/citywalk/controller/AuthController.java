@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.request.EmailCodeRequest;
 import com.liuliu.citywalk.model.dto.request.EmailLoginRequest;
 import com.liuliu.citywalk.model.dto.request.EmailRegisterRequest;
@@ -144,29 +145,23 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ApiResponse<UserProfileResponse> currentUser(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
-    ) {
-        UserSessionService.StoredUser currentUser = userSessionService.resolveUser(authorizationHeader);
-        if (currentUser != null && !currentUser.isGuest()) {
-            return ApiResponse.success(new UserProfileResponse(
-                    currentUser.id(),
-                    currentUser.nickName(),
-                    currentUser.avatarUrl(),
-                    currentUser.bio()
-            ));
-        }
-        return ApiResponse.success(wechatAuthService.loadCurrentUser(authorizationHeader));
+    public ApiResponse<UserProfileResponse> currentUser() {
+        UserSessionService.StoredUser currentUser = userSessionService.loadUserById(BaseContext.requireCurrentUserId());
+        return ApiResponse.success(new UserProfileResponse(
+                currentUser.id(),
+                currentUser.nickName(),
+                currentUser.avatarUrl(),
+                currentUser.bio()
+        ));
     }
 
     @PutMapping("/profile")
     public ApiResponse<UserProfileResponse> updateProfile(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader,
             @Valid @RequestBody UpdateUserProfileRequest request
     ) {
         try {
-            UserProfileResponse response = userSessionService.updateProfile(
-                    authorizationHeader,
+            UserProfileResponse response = userSessionService.updateProfileByUserId(
+                    BaseContext.requireCurrentUserId(),
                     request.nickname(),
                     request.avatar(),
                     request.bio()
@@ -183,11 +178,9 @@ public class AuthController {
     }
 
     @DeleteMapping("/account")
-    public ApiResponse<Boolean> deleteAccount(
-            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
-    ) {
+    public ApiResponse<Boolean> deleteAccount() {
         try {
-            userSessionService.deleteCurrentUser(authorizationHeader);
+            userSessionService.deleteCurrentUserByUserId(BaseContext.requireCurrentUserId());
             return ApiResponse.success(Boolean.TRUE);
         } catch (IllegalStateException error) {
             return ApiResponse.fail(400, error.getMessage());
