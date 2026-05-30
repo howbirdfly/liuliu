@@ -73,7 +73,7 @@ import {
   type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
-import { openAgentStream, type AgentStreamEvent } from './services/agentApi';
+import { clearAgentMemory, openAgentStream, type AgentStreamEvent } from './services/agentApi';
 import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, updateWalk, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
@@ -1702,6 +1702,7 @@ export default function App() {
   const [agentEvents, setAgentEvents] = useState<AgentStreamEvent[]>([]);
   const [agentStatus, setAgentStatus] = useState('');
   const [isAgentStreaming, setIsAgentStreaming] = useState(false);
+  const [isClearingAgentMemory, setIsClearingAgentMemory] = useState(false);
   const [showAgentPlannerModal, setShowAgentPlannerModal] = useState(false);
   const [showAgentTimelineModal, setShowAgentTimelineModal] = useState(false);
   const [mood, setMood] = useState('好奇');
@@ -2728,6 +2729,13 @@ export default function App() {
     agentStreamRef.current = null;
   };
 
+  const resetAgentWorkspace = (nextStatus = '') => {
+    setAgentAnswer('');
+    setAgentEvents([]);
+    setShowAgentTimelineModal(false);
+    setAgentStatus(nextStatus);
+  };
+
   const handleStartAgentPlanning = () => {
     const prompt = agentPrompt.trim();
     if (!prompt) {
@@ -2744,10 +2752,7 @@ export default function App() {
 
     closeAgentPlanningStream();
     setIsAgentStreaming(true);
-    setAgentAnswer('');
-    setAgentEvents([]);
-    setShowAgentTimelineModal(false);
-    setAgentStatus('Agent 正在整理需求并准备调用工具...');
+    resetAgentWorkspace('Agent 正在整理需求并准备调用工具...');
 
     const stream = openAgentStream(prompt);
     agentStreamRef.current = stream;
@@ -2821,6 +2826,30 @@ export default function App() {
     closeAgentPlanningStream();
     setIsAgentStreaming(false);
     setAgentStatus('已停止当前 Agent 规划。');
+  };
+
+  const handleClearAgentMemory = async () => {
+    if (!getStoredToken()) {
+      setAgentStatus('请先登录后再使用 Agent 路线规划。');
+      setShowEmailLogin(true);
+      setEmailLoginMode('login');
+      return;
+    }
+
+    if (isAgentStreaming) {
+      closeAgentPlanningStream();
+      setIsAgentStreaming(false);
+    }
+
+    setIsClearingAgentMemory(true);
+    try {
+      await clearAgentMemory();
+      resetAgentWorkspace('已开始新对话，Agent 记忆已清空。');
+    } catch (error) {
+      setAgentStatus(error instanceof Error ? error.message : '清空 Agent 记忆失败，请稍后再试。');
+    } finally {
+      setIsClearingAgentMemory(false);
+    }
   };
 
   const closeAgentPlannerModal = () => {
@@ -3976,6 +4005,15 @@ export default function App() {
                         className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
                       >
                         停止规划
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleClearAgentMemory()}
+                        disabled={isClearingAgentMemory}
+                        className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 disabled:opacity-50"
+                      >
+                        {isClearingAgentMemory && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                        {isClearingAgentMemory ? '清空中...' : '开始新对话'}
                       </button>
                     </div>
 
