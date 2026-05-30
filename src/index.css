@@ -36,3 +36,76 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #b1b1b1;
 }
+
+.agent-markdown {
+  color: #334155;
+  font-size: 0.95rem;
+  line-height: 1.9;
+}
+
+.agent-markdown > * + * {
+  margin-top: 0.95rem;
+}
+
+.agent-markdown h1,
+.agent-markdown h2,
+.agent-markdown h3,
+.agent-markdown h4 {
+  color: #0f172a;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.agent-markdown h1 {
+  font-size: 1.35rem;
+}
+
+.agent-markdown h2 {
+  font-size: 1.15rem;
+}
+
+.agent-markdown h3 {
+  font-size: 1.02rem;
+}
+
+.agent-markdown p {
+  margin: 0;
+}
+
+.agent-markdown strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.agent-markdown em {
+  color: #475569;
+  font-style: italic;
+}
+
+.agent-markdown ul,
+.agent-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.agent-markdown li + li {
+  margin-top: 0.35rem;
+}
+
+.agent-markdown hr {
+  margin: 1rem 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+.agent-markdown code {
+  border-radius: 0.4rem;
+  background: #f8fafc;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.9em;
+}
+
+.agent-markdown blockquote {
+  border-left: 3px solid #fbbf24;
+  padding-left: 0.9rem;
+  color: #475569;
+}

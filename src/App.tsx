@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   Bell,
   Compass,
@@ -94,6 +95,7 @@ import { ProfileStatsGrid } from './components/ProfileStatsGrid';
 import { ProfileWalkDetailBody } from './components/ProfileWalkDetailBody';
 import { ProfileWalkCardList } from './components/ProfileWalkCardList';
 import { WalkCommentSection } from './components/WalkCommentSection';
+import remarkGfm from 'remark-gfm';
 
 type SearchLocation = {
   name: string;
@@ -518,7 +520,7 @@ function extractBroadLocationName(text?: string) {
 
   const candidates: string[] = [];
   const bracketMatches = normalized.match(/[（(]([^()（）]{2,40})[)）]/g) || [];
-  bracketMatches.forEach((match) => {
+  bracketMatches.forEach((match: string) => {
     const inner = match.slice(1, -1).trim();
     if (inner) {
       candidates.push(inner);
@@ -527,7 +529,7 @@ function extractBroadLocationName(text?: string) {
 
   const pushPatternMatches = (source: string) => {
     const matches = source.match(BROAD_LOCATION_PATTERN) || [];
-    matches.forEach((item) => {
+    matches.forEach((item: string) => {
       const candidate = item.trim();
       if (candidate) {
         candidates.push(candidate);
@@ -536,7 +538,7 @@ function extractBroadLocationName(text?: string) {
   };
 
   pushPatternMatches(normalized);
-  bracketMatches.forEach((match) => pushPatternMatches(match.slice(1, -1)));
+  bracketMatches.forEach((match: string) => pushPatternMatches(match.slice(1, -1)));
 
   if (candidates.length === 0) {
     return '';
@@ -674,6 +676,122 @@ function truncateAgentEventText(value?: string | null, maxLength = 180) {
     return '';
   }
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function normalizeAgentMarkdown(value: string) {
+  return value
+    .replace(/＊＊/g, '**')
+    .replace(/＃/g, '#')
+    .replace(/，---/g, '\n---\n')
+    .trim();
+}
+
+function parseAgentEventJson(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function getAgentResultItems(payload: Record<string, unknown>, key = 'results') {
+  const value = payload[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function pickAgentItemLabel(item: unknown) {
+  if (!item || typeof item !== 'object') {
+    return '';
+  }
+  const record = item as Record<string, unknown>;
+  return String(
+    record.name ||
+      record.title ||
+      record.themeTitle ||
+      record.locationName ||
+      record.authorNickname ||
+      record.id ||
+      ''
+  ).trim();
+}
+
+function summarizeAgentInput(event: AgentStreamEvent) {
+  const payload = parseAgentEventJson(event.input);
+  if (!payload) {
+    return truncateAgentEventText(event.input, 180);
+  }
+
+  if (event.name === 'search_poi') {
+    return payload.query ? `搜索关键词：${payload.query}` : '';
+  }
+  if (event.name === 'nearby_pois') {
+    const lat = typeof payload.lat === 'number' ? payload.lat.toFixed(4) : payload.lat;
+    const lng = typeof payload.lng === 'number' ? payload.lng.toFixed(4) : payload.lng;
+    return lat && lng ? `搜索坐标：${lat}, ${lng}` : '';
+  }
+  if (event.name === 'search_community_guides') {
+    const pageSize = payload.pageSize ? `，最多 ${payload.pageSize} 条` : '';
+    return payload.keyword ? `检索关键词：${payload.keyword}${pageSize}` : '';
+  }
+  if (event.name === 'get_walk_detail') {
+    return payload.walkId ? `查看 Walk 详情：#${payload.walkId}` : '';
+  }
+
+  return truncateAgentEventText(event.input, 180);
+}
+
+function summarizeAgentOutput(event: AgentStreamEvent) {
+  if (event.type !== 'tool_result') {
+    return truncateAgentEventText(event.output, 280);
+  }
+
+  const payload = parseAgentEventJson(event.output);
+  if (!payload) {
+    return truncateAgentEventText(event.output, 280);
+  }
+
+  if (event.name === 'search_poi') {
+    const items = getAgentResultItems(payload);
+    const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 3);
+    return items.length > 0
+      ? `找到 ${items.length} 个候选地点，优先包括 ${names.join('、')}。`
+      : '这次没有找到合适的地点候选。';
+  }
+
+  if (event.name === 'nearby_pois') {
+    const items = getAgentResultItems(payload);
+    const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 4);
+    return items.length > 0
+      ? `附近共发现 ${items.length} 个兴趣点，可重点考虑 ${names.join('、')}。`
+      : '附近暂时没有召回到合适的兴趣点。';
+  }
+
+  if (event.name === 'search_community_guides') {
+    const items = getAgentResultItems(payload);
+    const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 3);
+    return items.length > 0
+      ? `从社区召回了 ${items.length} 条公开攻略，较相关的有 ${names.join('、')}。`
+      : '社区里暂时没有找到强相关的公开攻略。';
+  }
+
+  if (event.name === 'get_walk_detail') {
+    const found = Boolean(payload.found);
+    const result = payload.result;
+    if (!found || !result || typeof result !== 'object') {
+      return payload.walkId ? `没有找到可公开查看的 Walk #${payload.walkId}。` : '没有找到可公开查看的 Walk。';
+    }
+    const walk = result as Record<string, unknown>;
+    const themeTitle = walk.themeTitle || walk.locationName || '这条 Walk';
+    const authorNickname = walk.authorNickname ? `，作者 ${walk.authorNickname}` : '';
+    const tags = Array.isArray(walk.tags) ? walk.tags.slice(0, 3).join('、') : '';
+    const tagText = tags ? `，标签包括 ${tags}` : '';
+    return `已读取 ${themeTitle} 的详情${authorNickname}${tagText}。`;
+  }
+
+  return truncateAgentEventText(event.output, 280);
 }
 
 function generateWalkRecordCard(params: {
@@ -3820,14 +3938,14 @@ export default function App() {
                           </span>
                         </div>
                         <div className="mt-1 text-sm font-medium text-slate-900">{event.name || 'agent'}</div>
-                        {event.input ? (
+                        {summarizeAgentInput(event) ? (
                           <p className="mt-2 whitespace-pre-wrap break-all text-xs leading-5 text-slate-500">
-                            输入：{truncateAgentEventText(event.input, 280)}
+                            输入：{summarizeAgentInput(event)}
                           </p>
                         ) : null}
-                        {event.output ? (
+                        {summarizeAgentOutput(event) ? (
                           <p className="mt-2 whitespace-pre-wrap break-all text-xs leading-5 text-slate-600">
-                            输出：{truncateAgentEventText(event.output, 480)}
+                            输出：{summarizeAgentOutput(event)}
                           </p>
                         ) : null}
                       </div>
@@ -4409,7 +4527,11 @@ export default function App() {
                     <div className="mt-4 rounded-2xl border border-amber-200 bg-white px-4 py-4">
                       <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
                       <div className="mt-3 max-h-80 overflow-y-auto pr-1">
-                        <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{agentAnswer}</p>
+                        <div className="agent-markdown">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {normalizeAgentMarkdown(agentAnswer)}
+                          </ReactMarkdown>
+                        </div>
                       </div>
                     </div>
                   ) : null}
