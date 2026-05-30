@@ -29,6 +29,12 @@ interface ThemeApiResponse {
 
 interface LocationContextApiResponse {
   locationContext: string;
+  placeName?: string;
+}
+
+export interface LocationContextDetails {
+  locationContext: string;
+  placeName: string;
 }
 
 interface WalkRecordCardTextApiResponse {
@@ -253,14 +259,25 @@ export async function generateDynamicPreset(
 }
 
 export async function getLocationContext(lat: number, lng: number): Promise<string> {
+  const details = await getLocationContextDetails(lat, lng);
+  return details.locationContext;
+}
+
+export async function getLocationContextDetails(lat: number, lng: number): Promise<LocationContextDetails> {
   try {
     const data = await apiRequest<LocationContextApiResponse>(
       `/api/v1/ai/location/context?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
     );
-    return data.locationContext || LOCATION_FALLBACK;
+    return {
+      locationContext: data.locationContext || LOCATION_FALLBACK,
+      placeName: data.placeName || '当前位置',
+    };
   } catch (error) {
     console.error('Error getting location context:', error);
-    return LOCATION_FALLBACK;
+    return {
+      locationContext: LOCATION_FALLBACK,
+      placeName: '当前位置',
+    };
   }
 }
 

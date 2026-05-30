@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.model.dto.response;
 
 public record LocationContextResponse(
-        String locationContext
+        String locationContext,
+        String placeName
 ) {
 }

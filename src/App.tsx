@@ -44,6 +44,7 @@ import {
   generateWalkRecordCardText,
   MapPOI,
   getLocationContext,
+  getLocationContextDetails,
   searchLocationContext,
 } from './services/themeService';
 import {
@@ -570,15 +571,6 @@ function deriveDisplayLocationName(rawName?: string, locationContextText?: strin
 
 function hasBroadLocationHint(value?: string) {
   return extractBroadLocationName(value).length > 0;
-}
-
-function pickNearbyPoiTitle(pois?: MapPOI[]) {
-  if (!Array.isArray(pois)) {
-    return '';
-  }
-
-  const matchedPoi = pois.find((poi) => sanitizeCardText(poi.title || '').length > 0);
-  return matchedPoi ? sanitizeCardText(matchedPoi.title) : '';
 }
 
 function escapeXml(value: string) {
@@ -2276,61 +2268,58 @@ export default function App() {
     const lat = coords.coords.latitude;
     const lng = coords.coords.longitude;
     const gcjPosition = convertWgs84ToGcj02(lat, lng);
-    const context = await getLocationContext(gcjPosition.lat, gcjPosition.lng);
+    const details = await getLocationContextDetails(gcjPosition.lat, gcjPosition.lng);
 
-    setLocationContext(context);
+    setLocationContext(details.locationContext);
     setSelectedLocation({
-      name: '当前位置',
+      name: details.placeName,
       lat: gcjPosition.lat,
       lng: gcjPosition.lng,
     });
-    setSearchLocation('当前位置');
+    setSearchLocation(details.placeName);
     setSearchResults([]);
 
     return {
-      locationName: deriveDisplayLocationName('当前位置', context),
-      locationContextText: context,
+      locationName: details.placeName,
+      locationContextText: details.locationContext,
     };
   };
 
   const resolveCurrentContext = async (): Promise<{ locationName: string; locationContextText: string }> => {
     if (selectedLocation) {
       let nextLocationContext = locationContext;
+      let resolvedPlaceName: string | null = isGenericLocationName(selectedLocation.name) ? null : selectedLocation.name;
       if (isGenericLocationName(selectedLocation.name) || !hasBroadLocationHint(nextLocationContext)) {
         try {
-          nextLocationContext = await getLocationContext(selectedLocation.lat, selectedLocation.lng);
+          const details = await getLocationContextDetails(selectedLocation.lat, selectedLocation.lng);
+          nextLocationContext = details.locationContext;
+          resolvedPlaceName = details.placeName || resolvedPlaceName;
           setLocationContext(nextLocationContext);
         } catch (error) {
           console.error('Refresh selected location context error:', error);
         }
       }
-      const originPoint =
-        isGenericLocationName(selectedLocation.name) && path.length > 0
-          ? { lat: path[0].lat, lng: path[0].lng }
-          : { lat: selectedLocation.lat, lng: selectedLocation.lng };
       return {
-        locationName: await resolveNearestPoiLocationName(originPoint, selectedLocation.name, nextLocationContext),
+        locationName: resolvedPlaceName || deriveDisplayLocationName(selectedLocation.name, nextLocationContext),
         locationContextText: nextLocationContext,
       };
     }
 
     if (searchLocation.trim()) {
       let nextLocationContext = locationContext;
+      let resolvedPlaceName: string | null = isGenericLocationName(searchLocation.trim()) ? null : searchLocation.trim();
       if ((isGenericLocationName(searchLocation.trim()) || !hasBroadLocationHint(nextLocationContext)) && currentPosition) {
         try {
-          nextLocationContext = await getLocationContext(currentPosition.lat, currentPosition.lng);
+          const details = await getLocationContextDetails(currentPosition.lat, currentPosition.lng);
+          nextLocationContext = details.locationContext;
+          resolvedPlaceName = details.placeName || resolvedPlaceName;
           setLocationContext(nextLocationContext);
         } catch (error) {
           console.error('Refresh current geolocation context error:', error);
         }
       }
-      const originPoint = currentPosition
-        ? path.length > 0
-          ? { lat: path[0].lat, lng: path[0].lng }
-          : { lat: currentPosition.lat, lng: currentPosition.lng }
-        : null;
       return {
-        locationName: await resolveNearestPoiLocationName(originPoint, searchLocation.trim(), nextLocationContext),
+        locationName: resolvedPlaceName || deriveDisplayLocationName(searchLocation.trim(), nextLocationContext),
         locationContextText: nextLocationContext,
       };
     }
@@ -2345,27 +2334,6 @@ export default function App() {
       locationName: deriveDisplayLocationName('当前位置', locationContext),
       locationContextText: locationContext,
     };
-  };
-
-  const resolveNearestPoiLocationName = async (
-    coordinate: { lat: number; lng: number } | null,
-    fallbackName: string,
-    fallbackContextText: string,
-  ) => {
-    if (!coordinate) {
-      return deriveDisplayLocationName(fallbackName, fallbackContextText);
-    }
-
-    try {
-      const nearestPoiTitle = pickNearbyPoiTitle(await fetchNearbyPois(coordinate.lat, coordinate.lng));
-      if (nearestPoiTitle) {
-        return nearestPoiTitle;
-      }
-    } catch (error) {
-      console.error('Fetch nearby POIs for location name error:', error);
-    }
-
-    return deriveDisplayLocationName(fallbackName, fallbackContextText);
   };
 
   const handleSearchLocation = (query: string) => {
@@ -2443,13 +2411,14 @@ export default function App() {
   const handleSelectMapPoint = async (lat: number, lng: number) => {
     setIsGenerating(true);
     try {
-      const context = await getLocationContext(lat, lng);
-      const locationName = `地图选点 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      const details = await getLocationContextDetails(lat, lng);
+      const fallbackName = `地图选点 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      const locationName = details.placeName || fallbackName;
       setSelectedLocation({ name: locationName, lat, lng });
       setSelectedPoiKey(null);
       setSearchLocation(locationName);
       setSearchResults([]);
-      setLocationContext(context);
+      setLocationContext(details.locationContext);
     } catch (error) {
       console.error('Select map point error:', error);
       alert('地图选点失败，请稍后重试。');

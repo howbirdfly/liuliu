@@ -215,7 +215,9 @@ public class DeepSeekThemeService {
 
     public LocationContextResponse locationContext(Double lat, Double lng) {
         String fallback = "城市街区与生活化场景混合环境";
-        String poiSummary = buildPoiSummary(lat, lng);
+        List<PoiResponse> nearbyPois = mapSearchService.nearbyPois(lat, lng);
+        String poiSummary = buildPoiSummary(nearbyPois);
+        String placeName = pickPlaceName(nearbyPois, null);
         String prompt = """
                 你是一个地点环境描述助手。请根据经纬度推测此地点适合 City Walk 的环境氛围。
                 纬度：%s
@@ -227,7 +229,7 @@ public class DeepSeekThemeService {
 
                 请只输出一行中文短句，15 到 30 个字，不要解释。
                 """.formatted(lat, lng, poiSummary);
-        return new LocationContextResponse(callTextPrompt(prompt, fallback));
+        return new LocationContextResponse(callTextPrompt(prompt, fallback), placeName);
     }
 
     public LocationContextResponse searchContext(String query) {
@@ -241,11 +243,11 @@ public class DeepSeekThemeService {
 
                 请只输出一行中文短句，15 到 30 个字，不要解释。
                 """.formatted(query);
-        return new LocationContextResponse(callTextPrompt(prompt, fallback));
+        return new LocationContextResponse(callTextPrompt(prompt, fallback), safeText(query, null));
     }
 
-    private String buildPoiSummary(Double lat, Double lng) {
-        List<String> poiTitles = mapSearchService.nearbyPois(lat, lng).stream()
+    private String buildPoiSummary(List<PoiResponse> nearbyPois) {
+        List<String> poiTitles = nearbyPois.stream()
                 .map(PoiResponse::title)
                 .filter(title -> title != null && !title.isBlank())
                 .limit(6)
@@ -254,6 +256,14 @@ public class DeepSeekThemeService {
             return "暂无明显 POI，可按普通城市街区理解";
         }
         return String.join("、", poiTitles);
+    }
+
+    private String pickPlaceName(List<PoiResponse> nearbyPois, String fallback) {
+        return nearbyPois.stream()
+                .map(PoiResponse::title)
+                .filter(title -> title != null && !title.isBlank())
+                .findFirst()
+                .orElse(fallback);
     }
 
     private WalkRecordCardPayload callWalkRecordCardPrompt(String prompt, WalkRecordCardPayload fallback) {
