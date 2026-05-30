@@ -47,9 +47,18 @@ public class AgentOrchestratorService {
     }
 
     public AgentChatResponse chat(String prompt) {
+        return execute(prompt, null);
+    }
+
+    public AgentChatResponse stream(String prompt, AgentExecutionListener listener) {
+        return execute(prompt, listener);
+    }
+
+    private AgentChatResponse execute(String prompt, AgentExecutionListener listener) {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         List<LlmMessage> messages = new ArrayList<>();
         messages.add(LlmMessage.user(normalizedPrompt));
+        emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0));
 
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
@@ -63,7 +72,14 @@ public class AgentOrchestratorService {
             if (response.hasToolCalls()) {
                 messages.add(LlmMessage.assistant(response.content(), response.toolCalls()));
                 for (LlmToolCall toolCall : response.toolCalls()) {
-                    String toolOutput = executeTool(toolCall, steps);
+                    emit(listener, new AgentExecutionEvent(
+                            "tool_call",
+                            toolCall.name(),
+                            toolCall.argumentsJson(),
+                            null,
+                            round
+                    ));
+                    String toolOutput = executeTool(toolCall, steps, round, listener);
                     messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
                 }
                 continue;
@@ -77,18 +93,29 @@ public class AgentOrchestratorService {
                         null,
                         answer
                 ));
+                emit(listener, new AgentExecutionEvent(
+                        "final_answer",
+                        "assistant",
+                        null,
+                        answer,
+                        round
+                ));
             }
-            return new AgentChatResponse(
+
+            AgentChatResponse result = new AgentChatResponse(
                     answer,
                     steps,
                     round,
                     llmClient.provider(),
                     llmClient.model()
             );
+            emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round));
+            return result;
         }
 
         String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
         steps.add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
+        emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS));
         return new AgentChatResponse(
                 fallback,
                 steps,
@@ -98,7 +125,12 @@ public class AgentOrchestratorService {
         );
     }
 
-    private String executeTool(LlmToolCall toolCall, List<AgentStepResponse> steps) {
+    private String executeTool(
+            LlmToolCall toolCall,
+            List<AgentStepResponse> steps,
+            int round,
+            AgentExecutionListener listener
+    ) {
         AgentTool tool = toolsByName.get(toolCall.name());
         if (tool == null) {
             String output = json(Map.of(
@@ -106,6 +138,7 @@ public class AgentOrchestratorService {
                     "name", toolCall.name()
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
             return output;
         }
 
@@ -113,6 +146,7 @@ public class AgentOrchestratorService {
             Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
             String output = tool.execute(arguments);
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
             return output;
         } catch (Exception error) {
             String output = json(Map.of(
@@ -121,6 +155,7 @@ public class AgentOrchestratorService {
                     "message", safeText(error.getMessage(), "unknown_error")
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
             return output;
         }
     }
@@ -155,5 +190,25 @@ public class AgentOrchestratorService {
         } catch (Exception error) {
             return "{\"error\":\"json_encode_failed\"}";
         }
+    }
+
+    private void emit(AgentExecutionListener listener, AgentExecutionEvent event) {
+        if (listener == null || event == null) {
+            return;
+        }
+        listener.onEvent(event);
+    }
+
+    public interface AgentExecutionListener {
+        void onEvent(AgentExecutionEvent event);
+    }
+
+    public record AgentExecutionEvent(
+            String type,
+            String name,
+            String input,
+            String output,
+            int iteration
+    ) {
     }
 }
