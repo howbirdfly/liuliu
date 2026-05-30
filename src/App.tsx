@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import {
   AppUser,
-  consumeLoginCallback,
   deleteAccountFromServer,
   getStoredToken,
   loadCurrentUser,
@@ -31,7 +30,6 @@ import {
   loginWithEmail,
   registerWithEmail,
   resetPasswordWithEmail,
-  redirectToWechatLogin,
   sendEmailCode,
   updateUserProfile,
 } from './services/authApi';
@@ -1589,8 +1587,7 @@ export default function App() {
   }, [currentTheme?.title]);
 
   useEffect(() => {
-    const callbackPayload = consumeLoginCallback();
-    const token = callbackPayload?.token || getStoredToken();
+    const token = getStoredToken();
     if (!token) {
       return;
     }
@@ -2581,15 +2578,6 @@ export default function App() {
       setSelectedThemesForCombine([]);
     } finally {
       setIsGenerating(false);
-    }
-  };
-
-  const handleWechatLogin = async () => {
-    try {
-      await redirectToWechatLogin();
-    } catch (error) {
-      console.error('Auth error:', error);
-      alert('登录失败，请稍后重试。');
     }
   };
 
