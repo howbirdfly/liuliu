@@ -72,6 +72,7 @@ import {
   type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
+import { openAgentStream, type AgentStreamEvent } from './services/agentApi';
 import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, updateWalk, WalkItem } from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
@@ -648,6 +649,31 @@ function formatWalkTime(timestamp = Date.now()) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(timestamp);
+}
+
+function getAgentEventLabel(type: AgentStreamEvent['type']) {
+  switch (type) {
+    case 'start':
+      return '开始规划';
+    case 'tool_call':
+      return '调用工具';
+    case 'tool_result':
+      return '工具结果';
+    case 'final_answer':
+      return '最终回答';
+    case 'complete':
+      return '规划完成';
+    default:
+      return 'Agent 事件';
+  }
+}
+
+function truncateAgentEventText(value?: string | null, maxLength = 180) {
+  const normalized = sanitizeCardText(value || '');
+  if (!normalized) {
+    return '';
+  }
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
 }
 
 function generateWalkRecordCard(params: {
@@ -1553,6 +1579,12 @@ export default function App() {
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState('我想在上海找一条适合傍晚散步、拍照好看的 City Walk 路线');
+  const [agentAnswer, setAgentAnswer] = useState('');
+  const [agentEvents, setAgentEvents] = useState<AgentStreamEvent[]>([]);
+  const [agentStatus, setAgentStatus] = useState('');
+  const [isAgentStreaming, setIsAgentStreaming] = useState(false);
+  const [showAgentTimelineModal, setShowAgentTimelineModal] = useState(false);
   const [mood, setMood] = useState('好奇');
   const [weather, setWeather] = useState('晴朗');
   const [season, setSeason] = useState('春季');
@@ -1580,6 +1612,7 @@ export default function App() {
   const roomSyncTimeoutRef = useRef<number | null>(null);
   const roomThemeSyncTimeoutRef = useRef<number | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
+  const agentStreamRef = useRef<EventSource | null>(null);
   const showNotificationCenterRef = useRef(false);
 
   useEffect(() => {
@@ -1641,6 +1674,13 @@ export default function App() {
     };
     window.addEventListener(eventName, handleAuthRequired);
     return () => window.removeEventListener(eventName, handleAuthRequired);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      agentStreamRef.current?.close();
+      agentStreamRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -2562,6 +2602,106 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const closeAgentPlanningStream = () => {
+    agentStreamRef.current?.close();
+    agentStreamRef.current = null;
+  };
+
+  const handleStartAgentPlanning = () => {
+    const prompt = agentPrompt.trim();
+    if (!prompt) {
+      setAgentStatus('先告诉 Agent 你想怎么逛，我再帮你开始规划。');
+      return;
+    }
+
+    if (!getStoredToken()) {
+      setAgentStatus('请先登录后再使用 Agent 路线规划。');
+      setShowEmailLogin(true);
+      setEmailLoginMode('login');
+      return;
+    }
+
+    closeAgentPlanningStream();
+    setIsAgentStreaming(true);
+    setAgentAnswer('');
+    setAgentEvents([]);
+    setShowAgentTimelineModal(false);
+    setAgentStatus('Agent 正在整理需求并准备调用工具...');
+
+    const stream = openAgentStream(prompt);
+    agentStreamRef.current = stream;
+    let streamFinished = false;
+
+    const handleAgentEvent = (event: Event) => {
+      try {
+        const messageEvent = event as MessageEvent<string>;
+        const payload = JSON.parse(messageEvent.data) as AgentStreamEvent;
+
+        if (payload.type !== 'complete') {
+          setAgentEvents((prev) => [...prev, payload]);
+        }
+
+        if (payload.type === 'start') {
+          setAgentStatus('Agent 已开始规划路线...');
+          return;
+        }
+
+        if (payload.type === 'tool_call') {
+          setAgentStatus(`正在调用工具：${payload.name}`);
+          return;
+        }
+
+        if (payload.type === 'tool_result') {
+          setAgentStatus(`已拿到工具结果：${payload.name}`);
+          return;
+        }
+
+        if (payload.type === 'final_answer') {
+          setAgentAnswer(payload.output || '');
+          setAgentStatus('Agent 已生成路线建议。');
+          return;
+        }
+
+        if (payload.type === 'complete') {
+          streamFinished = true;
+          setIsAgentStreaming(false);
+          setAgentStatus('路线规划完成，可以继续追问或修改需求。');
+          stream.close();
+          if (agentStreamRef.current === stream) {
+            agentStreamRef.current = null;
+          }
+        }
+      } catch (error) {
+        console.error('Agent stream parse error:', error);
+      }
+    };
+
+    stream.addEventListener('start', handleAgentEvent);
+    stream.addEventListener('tool_call', handleAgentEvent);
+    stream.addEventListener('tool_result', handleAgentEvent);
+    stream.addEventListener('final_answer', handleAgentEvent);
+    stream.addEventListener('complete', handleAgentEvent);
+
+    stream.onerror = () => {
+      if (streamFinished) {
+        return;
+      }
+      console.error('Agent stream connection error');
+      setIsAgentStreaming(false);
+      setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
+      stream.close();
+      if (agentStreamRef.current === stream) {
+        agentStreamRef.current = null;
+      }
+    };
+  };
+
+  const handleStopAgentPlanning = () => {
+    closeAgentPlanningStream();
+    setIsAgentStreaming(false);
+    setAgentStatus('已停止当前 Agent 规划。');
   };
 
   const handleCombineThemes = async () => {
@@ -3649,6 +3789,59 @@ export default function App() {
             )}
           </div>
         </header>
+        {showAgentTimelineModal ? (
+          <div className="fixed inset-0 z-50 flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
+            <div className="flex max-h-[82vh] w-full flex-col overflow-hidden rounded-[26px] bg-white shadow-2xl sm:max-w-3xl">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Agent Timeline</div>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">执行过程详情</h3>
+                  <p className="mt-1 text-xs text-slate-500">这里保留工具调用和结果摘要，主页面默认只展示最终答案。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAgentTimelineModal(false)}
+                  className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
+                  aria-label="关闭 Agent 执行过程"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto px-4 py-4 sm:px-5">
+                {agentEvents.length > 0 ? (
+                  <div className="space-y-3">
+                    {agentEvents.map((event, index) => (
+                      <div key={`${event.type}-${event.name}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-medium text-slate-700">{getAgentEventLabel(event.type)}</span>
+                          <span className="text-[11px] text-slate-400">
+                            {event.iteration ? `第 ${event.iteration} 轮` : '实时'}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-slate-900">{event.name || 'agent'}</div>
+                        {event.input ? (
+                          <p className="mt-2 whitespace-pre-wrap break-all text-xs leading-5 text-slate-500">
+                            输入：{truncateAgentEventText(event.input, 280)}
+                          </p>
+                        ) : null}
+                        {event.output ? (
+                          <p className="mt-2 whitespace-pre-wrap break-all text-xs leading-5 text-slate-600">
+                            输出：{truncateAgentEventText(event.output, 480)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+                    还没有可展示的执行过程。
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
         {showEmailLogin && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
             <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl">
@@ -4148,6 +4341,78 @@ export default function App() {
                   >
                     {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
                   </button>
+                </div>
+
+                <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-500">
+                        用自然语言描述你想怎么逛，Agent 会实时调用地图、社区和 Walk 工具来规划。
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
+                      {isAgentStreaming ? '流式规划中' : '支持实时步骤输出'}
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={agentPrompt}
+                    onChange={(event) => setAgentPrompt(event.target.value)}
+                    placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
+                    className="mt-4 min-h-28 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                  />
+
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={handleStartAgentPlanning}
+                      disabled={isAgentStreaming}
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                      {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopAgentPlanning}
+                      disabled={!isAgentStreaming}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
+                    >
+                      停止规划
+                    </button>
+                  </div>
+
+                  {agentStatus ? <p className="mt-3 text-xs text-slate-500">{agentStatus}</p> : null}
+
+                  {agentEvents.length > 0 ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">执行过程已折叠</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            已记录 {agentEvents.length} 条 Agent 事件，默认不在主页面展开，避免把页面撑得过长。
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAgentTimelineModal(true)}
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+                        >
+                          查看执行过程
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {agentAnswer ? (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-white px-4 py-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
+                      <div className="mt-3 max-h-80 overflow-y-auto pr-1">
+                        <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{agentAnswer}</p>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>
