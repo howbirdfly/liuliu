@@ -3938,85 +3938,103 @@ export default function App() {
               </div>
 
               <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-                <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
-                      <p className="mt-1 text-xs leading-6 text-slate-500">
-                        用自然语言描述你想怎么逛，Agent 会实时调用地图、社区和 Walk 工具来规划。
-                      </p>
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
+                  <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
+                        <p className="mt-1 text-xs leading-6 text-slate-500">
+                          在左侧描述需求、发起规划、查看状态；右侧会固定显示当前路线建议。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
+                        {isAgentStreaming ? '流式规划中' : '工作台模式'}
+                      </span>
                     </div>
-                    <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
-                      {isAgentStreaming ? '流式规划中' : '支持实时步骤输出'}
-                    </span>
-                  </div>
 
-                  <textarea
-                    value={agentPrompt}
-                    onChange={(event) => setAgentPrompt(event.target.value)}
-                    placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
-                    className="mt-4 min-h-32 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
-                  />
+                    <textarea
+                      value={agentPrompt}
+                      onChange={(event) => setAgentPrompt(event.target.value)}
+                      placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
+                      className="mt-4 min-h-36 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                    />
 
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={handleStartAgentPlanning}
-                      disabled={isAgentStreaming}
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                    >
-                      {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                      {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleStopAgentPlanning}
-                      disabled={!isAgentStreaming}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
-                    >
-                      停止规划
-                    </button>
-                    {agentEvents.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-3">
                       <button
                         type="button"
-                        onClick={() => setShowAgentTimelineModal(true)}
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700"
+                        onClick={handleStartAgentPlanning}
+                        disabled={isAgentStreaming}
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
                       >
-                        查看执行过程
+                        {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                        {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
                       </button>
+                      <button
+                        type="button"
+                        onClick={handleStopAgentPlanning}
+                        disabled={!isAgentStreaming}
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
+                      >
+                        停止规划
+                      </button>
+                    </div>
+
+                    {agentStatus ? (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Status</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{agentStatus}</p>
+                      </div>
                     ) : null}
-                  </div>
 
-                  {agentStatus ? <p className="mt-3 text-xs text-slate-500">{agentStatus}</p> : null}
-
-                  {agentEvents.length > 0 ? (
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
-                          <p className="text-sm font-medium text-slate-900">执行过程已折叠</p>
+                          <p className="text-sm font-medium text-slate-900">执行过程</p>
                           <p className="mt-1 text-xs leading-5 text-slate-500">
-                            已记录 {agentEvents.length} 条 Agent 事件，默认不在窗口里直接展开，避免打断你看最终路线。
+                            {agentEvents.length > 0
+                              ? `已记录 ${agentEvents.length} 条 Agent 事件，建议单独打开时间线查看。`
+                              : '开始规划后，这里会记录工具调用和结果摘要。'}
                           </p>
                         </div>
-                        <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
-                          时间线单独查看
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowAgentTimelineModal(true)}
+                          disabled={agentEvents.length === 0}
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+                        >
+                          查看执行过程
+                        </button>
                       </div>
                     </div>
-                  ) : null}
+                  </div>
 
-                  {agentAnswer ? (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-white px-4 py-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
-                      <div className="mt-3 max-h-[46vh] overflow-y-auto pr-1">
+                  <div className="rounded-[28px] border border-amber-200 bg-white p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-100 pb-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          这里固定展示当前规划结果，你可以一边改需求一边对照查看。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                        {agentAnswer ? '已生成路线建议' : '等待生成结果'}
+                      </span>
+                    </div>
+
+                    {agentAnswer ? (
+                      <div className="mt-4 max-h-[60vh] overflow-y-auto pr-1">
                         <div className="agent-markdown">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {normalizeAgentMarkdown(agentAnswer)}
                           </ReactMarkdown>
                         </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : (
+                      <div className="mt-4 flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm leading-6 text-slate-500">
+                        还没有生成路线建议。输入你的需求后开始规划，结果会固定显示在这里。
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

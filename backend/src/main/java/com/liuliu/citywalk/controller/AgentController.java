@@ -1,9 +1,11 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.request.AgentChatRequest;
 import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStreamEventResponse;
+import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.service.AgentOrchestratorService;
 import com.liuliu.citywalk.service.UserSessionService;
 import jakarta.validation.Valid;
@@ -35,7 +37,13 @@ public class AgentController {
 
     @PostMapping("/chat")
     public ApiResponse<AgentChatResponse> chat(@Valid @RequestBody AgentChatRequest request) {
-        return ApiResponse.success(agentOrchestratorService.chat(request.prompt()));
+        return ApiResponse.success(agentOrchestratorService.chat(BaseContext.requireCurrentUserId(), request.prompt()));
+    }
+
+    @PostMapping("/memory/clear")
+    public ApiResponse<OperationResultResponse> clearMemory() {
+        agentOrchestratorService.clearConversation(BaseContext.requireCurrentUserId());
+        return ApiResponse.success(new OperationResultResponse(true));
     }
 
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -56,7 +64,7 @@ public class AgentController {
         SseEmitter emitter = new SseEmitter(5L * 60L * 1000L);
         Thread.startVirtualThread(() -> {
             try {
-                agentOrchestratorService.stream(normalizedPrompt, event -> sendEvent(emitter, event));
+                agentOrchestratorService.stream(currentUser.id(), normalizedPrompt, event -> sendEvent(emitter, event));
                 emitter.complete();
             } catch (Exception error) {
                 emitter.completeWithError(error);

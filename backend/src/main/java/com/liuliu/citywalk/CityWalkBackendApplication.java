@@ -1,6 +1,7 @@
 package com.liuliu.citywalk;
 
 import com.liuliu.citywalk.config.AmapProperties;
+import com.liuliu.citywalk.config.AgentMemoryProperties;
 import com.liuliu.citywalk.config.CommunityCacheProperties;
 import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
@@ -19,7 +20,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         AmapProperties.class,
         MissionVerifyAiProperties.class,
         NotificationCacheProperties.class,
-        CommunityCacheProperties.class
+        CommunityCacheProperties.class,
+        AgentMemoryProperties.class
 })
 public class CityWalkBackendApplication {
 

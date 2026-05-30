@@ -31,12 +31,19 @@ public class AgentOrchestratorService {
             """;
 
     private final LlmClient llmClient;
+    private final AgentMemoryService agentMemoryService;
     private final ObjectMapper objectMapper;
     private final Map<String, AgentTool> toolsByName;
     private final List<LlmToolDefinition> toolDefinitions;
 
-    public AgentOrchestratorService(LlmClient llmClient, ObjectMapper objectMapper, List<AgentTool> agentTools) {
+    public AgentOrchestratorService(
+            LlmClient llmClient,
+            AgentMemoryService agentMemoryService,
+            ObjectMapper objectMapper,
+            List<AgentTool> agentTools
+    ) {
         this.llmClient = llmClient;
+        this.agentMemoryService = agentMemoryService;
         this.objectMapper = objectMapper;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
@@ -46,17 +53,22 @@ public class AgentOrchestratorService {
         }
     }
 
-    public AgentChatResponse chat(String prompt) {
-        return execute(prompt, null);
+    public AgentChatResponse chat(Long userId, String prompt) {
+        return execute(userId, prompt, null);
     }
 
-    public AgentChatResponse stream(String prompt, AgentExecutionListener listener) {
-        return execute(prompt, listener);
+    public AgentChatResponse stream(Long userId, String prompt, AgentExecutionListener listener) {
+        return execute(userId, prompt, listener);
     }
 
-    private AgentChatResponse execute(String prompt, AgentExecutionListener listener) {
+    public void clearConversation(Long userId) {
+        agentMemoryService.clearConversation(userId);
+    }
+
+    private AgentChatResponse execute(Long userId, String prompt, AgentExecutionListener listener) {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         List<LlmMessage> messages = new ArrayList<>();
+        messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
         emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0));
 
@@ -109,12 +121,14 @@ public class AgentOrchestratorService {
                     llmClient.provider(),
                     llmClient.model()
             );
+            rememberConversation(userId, normalizedPrompt, answer);
             emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round));
             return result;
         }
 
         String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
         steps.add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
+        rememberConversation(userId, normalizedPrompt, fallback);
         emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS));
         return new AgentChatResponse(
                 fallback,
@@ -123,6 +137,10 @@ public class AgentOrchestratorService {
                 llmClient.provider(),
                 llmClient.model()
         );
+    }
+
+    private void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
+        agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
     }
 
     private String executeTool(
