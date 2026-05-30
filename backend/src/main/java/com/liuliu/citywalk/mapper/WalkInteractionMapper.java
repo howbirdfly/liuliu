@@ -49,6 +49,9 @@ public interface WalkInteractionMapper {
     @Update("update walk_records set view_count = ifnull(view_count, 0) + 1 where id = #{walkId}")
     int incrementViewCount(@Param("walkId") Long walkId);
 
+    @Update("update walk_records set view_count = ifnull(view_count, 0) + #{delta} where id = #{walkId}")
+    int incrementViewCountByDelta(@Param("walkId") Long walkId, @Param("delta") long delta);
+
     @Select("select ifnull(like_count, 0) from walk_records where id = #{walkId}")
     Integer findLikeCount(@Param("walkId") Long walkId);
 

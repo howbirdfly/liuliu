@@ -1,6 +1,7 @@
 package com.liuliu.citywalk;
 
 import com.liuliu.citywalk.config.AmapProperties;
+import com.liuliu.citywalk.config.CommunityCacheProperties;
 import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.config.NotificationCacheProperties;
@@ -8,14 +9,17 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
+@EnableScheduling
 @MapperScan("com.liuliu.citywalk.mapper")
 @EnableConfigurationProperties({
         DeepSeekProperties.class,
         AmapProperties.class,
         MissionVerifyAiProperties.class,
-        NotificationCacheProperties.class
+        NotificationCacheProperties.class,
+        CommunityCacheProperties.class
 })
 public class CityWalkBackendApplication {
 

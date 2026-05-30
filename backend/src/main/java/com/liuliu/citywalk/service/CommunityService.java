@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 @Service
 public class CommunityService {
@@ -36,6 +37,7 @@ public class CommunityService {
     private final WalkRecordMapper walkRecordMapper;
     private final WalkInteractionMapper walkInteractionMapper;
     private final NotificationService notificationService;
+    private final CommunityCacheService communityCacheService;
     private final ObjectMapper objectMapper;
 
     public CommunityService(
@@ -44,6 +46,7 @@ public class CommunityService {
             WalkRecordMapper walkRecordMapper,
             WalkInteractionMapper walkInteractionMapper,
             NotificationService notificationService,
+            CommunityCacheService communityCacheService,
             ObjectMapper objectMapper
     ) {
         this.communityCommentMapper = communityCommentMapper;
@@ -51,6 +54,7 @@ public class CommunityService {
         this.walkRecordMapper = walkRecordMapper;
         this.walkInteractionMapper = walkInteractionMapper;
         this.notificationService = notificationService;
+        this.communityCacheService = communityCacheService;
         this.objectMapper = objectMapper;
     }
 
@@ -67,19 +71,22 @@ public class CommunityService {
     public List<CommunityWalkResponse> latestFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listLatestPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+        return loadFeed("latest", currentUserId, limit, offset,
+                () -> communityMapper.listLatestPublicWalks(currentUserId, limit, offset));
     }
 
     public List<CommunityWalkResponse> hotFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listHotPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+        return loadFeed("hot", currentUserId, limit, offset,
+                () -> communityMapper.listHotPublicWalks(currentUserId, limit, offset));
     }
 
     public List<CommunityWalkResponse> recommendFeed(Long currentUserId, int page, int pageSize) {
         int limit = normalizePageSize(pageSize);
         int offset = normalizeOffset(page, limit);
-        return communityMapper.listRecommendedPublicWalks(currentUserId, limit, offset).stream().map(this::toResponse).toList();
+        return loadFeed("recommend", currentUserId, limit, offset,
+                () -> communityMapper.listRecommendedPublicWalks(currentUserId, limit, offset));
     }
 
     public List<CommunityWalkResponse> likedWalks(Long currentUserId, int page, int pageSize) {
@@ -97,12 +104,25 @@ public class CommunityService {
     @Transactional
     public CommunityWalkResponse getWalkDetail(Long walkId, Long currentUserId) {
         ensurePublicWalkExists(walkId);
-        walkInteractionMapper.incrementViewCount(walkId);
+        incrementViewCount(walkId);
+
+        CommunityWalkResponse cached = currentUserId == null
+                ? communityCacheService.getWalkDetail(walkId)
+                : null;
+        if (cached != null) {
+            return withBufferedViewCount(cached);
+        }
+
         CommunityWalkQueryRow row = communityMapper.findPublicWalkById(walkId, currentUserId);
         if (row == null) {
             throw new IllegalStateException("walk_not_found");
         }
-        return toResponse(row);
+
+        CommunityWalkResponse response = toResponse(row);
+        if (currentUserId == null) {
+            communityCacheService.putWalkDetail(walkId, response);
+        }
+        return withBufferedViewCount(response);
     }
 
     @Transactional
@@ -112,6 +132,7 @@ public class CommunityService {
             walkInteractionMapper.insertLike(walkId, userId);
             walkInteractionMapper.incrementLikeCount(walkId);
             notificationService.notifyWalkLiked(walkId, userId);
+            evictCommunityReadCaches(walkId);
         }
         return buildEngagementResponse(walkId, userId);
     }
@@ -122,6 +143,7 @@ public class CommunityService {
         if (hasLike(walkId, userId)) {
             walkInteractionMapper.deleteLike(walkId, userId);
             walkInteractionMapper.decrementLikeCount(walkId);
+            evictCommunityReadCaches(walkId);
         }
         return buildEngagementResponse(walkId, userId);
     }
@@ -133,6 +155,7 @@ public class CommunityService {
             walkInteractionMapper.insertFavorite(walkId, userId);
             walkInteractionMapper.incrementFavoriteCount(walkId);
             notificationService.notifyWalkFavorited(walkId, userId);
+            evictCommunityReadCaches(walkId);
         }
         return buildEngagementResponse(walkId, userId);
     }
@@ -143,14 +166,21 @@ public class CommunityService {
         if (hasFavorite(walkId, userId)) {
             walkInteractionMapper.deleteFavorite(walkId, userId);
             walkInteractionMapper.decrementFavoriteCount(walkId);
+            evictCommunityReadCaches(walkId);
         }
         return buildEngagementResponse(walkId, userId);
     }
 
     public List<CommunityCommentResponse> listComments(Long walkId, Long currentUserId) {
         ensureCommentableWalkExists(walkId, currentUserId);
+        List<CommunityCommentResponse> cached = communityCacheService.getComments(walkId);
+        if (cached != null) {
+            return cached;
+        }
         List<CommunityCommentQueryRow> rows = communityCommentMapper.findVisibleByWalkId(walkId);
-        return buildCommentTree(rows);
+        List<CommunityCommentResponse> comments = buildCommentTree(rows);
+        communityCacheService.putComments(walkId, comments);
+        return comments;
     }
 
     @Transactional
@@ -178,6 +208,7 @@ public class CommunityService {
         entity.setStatus("active");
         communityCommentMapper.insert(entity);
         notificationService.notifyCommentCreated(walkId, userId, entity.getId(), parentId);
+        communityCacheService.evictComments(walkId);
 
         CommunityCommentQueryRow created = communityCommentMapper.findActiveById(entity.getId());
         if (created == null) {
@@ -200,6 +231,7 @@ public class CommunityService {
         }
 
         communityCommentMapper.softDelete(commentId);
+        communityCacheService.evictComments(comment.getWalkId());
     }
 
     private CommunityWalkResponse toResponse(CommunityWalkQueryRow row) {
@@ -261,6 +293,27 @@ public class CommunityService {
                 hasLike(walkId, userId),
                 hasFavorite(walkId, userId)
         );
+    }
+
+    private List<CommunityWalkResponse> loadFeed(
+            String feedType,
+            Long currentUserId,
+            int limit,
+            int offset,
+            Supplier<List<CommunityWalkQueryRow>> querySupplier
+    ) {
+        if (currentUserId == null) {
+            List<CommunityWalkResponse> cached = communityCacheService.getFeed(feedType, offset, limit);
+            if (cached != null) {
+                return withBufferedViewCounts(cached);
+            }
+        }
+
+        List<CommunityWalkResponse> responses = querySupplier.get().stream().map(this::toResponse).toList();
+        if (currentUserId == null) {
+            communityCacheService.putFeed(feedType, offset, limit, responses);
+        }
+        return withBufferedViewCounts(responses);
     }
 
     private int normalizePageSize(int pageSize) {
@@ -342,6 +395,69 @@ public class CommunityService {
     private boolean hasFavorite(Long walkId, Long userId) {
         Integer count = walkInteractionMapper.countFavorite(walkId, userId);
         return count != null && count > 0;
+    }
+
+    private void incrementViewCount(Long walkId) {
+        if (communityCacheService.isEnabled()) {
+            communityCacheService.incrementBufferedViewCount(walkId);
+            return;
+        }
+        walkInteractionMapper.incrementViewCount(walkId);
+    }
+
+    private void evictCommunityReadCaches(Long walkId) {
+        communityCacheService.evictWalkDetail(walkId);
+        communityCacheService.evictAllFeeds();
+    }
+
+    private List<CommunityWalkResponse> withBufferedViewCounts(List<CommunityWalkResponse> responses) {
+        if (!communityCacheService.isEnabled() || responses.isEmpty()) {
+            return responses;
+        }
+
+        List<CommunityWalkResponse> adjusted = new ArrayList<>(responses.size());
+        for (CommunityWalkResponse response : responses) {
+            adjusted.add(withBufferedViewCount(response));
+        }
+        return adjusted;
+    }
+
+    private CommunityWalkResponse withBufferedViewCount(CommunityWalkResponse response) {
+        if (!communityCacheService.isEnabled() || response == null || response.id() == null) {
+            return response;
+        }
+
+        long buffered = communityCacheService.getBufferedViewCount(response.id());
+        if (buffered <= 0L) {
+            return response;
+        }
+
+        return new CommunityWalkResponse(
+                response.id(),
+                response.themeTitle(),
+                response.themeCategory(),
+                response.locationName(),
+                response.authorId(),
+                response.authorNickname(),
+                response.authorAvatar(),
+                response.recordUnit(),
+                response.isPublic(),
+                response.noteText(),
+                response.photoUrl(),
+                response.path(),
+                response.completedMissions(),
+                response.likeCount(),
+                response.favoriteCount(),
+                safeLong(response.viewCount()) + buffered,
+                response.liked(),
+                response.favorited(),
+                response.tags(),
+                response.createdAt()
+        );
+    }
+
+    private long safeLong(Long value) {
+        return value == null ? 0L : value;
     }
 
     private List<CommunityCommentResponse> buildCommentTree(List<CommunityCommentQueryRow> rows) {
