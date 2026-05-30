@@ -136,6 +136,25 @@ type RoomMapMember = {
   currentPosition: [number, number] | null;
 };
 
+const AGENT_QUICK_PROMPTS = [
+  {
+    label: '日落拍照',
+    prompt: '我想找一条适合傍晚散步、看日落、拍照好看的 City Walk 路线，节奏轻松一点。',
+  },
+  {
+    label: '咖啡散步',
+    prompt: '帮我规划一条适合边走边逛、顺便喝咖啡的 City Walk 路线，最好街区氛围感强一点。',
+  },
+  {
+    label: '校园轻松走',
+    prompt: '我想在校园附近找一条轻松好走的散步路线，适合放松、拍照和随便逛逛。',
+  },
+  {
+    label: '低体力 1 小时',
+    prompt: '帮我规划一条总时长控制在 1 小时左右、步行压力不要太大的 City Walk 路线。',
+  },
+] as const;
+
 function buildSavedRoomMembers(
   room: CoCreateRoom | null,
   currentUser: AppUser | null,
@@ -686,6 +705,13 @@ function normalizeAgentMarkdown(value: string) {
     .trim();
 }
 
+function buildAgentPoiUri(title: string, lng?: number, lat?: number) {
+  if (typeof lng !== 'number' || typeof lat !== 'number') {
+    return '';
+  }
+  return `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(title)}`;
+}
+
 function parseAgentEventJson(value?: string | null) {
   if (!value) {
     return null;
@@ -792,6 +818,108 @@ function summarizeAgentOutput(event: AgentStreamEvent) {
   }
 
   return truncateAgentEventText(event.output, 280);
+}
+
+function extractAgentSuggestedPois(events: AgentStreamEvent[]): MapPOI[] {
+  const ordered = [...events].reverse();
+  const results: MapPOI[] = [];
+  const seen = new Set<string>();
+
+  for (const event of ordered) {
+    if (event.type !== 'tool_result' || !event.output) {
+      continue;
+    }
+
+    const payload = parseAgentEventJson(event.output);
+    if (!payload) {
+      continue;
+    }
+
+    const items = getAgentResultItems(payload);
+    for (const item of items) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const title = String(record.title || record.name || '').trim();
+      const lat = typeof record.lat === 'number' ? record.lat : undefined;
+      const lng = typeof record.lng === 'number' ? record.lng : undefined;
+      if (!title || typeof lat !== 'number' || typeof lng !== 'number') {
+        continue;
+      }
+
+      const key = `${title}-${lat}-${lng}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      results.push({
+        title,
+        lat,
+        lng,
+        uri: typeof record.uri === 'string' && record.uri.trim() ? record.uri.trim() : buildAgentPoiUri(title, lng, lat),
+      });
+    }
+  }
+
+  return results.slice(0, 8);
+}
+
+function mergeMapPois(primary: MapPOI[], secondary: MapPOI[]) {
+  const merged: MapPOI[] = [];
+  const seen = new Set<string>();
+  for (const poi of [...primary, ...secondary]) {
+    const key = `${poi.title}-${poi.lat ?? 'na'}-${poi.lng ?? 'na'}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(poi);
+  }
+  return merged;
+}
+
+function cleanAgentRouteCandidate(value: string) {
+  return value
+    .replace(/[`*#>]/g, ' ')
+    .replace(/[📍🗺️🚶🏫☕🌇✨]/g, ' ')
+    .replace(/第[一二三四五六七八九十0-9]+站[:：]?/g, ' ')
+    .replace(/(漫步路线|路线顺序|建议路线顺序|适合区域|推荐区域)/g, ' ')
+    .replace(/[()（）]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractRoutePointCandidatesFromAnswer(answer: string) {
+  const lines = normalizeAgentMarkdown(answer)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const candidates: string[] = [];
+
+  for (const line of lines) {
+    if (line.includes('→')) {
+      line
+        .split('→')
+        .map(cleanAgentRouteCandidate)
+        .filter((item) => item.length >= 2 && item.length <= 30)
+        .forEach((item) => candidates.push(item));
+    }
+
+    const stationMatch = line.match(/第[一二三四五六七八九十0-9]+站[:：]?\s*(.+)/);
+    if (stationMatch?.[1]) {
+      const cleaned = cleanAgentRouteCandidate(stationMatch[1])
+        .split(/[，,]/)[0]
+        .split(/[（(]/)[0]
+        .trim();
+      if (cleaned.length >= 2 && cleaned.length <= 30) {
+        candidates.push(cleaned);
+      }
+    }
+  }
+
+  return [...new Set(candidates)].slice(0, 6);
 }
 
 function generateWalkRecordCard(params: {
@@ -1703,6 +1831,7 @@ export default function App() {
   const [agentStatus, setAgentStatus] = useState('');
   const [isAgentStreaming, setIsAgentStreaming] = useState(false);
   const [isClearingAgentMemory, setIsClearingAgentMemory] = useState(false);
+  const [isApplyingAgentResult, setIsApplyingAgentResult] = useState(false);
   const [showAgentPlannerModal, setShowAgentPlannerModal] = useState(false);
   const [showAgentTimelineModal, setShowAgentTimelineModal] = useState(false);
   const [mood, setMood] = useState('好奇');
@@ -1716,6 +1845,7 @@ export default function App() {
   const [selectedLocation, setSelectedLocation] = useState<SearchLocation | null>(null);
   const [selectedThemesForCombine, setSelectedThemesForCombine] = useState<string[]>([]);
   const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
+  const [agentSuggestedPois, setAgentSuggestedPois] = useState<MapPOI[]>([]);
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
   const [isPublic, setIsPublic] = useState(true);
@@ -1733,6 +1863,7 @@ export default function App() {
   const roomThemeSyncTimeoutRef = useRef<number | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
+  const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const showNotificationCenterRef = useRef(false);
 
   useEffect(() => {
@@ -1998,6 +2129,11 @@ export default function App() {
   const currentLocationName = useMemo(
     () => deriveDisplayLocationName(selectedLocation?.name || searchLocation || '当前位置', locationContext),
     [locationContext, searchLocation, selectedLocation],
+  );
+
+  const displayNearbyPois = useMemo(
+    () => (agentSuggestedPois.length > 0 ? agentSuggestedPois : nearbyPois),
+    [agentSuggestedPois, nearbyPois],
   );
 
   const currentPosition = useMemo<SearchLocation | null>(() => livePosition, [livePosition]);
@@ -2496,6 +2632,7 @@ export default function App() {
   const handleSearchLocation = (query: string) => {
     setSearchLocation(query);
     setSelectedLocation(null);
+    setAgentSuggestedPois([]);
 
     if (searchTimeoutRef.current) {
       window.clearTimeout(searchTimeoutRef.current);
@@ -2540,6 +2677,7 @@ export default function App() {
   };
 
   const handleSelectLocation = async (location: SearchLocation) => {
+    setAgentSuggestedPois([]);
     setSelectedLocation(location);
     setSelectedPoiKey(null);
     setSearchLocation(location.name);
@@ -2554,6 +2692,7 @@ export default function App() {
   };
 
   const handleUseCurrentLocation = async () => {
+    setAgentSuggestedPois([]);
     setIsGenerating(true);
     try {
       await resolveBrowserLocation();
@@ -2566,6 +2705,7 @@ export default function App() {
   };
 
   const handleSelectMapPoint = async (lat: number, lng: number) => {
+    setAgentSuggestedPois([]);
     setIsGenerating(true);
     try {
       const details = await getLocationContextDetails(lat, lng);
@@ -2589,6 +2729,7 @@ export default function App() {
       return;
     }
 
+    setAgentSuggestedPois([]);
     setIsGenerating(true);
     try {
       const [geoContext, nameContext] = await Promise.all([
@@ -2732,6 +2873,7 @@ export default function App() {
   const resetAgentWorkspace = (nextStatus = '') => {
     setAgentAnswer('');
     setAgentEvents([]);
+    setAgentSuggestedPois([]);
     setShowAgentTimelineModal(false);
     setAgentStatus(nextStatus);
   };
@@ -2849,6 +2991,88 @@ export default function App() {
       setAgentStatus(error instanceof Error ? error.message : '清空 Agent 记忆失败，请稍后再试。');
     } finally {
       setIsClearingAgentMemory(false);
+    }
+  };
+
+  const handleApplyAgentResult = async () => {
+    const normalizedAnswer = normalizeAgentMarkdown(agentAnswer || '');
+    if (!normalizedAnswer) {
+      setAgentStatus('当前还没有可应用的 Agent 结果。');
+      return;
+    }
+
+    setIsApplyingAgentResult(true);
+    try {
+      const routeCandidates = extractRoutePointCandidatesFromAnswer(normalizedAnswer);
+      const resolvedRoutePois = (
+        await Promise.all(
+          routeCandidates.map(async (candidate) => {
+            try {
+              const results = await searchLocations(candidate);
+              const first = results[0];
+              if (!first) {
+                return null;
+              }
+              return {
+                title: first.name,
+                lat: first.lat,
+                lng: first.lng,
+                uri: buildAgentPoiUri(first.name, first.lng, first.lat),
+              } satisfies MapPOI;
+            } catch (error) {
+              console.error('Resolve agent route point error:', candidate, error);
+              return null;
+            }
+          }),
+        )
+      ).filter((item): item is NonNullable<typeof item> => item !== null);
+      const toolSuggestedPois = extractAgentSuggestedPois(agentEvents);
+      const suggestedPois = mergeMapPois(resolvedRoutePois, toolSuggestedPois);
+      const notePrefix = '【Agent 路线规划建议】';
+      setNoteText((prev) => {
+        const cleanedPrev = prev.includes(notePrefix) ? prev.split(notePrefix)[0].trimEnd() : prev.trim();
+        const nextContent = `${notePrefix}\n${normalizedAnswer}`;
+        return cleanedPrev ? `${cleanedPrev}\n\n${nextContent}` : nextContent;
+      });
+
+      if (suggestedPois.length > 0) {
+        setAgentSuggestedPois(suggestedPois);
+        const firstPoi = suggestedPois[0];
+        if (typeof firstPoi.lat === 'number' && typeof firstPoi.lng === 'number') {
+          setSelectedLocation({
+            name: firstPoi.title,
+            lat: firstPoi.lat,
+            lng: firstPoi.lng,
+          });
+          setSelectedPoiKey(`${firstPoi.title}-${firstPoi.lat}-${firstPoi.lng}`);
+          setSearchLocation(firstPoi.title);
+          try {
+            const [geoContext, nameContext] = await Promise.all([
+              getLocationContext(firstPoi.lat, firstPoi.lng),
+              searchLocationContext(firstPoi.title),
+            ]);
+            setLocationContext(nameContext && nameContext !== firstPoi.title ? nameContext : geoContext);
+          } catch (error) {
+            console.error('Refresh applied agent point context error:', error);
+          }
+        }
+        setAgentStatus(`已将路线建议写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`);
+      } else {
+        setAgentStatus('已将路线建议写入备注，但这次没有从工具结果里提取到可标注的地图点位。');
+      }
+
+      setShowAgentTimelineModal(false);
+      setShowAgentPlannerModal(false);
+      setActiveTab('explore');
+      window.setTimeout(() => {
+        noteTextareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        noteTextareaRef.current?.focus();
+      }, 120);
+    } catch (error) {
+      console.error('Apply agent result error:', error);
+      setAgentStatus('应用 Agent 结果失败，请稍后再试。');
+    } finally {
+      setIsApplyingAgentResult(false);
     }
   };
 
@@ -3981,6 +4205,22 @@ export default function App() {
                       </span>
                     </div>
 
+                    <div className="mt-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Quick Prompts</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {AGENT_QUICK_PROMPTS.map((item) => (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => setAgentPrompt(item.prompt)}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <textarea
                       value={agentPrompt}
                       onChange={(event) => setAgentPrompt(event.target.value)}
@@ -4054,9 +4294,22 @@ export default function App() {
                           这里固定展示当前规划结果，你可以一边改需求一边对照查看。
                         </p>
                       </div>
-                      <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                        {agentAnswer ? '已生成路线建议' : '等待生成结果'}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {agentAnswer ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleApplyAgentResult()}
+                            disabled={isApplyingAgentResult}
+                            className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
+                          >
+                            {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+                            {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
+                          </button>
+                        ) : null}
+                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                          {agentAnswer ? '已生成路线建议' : '等待生成结果'}
+                        </span>
+                      </div>
                     </div>
 
                     {agentAnswer ? (
@@ -4423,7 +4676,7 @@ export default function App() {
                   <div className="flex flex-wrap gap-2 text-xs text-slate-500">
                     <div className="rounded-full bg-slate-100 px-3 py-1">轨迹点 {path.length}</div>
                     <div className="rounded-full bg-slate-100 px-3 py-1">距离 {pathDistanceKm.toFixed(2)} km</div>
-                    <div className="rounded-full bg-slate-100 px-3 py-1">POI {nearbyPois.length}</div>
+                    <div className="rounded-full bg-slate-100 px-3 py-1">POI {displayNearbyPois.length}</div>
                   </div>
                 </div>
 
@@ -4437,7 +4690,7 @@ export default function App() {
                     followCurrentPosition={isTracking}
                     pathCoordinates={visiblePathCoordinates}
                     roomMembers={walkMode === 'advanced' ? roomMapMembers : []}
-                    nearbyPois={nearbyPois}
+                    nearbyPois={displayNearbyPois}
                     selectedPoiKey={selectedPoiKey}
                     onSelectMapPoint={(lat, lng) => void handleSelectMapPoint(lat, lng)}
                     onSelectPoi={(poi) => void handleSelectPoi(poi)}
@@ -4468,11 +4721,11 @@ export default function App() {
                   </div>
 
                   <h3 className="text-sm font-medium text-slate-700">附近可逛点</h3>
-                  {nearbyPois.length === 0 ? (
+                  {displayNearbyPois.length === 0 ? (
                     <p className="mt-2 text-sm text-slate-500">选择地点后，这里会显示附近推荐点位。</p>
                   ) : (
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {nearbyPois.map((poi, index) => (
+                      {displayNearbyPois.map((poi, index) => (
                         <button
                           key={`${poi.title}-${index}`}
                           onClick={() => void handleSelectPoi(poi)}
@@ -4676,6 +4929,7 @@ export default function App() {
                 </div>
 
                 <textarea
+                  ref={noteTextareaRef}
                   value={noteText}
                   onChange={(event) => setNoteText(event.target.value)}
                   placeholder="写一点这次漫步的感受"
