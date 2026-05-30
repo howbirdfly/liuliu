@@ -712,6 +712,18 @@ function buildAgentPoiUri(title: string, lng?: number, lat?: number) {
   return `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(title)}`;
 }
 
+function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const deltaLat = toRadians(lat2 - lat1);
+  const deltaLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
 function parseAgentEventJson(value?: string | null) {
   if (!value) {
     return null;
@@ -882,10 +894,11 @@ function mergeMapPois(primary: MapPOI[], secondary: MapPOI[]) {
 function cleanAgentRouteCandidate(value: string) {
   return value
     .replace(/[`*#>]/g, ' ')
-    .replace(/[📍🗺️🚶🏫☕🌇✨]/g, ' ')
+    .replace(/[📍🗺️🚶🏫☕🌇✨👉]/g, ' ')
     .replace(/第[一二三四五六七八九十0-9]+站[:：]?/g, ' ')
-    .replace(/(漫步路线|路线顺序|建议路线顺序|适合区域|推荐区域)/g, ' ')
-    .replace(/[()（）]/g, ' ')
+    .replace(/(漫步路线|路线顺序|建议路线顺序|适合区域|推荐区域|起点|终点)/g, ' ')
+    .replace(/[()（）【】\[\]]/g, ' ')
+    .replace(/[，,。；;：:]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -903,7 +916,8 @@ function extractRoutePointCandidatesFromAnswer(answer: string) {
       line
         .split('→')
         .map(cleanAgentRouteCandidate)
-        .filter((item) => item.length >= 2 && item.length <= 30)
+        .map((item) => item.replace(/\s*漫步路线\s*/g, '').trim())
+        .filter((item) => item.length >= 2 && item.length <= 24)
         .forEach((item) => candidates.push(item));
     }
 
@@ -911,15 +925,200 @@ function extractRoutePointCandidatesFromAnswer(answer: string) {
     if (stationMatch?.[1]) {
       const cleaned = cleanAgentRouteCandidate(stationMatch[1])
         .split(/[，,]/)[0]
-        .split(/[（(]/)[0]
+        .split(/\s+/)[0]
         .trim();
-      if (cleaned.length >= 2 && cleaned.length <= 30) {
+      if (cleaned.length >= 2 && cleaned.length <= 24) {
         candidates.push(cleaned);
       }
     }
   }
 
   return [...new Set(candidates)].slice(0, 6);
+}
+
+function normalizeSearchName(value: string) {
+  return value.replace(/[()（）·•\s-]/g, '').toLowerCase();
+}
+
+function scoreRouteSearchResult(
+  candidate: string,
+  resultName: string,
+  distanceKm: number
+) {
+  const normalizedCandidate = normalizeSearchName(candidate);
+  const normalizedResult = normalizeSearchName(resultName);
+  let score = -distanceKm;
+
+  if (normalizedResult === normalizedCandidate) {
+    score += 1000;
+  } else if (normalizedResult.startsWith(normalizedCandidate)) {
+    score += 600;
+  } else if (normalizedResult.includes(normalizedCandidate)) {
+    score += 260;
+  }
+
+  if (normalizedResult.includes('店') || normalizedResult.includes('酒店') || normalizedResult.includes('咖啡')) {
+    score -= 120;
+  }
+
+  return score;
+}
+
+function isConfidentRouteSearchMatch(score: number, distanceKm: number) {
+  if (distanceKm > 120) {
+    return false;
+  }
+  if (distanceKm > 60 && score < 400) {
+    return false;
+  }
+  if (distanceKm > 20 && score < 180) {
+    return false;
+  }
+  return score > 0;
+}
+
+function stripMarkdownSyntax(value: string) {
+  return value
+    .replace(/[`*_>#-]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractAgentThemeTitle(answer: string, routeCandidates: string[], fallbackLocationName: string) {
+  const lines = normalizeAgentMarkdown(answer)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const headingLine = lines.find((line) => /^#{1,4}\s+/.test(line));
+  const cleanedHeading = headingLine ? stripMarkdownSyntax(headingLine.replace(/^#{1,4}\s+/, '')) : '';
+  if (cleanedHeading && cleanedHeading.length <= 36) {
+    return cleanedHeading;
+  }
+
+  if (routeCandidates.length >= 2) {
+    return `${routeCandidates[0]} -> ${routeCandidates[routeCandidates.length - 1]} 漫步路线`;
+  }
+
+  if (routeCandidates.length === 1) {
+    return `${routeCandidates[0]} 周边漫步`;
+  }
+
+  return `${fallbackLocationName} Agent 漫步建议`;
+}
+
+function extractAgentThemeDescription(answer: string, title: string) {
+  const lines = normalizeAgentMarkdown(answer)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (/^#{1,6}\s+/.test(line)) {
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      continue;
+    }
+    const cleaned = stripMarkdownSyntax(line);
+    if (cleaned && cleaned !== title && cleaned.length >= 12) {
+      return cleaned.length > 80 ? `${cleaned.slice(0, 80)}...` : cleaned;
+    }
+  }
+
+  return '沿着 Agent 推荐的路线慢慢走，把沿途最想停下来的画面、气味和节奏记下来。';
+}
+
+function inferAgentThemeCategory(answer: string, fallback = 'Agent 漫步') {
+  const normalized = normalizeAgentMarkdown(answer);
+  if (/(日落|晚霞|拍照|光影)/.test(normalized)) {
+    return '日落漫步';
+  }
+  if (/(咖啡|店铺|街区|古镇|老街)/.test(normalized)) {
+    return '街区漫步';
+  }
+  if (/(校园|大学|图书馆|宿舍)/.test(normalized)) {
+    return '校园漫步';
+  }
+  if (/(海边|公园|绿地|自然)/.test(normalized)) {
+    return '自然漫步';
+  }
+  return fallback;
+}
+
+function inferAgentThemeColor(answer: string) {
+  const normalized = normalizeAgentMarkdown(answer);
+  if (/(日落|晚霞|夜景|灯光)/.test(normalized)) {
+    return '#f97316';
+  }
+  if (/(海边|海岸|海风|公园|绿地|自然)/.test(normalized)) {
+    return '#0ea5a4';
+  }
+  if (/(校园|大学|图书馆)/.test(normalized)) {
+    return '#2563eb';
+  }
+  if (/(古镇|街区|店铺|老街)/.test(normalized)) {
+    return '#f59e0b';
+  }
+  return '#8b5cf6';
+}
+
+function buildAgentThemeMissions(routeCandidates: string[], answer: string) {
+  const routeMissions = routeCandidates.slice(0, 3).map((point, index, points) => {
+    if (index === 0 && points.length > 1) {
+      return `从 ${point} 出发，先记录这条路线最吸引你的第一眼氛围`;
+    }
+    if (index === points.length - 1 && points.length > 1) {
+      return `走到 ${point} 时停留片刻，记下这条路线最值得分享的瞬间`;
+    }
+    return `经过 ${point} 时观察周边最有记忆点的细节，并拍下一张代表画面`;
+  });
+
+  if (routeMissions.length >= 3) {
+    return routeMissions;
+  }
+
+  const fallbackMissions = normalizeAgentMarkdown(answer)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s+/.test(line))
+    .map((line) => stripMarkdownSyntax(line.replace(/^[-*]\s+/, '')))
+    .filter((line) => line.length >= 6 && line.length <= 40);
+
+  const merged = [...routeMissions];
+  for (const mission of fallbackMissions) {
+    if (!merged.includes(mission)) {
+      merged.push(mission);
+    }
+    if (merged.length >= 3) {
+      break;
+    }
+  }
+
+  while (merged.length < 3) {
+    if (merged.length === 0) {
+      merged.push('沿着 Agent 推荐路线出发，先找到今天最想慢下来的一个位置');
+    } else if (merged.length === 1) {
+      merged.push('在途中记录一处最有氛围感的街角、建筑或风景');
+    } else {
+      merged.push('结束前总结这条路线最适合分享给朋友的理由');
+    }
+  }
+
+  return merged.slice(0, 3);
+}
+
+function buildThemeFromAgentAnswer(answer: string, routeCandidates: string[], fallbackLocationName: string): WalkTheme {
+  const title = extractAgentThemeTitle(answer, routeCandidates, fallbackLocationName);
+  return {
+    title,
+    description: extractAgentThemeDescription(answer, title),
+    category: inferAgentThemeCategory(answer),
+    missions: buildAgentThemeMissions(routeCandidates, answer),
+    vibeColor: inferAgentThemeColor(answer),
+    provider: 'agent',
+  };
 }
 
 function generateWalkRecordCard(params: {
@@ -1153,6 +1352,7 @@ function AmapScene(props: {
   pathCoordinates: [number, number][];
   roomMembers?: RoomMapMember[];
   nearbyPois: MapPOI[];
+  fitPoisToView?: boolean;
   selectedPoiKey: string | null;
   onSelectMapPoint: (lat: number, lng: number) => void;
   onSelectPoi: (poi: MapPOI) => void;
@@ -1167,6 +1367,7 @@ function AmapScene(props: {
     pathCoordinates,
     roomMembers = [],
     nearbyPois,
+    fitPoisToView = false,
     selectedPoiKey,
     onSelectMapPoint,
     onSelectPoi,
@@ -1308,6 +1509,8 @@ function AmapScene(props: {
       );
     }
 
+    const poiOverlays: any[] = [];
+
     nearbyPois
       .filter((poi) => typeof poi.lat === 'number' && typeof poi.lng === 'number')
       .forEach((poi) => {
@@ -1339,6 +1542,7 @@ function AmapScene(props: {
         });
 
         overlays.push(marker);
+        poiOverlays.push(marker);
       });
 
     if (pathCoordinates.length > 1 && !hasRoomTracks) {
@@ -1393,7 +1597,10 @@ function AmapScene(props: {
     }
 
     overlaysRef.current = overlays;
-  }, [currentPosition, hasRoomTracks, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, roomMembers, selectedLocation, selectedPoiKey]);
+    if (fitPoisToView && poiOverlays.length > 1) {
+      map.setFitView(poiOverlays, false, [64, 64, 64, 64]);
+    }
+  }, [currentPosition, fitPoisToView, hasRoomTracks, isSameCoordinate, mapReadyVersion, nearbyPois, onSelectPoi, pathCoordinates, roomMembers, selectedLocation, selectedPoiKey]);
 
   const handleRecenterCurrentPosition = () => {
     if (!mapRef.current || isRecenteringCurrentPosition) {
@@ -3004,20 +3211,61 @@ export default function App() {
     setIsApplyingAgentResult(true);
     try {
       const routeCandidates = extractRoutePointCandidatesFromAnswer(normalizedAnswer);
+      const agentTheme = buildThemeFromAgentAnswer(normalizedAnswer, routeCandidates, currentLocationName);
+      const routeAnchor =
+        selectedLocation ??
+        currentPosition ?? {
+          name: currentLocationName,
+          lat: DEFAULT_CENTER[0],
+          lng: DEFAULT_CENTER[1],
+        };
+      const routeContextKeyword =
+        extractBroadLocationName(locationContext) ||
+        extractBroadLocationName(currentLocationName) ||
+        currentLocationName;
       const resolvedRoutePois = (
         await Promise.all(
           routeCandidates.map(async (candidate) => {
             try {
-              const results = await searchLocations(candidate);
-              const first = results[0];
-              if (!first) {
+              const queryOptions = [
+                `${routeContextKeyword} ${candidate}`.trim(),
+                `${currentLocationName} ${candidate}`.trim(),
+                candidate,
+              ].filter((item, index, array) => item && array.indexOf(item) === index);
+
+              const mergedResults = [];
+              for (const query of queryOptions) {
+                const results = await searchLocations(query);
+                mergedResults.push(...results);
+                if (mergedResults.length >= 5) {
+                  break;
+                }
+              }
+
+              const dedupedResults = mergedResults.filter((item, index, array) => {
+                const key = `${item.name}-${item.lat}-${item.lng}`;
+                return index === array.findIndex((candidateItem) => `${candidateItem.name}-${candidateItem.lat}-${candidateItem.lng}` === key);
+              });
+
+              const best = dedupedResults
+                .map((item) => {
+                  const distanceKm = calculateDistanceKm(routeAnchor.lat, routeAnchor.lng, item.lat, item.lng);
+                  return {
+                    item,
+                    distanceKm,
+                    score: scoreRouteSearchResult(candidate, item.name, distanceKm),
+                  };
+                })
+                .sort((left, right) => right.score - left.score || left.distanceKm - right.distanceKm)[0];
+
+              if (!best || !isConfidentRouteSearchMatch(best.score, best.distanceKm)) {
                 return null;
               }
               return {
-                title: first.name,
-                lat: first.lat,
-                lng: first.lng,
-                uri: buildAgentPoiUri(first.name, first.lng, first.lat),
+                title: best.item.name,
+                lat: best.item.lat,
+                lng: best.item.lng,
+                uri: buildAgentPoiUri(best.item.name, best.item.lng, best.item.lat),
               } satisfies MapPOI;
             } catch (error) {
               console.error('Resolve agent route point error:', candidate, error);
@@ -3027,13 +3275,15 @@ export default function App() {
         )
       ).filter((item): item is NonNullable<typeof item> => item !== null);
       const toolSuggestedPois = extractAgentSuggestedPois(agentEvents);
-      const suggestedPois = mergeMapPois(resolvedRoutePois, toolSuggestedPois);
+      const suggestedPois = resolvedRoutePois.length > 0 ? resolvedRoutePois : toolSuggestedPois;
       const notePrefix = '【Agent 路线规划建议】';
       setNoteText((prev) => {
         const cleanedPrev = prev.includes(notePrefix) ? prev.split(notePrefix)[0].trimEnd() : prev.trim();
         const nextContent = `${notePrefix}\n${normalizedAnswer}`;
         return cleanedPrev ? `${cleanedPrev}\n\n${nextContent}` : nextContent;
       });
+      setCurrentTheme(agentTheme);
+      setCheckedMissions([]);
 
       if (suggestedPois.length > 0) {
         setAgentSuggestedPois(suggestedPois);
@@ -3056,9 +3306,25 @@ export default function App() {
             console.error('Refresh applied agent point context error:', error);
           }
         }
-        setAgentStatus(`已将路线建议写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`);
+        const unresolvedCount = Math.max(0, routeCandidates.length - resolvedRoutePois.length);
+        setAgentStatus(
+          unresolvedCount > 0
+            ? `已写入备注，并在地图上标出 ${suggestedPois.length} 个可信点位；另有 ${unresolvedCount} 个路线点未通过本地匹配校验，已跳过。`
+            : `已将路线建议写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`
+        );
       } else {
-        setAgentStatus('已将路线建议写入备注，但这次没有从工具结果里提取到可标注的地图点位。');
+        setAgentStatus('已将路线建议写入备注，但这次没有识别出足够可信的本地点位，所以没有直接上图。');
+      }
+
+      const unresolvedCount = Math.max(0, routeCandidates.length - resolvedRoutePois.length);
+      if (suggestedPois.length > 0) {
+        setAgentStatus(
+          unresolvedCount > 0
+            ? `已用 Agent 建议更新当前任务、写入备注，并在地图上标出 ${suggestedPois.length} 个可信点位；另有 ${unresolvedCount} 个路线点未通过本地匹配校验，已跳过。`
+            : `已用 Agent 建议更新当前任务、写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`,
+        );
+      } else {
+        setAgentStatus('已用 Agent 建议更新当前任务，并写入备注；但这次没有识别出足够可信的本地点位，所以没有直接上图。');
       }
 
       setShowAgentTimelineModal(false);
@@ -4303,7 +4569,7 @@ export default function App() {
                             className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
                           >
                             {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-                            {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
+                            {isApplyingAgentResult ? '应用中...' : '应用为当前任务与地图'}
                           </button>
                         ) : null}
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
@@ -4691,6 +4957,7 @@ export default function App() {
                     pathCoordinates={visiblePathCoordinates}
                     roomMembers={walkMode === 'advanced' ? roomMapMembers : []}
                     nearbyPois={displayNearbyPois}
+                    fitPoisToView={agentSuggestedPois.length > 1}
                     selectedPoiKey={selectedPoiKey}
                     onSelectMapPoint={(lat, lng) => void handleSelectMapPoint(lat, lng)}
                     onSelectPoi={(poi) => void handleSelectPoi(poi)}
