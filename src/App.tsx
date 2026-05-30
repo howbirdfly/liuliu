@@ -1702,6 +1702,7 @@ export default function App() {
   const [agentEvents, setAgentEvents] = useState<AgentStreamEvent[]>([]);
   const [agentStatus, setAgentStatus] = useState('');
   const [isAgentStreaming, setIsAgentStreaming] = useState(false);
+  const [showAgentPlannerModal, setShowAgentPlannerModal] = useState(false);
   const [showAgentTimelineModal, setShowAgentTimelineModal] = useState(false);
   const [mood, setMood] = useState('好奇');
   const [weather, setWeather] = useState('晴朗');
@@ -2822,6 +2823,16 @@ export default function App() {
     setAgentStatus('已停止当前 Agent 规划。');
   };
 
+  const closeAgentPlannerModal = () => {
+    if (isAgentStreaming) {
+      closeAgentPlanningStream();
+      setIsAgentStreaming(false);
+      setAgentStatus('已关闭 Agent 窗口，本次规划已停止。');
+    }
+    setShowAgentTimelineModal(false);
+    setShowAgentPlannerModal(false);
+  };
+
   const handleCombineThemes = async () => {
     if (selectedThemesForCombine.length < 2) {
       alert('请至少选择两个主题方向。');
@@ -3907,8 +3918,112 @@ export default function App() {
             )}
           </div>
         </header>
-        {showAgentTimelineModal ? (
+        {showAgentPlannerModal ? (
           <div className="fixed inset-0 z-50 flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
+            <div className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl sm:max-w-4xl">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Agent Planner</div>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">Agent 路线规划窗口</h3>
+                  <p className="mt-1 text-xs text-slate-500">在这里专门和 Agent 对话、看工具调用过程、查看最终路线建议。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeAgentPlannerModal}
+                  className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
+                  aria-label="关闭 Agent 规划窗口"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+                <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-500">
+                        用自然语言描述你想怎么逛，Agent 会实时调用地图、社区和 Walk 工具来规划。
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
+                      {isAgentStreaming ? '流式规划中' : '支持实时步骤输出'}
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={agentPrompt}
+                    onChange={(event) => setAgentPrompt(event.target.value)}
+                    placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
+                    className="mt-4 min-h-32 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                  />
+
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={handleStartAgentPlanning}
+                      disabled={isAgentStreaming}
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                      {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopAgentPlanning}
+                      disabled={!isAgentStreaming}
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
+                    >
+                      停止规划
+                    </button>
+                    {agentEvents.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowAgentTimelineModal(true)}
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700"
+                      >
+                        查看执行过程
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {agentStatus ? <p className="mt-3 text-xs text-slate-500">{agentStatus}</p> : null}
+
+                  {agentEvents.length > 0 ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">执行过程已折叠</p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            已记录 {agentEvents.length} 条 Agent 事件，默认不在窗口里直接展开，避免打断你看最终路线。
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
+                          时间线单独查看
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {agentAnswer ? (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-white px-4 py-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
+                      <div className="mt-3 max-h-[46vh] overflow-y-auto pr-1">
+                        <div className="agent-markdown">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {normalizeAgentMarkdown(agentAnswer)}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {showAgentTimelineModal ? (
+          <div className="fixed inset-0 z-[60] flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
             <div className="flex max-h-[82vh] w-full flex-col overflow-hidden rounded-[26px] bg-white shadow-2xl sm:max-w-3xl">
               <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
                 <div>
@@ -4466,75 +4581,33 @@ export default function App() {
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
                       <p className="mt-1 text-xs leading-6 text-slate-500">
-                        用自然语言描述你想怎么逛，Agent 会实时调用地图、社区和 Walk 工具来规划。
+                        用自然语言描述你想怎么逛，Agent 会在独立窗口里实时调用地图、社区和 Walk 工具来规划。
                       </p>
                     </div>
-                    <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
-                      {isAgentStreaming ? '流式规划中' : '支持实时步骤输出'}
-                    </span>
-                  </div>
-
-                  <textarea
-                    value={agentPrompt}
-                    onChange={(event) => setAgentPrompt(event.target.value)}
-                    placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
-                    className="mt-4 min-h-28 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
-                  />
-
-                  <div className="mt-3 flex flex-wrap gap-3">
                     <button
                       type="button"
-                      onClick={handleStartAgentPlanning}
-                      disabled={isAgentStreaming}
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      onClick={() => setShowAgentPlannerModal(true)}
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
                     >
-                      {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                      {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleStopAgentPlanning}
-                      disabled={!isAgentStreaming}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
-                    >
-                      停止规划
+                      <Sparkles className="h-4 w-4" />
+                      打开 Agent 窗口
                     </button>
                   </div>
-
-                  {agentStatus ? <p className="mt-3 text-xs text-slate-500">{agentStatus}</p> : null}
-
-                  {agentEvents.length > 0 ? (
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">执行过程已折叠</p>
-                          <p className="mt-1 text-xs leading-5 text-slate-500">
-                            已记录 {agentEvents.length} 条 Agent 事件，默认不在主页面展开，避免把页面撑得过长。
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowAgentTimelineModal(true)}
-                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
-                        >
-                          查看执行过程
-                        </button>
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">{isAgentStreaming ? 'Agent 正在规划中' : '适合放到单独窗口里专注查看'}</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {agentAnswer
+                            ? '上次规划结果还保留着，打开窗口可以继续追问、查看过程和最终路线。'
+                            : '打开后可以输入需求、看实时步骤、查看最终路线建议，不会再把当前页面撑长。'}
+                        </p>
                       </div>
+                      <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
+                        {isAgentStreaming ? '流式规划中' : agentAnswer ? '已有规划结果' : '支持实时步骤输出'}
+                      </span>
                     </div>
-                  ) : null}
-
-                  {agentAnswer ? (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-white px-4 py-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
-                      <div className="mt-3 max-h-80 overflow-y-auto pr-1">
-                        <div className="agent-markdown">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {normalizeAgentMarkdown(agentAnswer)}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
               </div>
             </section>
