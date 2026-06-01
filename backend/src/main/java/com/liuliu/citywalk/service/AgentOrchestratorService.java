@@ -21,6 +21,7 @@ import java.util.Map;
 @Service
 public class AgentOrchestratorService {
 
+    // 限制单次请求最多循环多少轮工具调用，避免 Agent 卡在无限循环里。
     private static final int MAX_TOOL_ROUNDS = 6;
     private static final String DEFAULT_INSTRUCTIONS = """
             你是 Liuliu City Walk 的智能规划 Agent。
@@ -68,12 +69,14 @@ public class AgentOrchestratorService {
     private AgentChatResponse execute(Long userId, String prompt, AgentExecutionListener listener) {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         List<LlmMessage> messages = new ArrayList<>();
+        // 先把 Redis 里最近几轮对话取出来，再拼上当前这一轮用户输入。
         messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
         emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0));
 
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
+            // 每一轮都会把当前对话上下文和所有可用工具一起发给模型。
             LlmResponse response = llmClient.createResponse(new LlmRequest(
                     DEFAULT_INSTRUCTIONS,
                     messages,
@@ -82,6 +85,7 @@ public class AgentOrchestratorService {
             ));
 
             if (response.hasToolCalls()) {
+                // 先把“模型刚刚请求过哪些工具”记进上下文，下一轮模型才能接着往下推理。
                 messages.add(LlmMessage.assistant(response.content(), response.toolCalls()));
                 for (LlmToolCall toolCall : response.toolCalls()) {
                     emit(listener, new AgentExecutionEvent(
@@ -97,6 +101,7 @@ public class AgentOrchestratorService {
                 continue;
             }
 
+            // 没有继续发起工具调用，说明模型已经准备直接给最终答案了。
             String answer = normalizeAssistantAnswer(response.content());
             if (!answer.isBlank()) {
                 steps.add(new AgentStepResponse(
@@ -140,6 +145,7 @@ public class AgentOrchestratorService {
     }
 
     private void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
+        // Redis 里只记最终的问答轮次，不把工具过程塞进去，避免上下文越来越臃肿。
         agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
     }
 
@@ -151,6 +157,7 @@ public class AgentOrchestratorService {
     ) {
         AgentTool tool = toolsByName.get(toolCall.name());
         if (tool == null) {
+            // 工具不存在时返回结构化错误，而不是让整个 Agent 直接中断。
             String output = json(Map.of(
                     "error", "tool_not_found",
                     "name", toolCall.name()
@@ -163,6 +170,7 @@ public class AgentOrchestratorService {
         try {
             Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
             String output = tool.execute(arguments);
+            // 工具结果要重新塞回对话里，模型下一轮才能基于这些真实数据继续推理。
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
             return output;
@@ -183,6 +191,7 @@ public class AgentOrchestratorService {
             return Map.of();
         }
         try {
+            // 模型传回来的工具参数本质上是一段 JSON 文本，这里统一解析一次。
             return objectMapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {
             });
         } catch (Exception error) {

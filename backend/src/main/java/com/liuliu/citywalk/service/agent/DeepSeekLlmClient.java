@@ -57,6 +57,7 @@ public class DeepSeekLlmClient implements LlmClient {
         }
 
         try {
+            // 把项目内部统一的 LLM 请求结构，转换成 DeepSeek 的 chat/completions 请求体。
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("model", properties.getModel());
             body.put("messages", buildMessages(request));
@@ -84,6 +85,7 @@ public class DeepSeekLlmClient implements LlmClient {
                     .path(0)
                     .path("message");
 
+            // 一次模型响应里，可能同时包含普通文本和工具调用。
             String content = extractContent(messageNode.path("content"));
             List<LlmToolCall> toolCalls = extractToolCalls(messageNode.path("tool_calls"));
             return new LlmResponse(content, toolCalls, response.body());
@@ -122,6 +124,7 @@ public class DeepSeekLlmClient implements LlmClient {
                 continue;
             }
 
+            // 把项目内部统一的消息格式，转换成 DeepSeek 需要的消息结构。
             Map<String, Object> message = new LinkedHashMap<>();
             message.put("role", item.role());
             if (item.content() != null) {
@@ -155,6 +158,7 @@ public class DeepSeekLlmClient implements LlmClient {
     private List<Map<String, Object>> buildTools(List<LlmToolDefinition> tools) {
         List<Map<String, Object>> toolList = new ArrayList<>();
         for (LlmToolDefinition tool : tools) {
+            // 把每个 Agent 工具暴露成 JSON Schema 形式的 function 定义，供模型选择调用。
             toolList.add(Map.of(
                     "type", "function",
                     "function", Map.of(
@@ -195,6 +199,7 @@ public class DeepSeekLlmClient implements LlmClient {
             return List.of();
         }
 
+        // 把 DeepSeek 返回的工具调用，再转换回项目内部统一的工具调用模型。
         List<LlmToolCall> toolCalls = new ArrayList<>();
         for (JsonNode node : toolCallsNode) {
             JsonNode functionNode = node.path("function");

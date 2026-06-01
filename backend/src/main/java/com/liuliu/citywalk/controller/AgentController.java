@@ -52,6 +52,8 @@ public class AgentController {
             @RequestParam(required = false) String token,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
     ) {
+        // SSE 会保持一条长连接，所以这里主要负责校验请求，
+        // 再把后续编排过程产生的事件持续转发给前端。
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         if (normalizedPrompt.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "prompt_required");
@@ -64,6 +66,7 @@ public class AgentController {
         SseEmitter emitter = new SseEmitter(5L * 60L * 1000L);
         Thread.startVirtualThread(() -> {
             try {
+                // 把编排过程中的每一步实时推回浏览器。
                 agentOrchestratorService.stream(currentUser.id(), normalizedPrompt, event -> sendEvent(emitter, event));
                 emitter.complete();
             } catch (Exception error) {
@@ -78,6 +81,8 @@ public class AgentController {
     }
 
     private UserSessionService.StoredUser resolveStreamUser(String token, String authorizationHeader) {
+        // 这个项目里 EventSource 不方便自定义鉴权头，
+        // 所以前端也可以把 token 放在 query 参数里传过来。
         if (token != null && !token.isBlank()) {
             return userSessionService.resolveUserByToken(token.trim());
         }
@@ -86,6 +91,7 @@ public class AgentController {
 
     private void sendEvent(SseEmitter emitter, AgentOrchestratorService.AgentExecutionEvent event) {
         try {
+            // 统一所有 Agent SSE 事件的返回结构，前端就只需要处理一种 payload。
             AgentStreamEventResponse payload = new AgentStreamEventResponse(
                     event.type(),
                     event.name(),

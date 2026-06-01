@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { apiRequest, getApiBaseUrlForDebug, readAuthToken } from './apiClient';
 import type { PathPoint } from './walkApi';
 
 export interface CoCreateRoomTheme {
@@ -31,6 +31,14 @@ export interface CoCreateRoom {
   theme?: CoCreateRoomTheme | null;
   members: CoCreateRoomMember[];
   createdAt?: number;
+}
+
+export type CoCreateRoomSocketEventType = 'room_snapshot' | 'room_closed';
+
+export interface CoCreateRoomSocketEvent {
+  type: CoCreateRoomSocketEventType;
+  roomCode: string;
+  room?: CoCreateRoom | null;
 }
 
 export interface CreateCoCreateRoomPayload {
@@ -84,4 +92,15 @@ export async function leaveCoCreateRoom(roomCode: string): Promise<boolean> {
   return apiRequest<boolean>(`/api/v1/co-create/rooms/${encodeURIComponent(roomCode)}`, {
     method: 'DELETE',
   });
+}
+
+export function openCoCreateRoomSocket(roomCode: string): WebSocket {
+  const token = readAuthToken();
+  const apiBaseUrl = getApiBaseUrlForDebug();
+  const wsBaseUrl = apiBaseUrl.replace(/^http/i, 'ws');
+  const params = new URLSearchParams({
+    roomCode,
+    ...(token ? { token } : {}),
+  });
+  return new WebSocket(`${wsBaseUrl}/ws/co-create?${params.toString()}`);
 }

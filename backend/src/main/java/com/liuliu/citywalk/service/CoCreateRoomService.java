@@ -3,6 +3,7 @@ package com.liuliu.citywalk.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.config.CoCreateRoomProperties;
 import com.liuliu.citywalk.mapper.CoCreateRoomMapper;
 import com.liuliu.citywalk.mapper.entity.CoCreateRoomEntity;
 import com.liuliu.citywalk.mapper.entity.CoCreateRoomMemberEntity;
@@ -31,7 +32,6 @@ import java.util.Random;
 public class CoCreateRoomService {
 
     private static final int MEMBER_LIMIT = 5;
-    private static final long MEMBER_INACTIVE_TIMEOUT_MILLIS = 20_000;
     private static final List<String> TRACK_COLORS = List.of(
             "#2563eb",
             "#f97316",
@@ -43,16 +43,22 @@ public class CoCreateRoomService {
     private final CoCreateRoomMapper roomMapper;
     private final UserSessionService userSessionService;
     private final ObjectMapper objectMapper;
+    private final CoCreateRoomRealtimeService coCreateRoomRealtimeService;
+    private final CoCreateRoomProperties coCreateRoomProperties;
     private final Random random = new Random();
 
     public CoCreateRoomService(
             CoCreateRoomMapper roomMapper,
             UserSessionService userSessionService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            CoCreateRoomRealtimeService coCreateRoomRealtimeService,
+            CoCreateRoomProperties coCreateRoomProperties
     ) {
         this.roomMapper = roomMapper;
         this.userSessionService = userSessionService;
         this.objectMapper = objectMapper;
+        this.coCreateRoomRealtimeService = coCreateRoomRealtimeService;
+        this.coCreateRoomProperties = coCreateRoomProperties;
     }
 
     @Transactional
@@ -67,7 +73,9 @@ public class CoCreateRoomService {
 
         RoomRecord room = createRoomRecord(roomCode, user.id(), writeJson(normalizeTheme(request.theme())));
         addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), TRACK_COLORS.get(0));
-        return getRoom(authorizationHeader, room.roomCode());
+        CoCreateRoomResponse response = getRoom(authorizationHeader, room.roomCode());
+        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        return response;
     }
 
     @Transactional
@@ -89,7 +97,9 @@ public class CoCreateRoomService {
             addMember(room.id(), user.id(), safeNickname(user.nickName()), safeAvatar(user.avatarUrl()), existingMember.get().trackColor());
         }
 
-        return getRoom(authorizationHeader, room.roomCode());
+        CoCreateRoomResponse response = getRoom(authorizationHeader, room.roomCode());
+        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        return response;
     }
 
     public CoCreateRoomResponse getRoom(String authorizationHeader, String roomCode) {
@@ -121,7 +131,9 @@ public class CoCreateRoomService {
                 isTracking
         );
 
-        return toResponse(findRoomById(room.id()).orElseThrow(() -> new IllegalStateException("room_not_found")));
+        CoCreateRoomResponse response = toResponse(findRoomById(room.id()).orElseThrow(() -> new IllegalStateException("room_not_found")));
+        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        return response;
     }
 
     @Transactional
@@ -133,7 +145,9 @@ public class CoCreateRoomService {
             throw new IllegalStateException("room_owner_required");
         }
         roomMapper.updateRoomTheme(room.id(), writeJson(normalizeTheme(request.theme())));
-        return getRoom(authorizationHeader, room.roomCode());
+        CoCreateRoomResponse response = getRoom(authorizationHeader, room.roomCode());
+        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        return response;
     }
 
     @Transactional
@@ -145,6 +159,7 @@ public class CoCreateRoomService {
         int remainingMembers = countMembers(room.id());
         if (remainingMembers <= 0) {
             deleteRoom(room.id());
+            coCreateRoomRealtimeService.broadcastRoomClosed(room.roomCode());
             return;
         }
 
@@ -153,6 +168,10 @@ public class CoCreateRoomService {
                     .findFirst()
                     .ifPresent(member -> roomMapper.changeOwner(room.id(), member.userId()));
         }
+
+        findRoomById(room.id())
+                .map(this::toResponse)
+                .ifPresent(response -> coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response));
     }
 
     private CoCreateRoomResponse toResponse(RoomRecord room) {
@@ -261,7 +280,8 @@ public class CoCreateRoomService {
     }
 
     private void cleanupInactiveMembers(Long roomId) {
-        Timestamp cutoff = Timestamp.from(Instant.now().minusMillis(MEMBER_INACTIVE_TIMEOUT_MILLIS));
+        long timeoutMillis = Math.max(60_000L, coCreateRoomProperties.getMemberInactiveTimeoutMillis());
+        Timestamp cutoff = Timestamp.from(Instant.now().minusMillis(timeoutMillis));
         roomMapper.deleteInactiveMembers(roomId, cutoff);
 
         int remainingMembers = countMembers(roomId);

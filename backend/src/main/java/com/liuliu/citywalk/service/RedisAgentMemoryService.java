@@ -39,6 +39,7 @@ public class RedisAgentMemoryService implements AgentMemoryService {
         if (userId == null || userId <= 0) {
             return List.of();
         }
+        // Redis 列表里的每一项，保存的是一轮“用户问题 + 助手回答”的 JSON。
         List<String> values = stringRedisTemplate.opsForList().range(buildKey(userId), 0, -1);
         if (values == null || values.isEmpty()) {
             return List.of();
@@ -86,9 +87,11 @@ public class RedisAgentMemoryService implements AgentMemoryService {
         Long size = stringRedisTemplate.opsForList().rightPush(key, value);
         int maxTurns = Math.max(1, properties.getMaxTurns());
         if (size != null && size > maxTurns) {
+            // 只保留最近 N 轮，避免上下文无限增长。
             long start = Math.max(0L, size - maxTurns);
             stringRedisTemplate.opsForList().trim(key, start, -1);
         }
+        // 每次成功写入后顺手刷新过期时间。
         stringRedisTemplate.expire(key, Duration.ofSeconds(Math.max(300L, properties.getTtlSeconds())));
     }
 

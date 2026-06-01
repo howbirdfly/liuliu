@@ -85,6 +85,8 @@ import {
   fetchCoCreateRoom,
   joinCoCreateRoom,
   leaveCoCreateRoom,
+  openCoCreateRoomSocket,
+  type CoCreateRoomSocketEvent,
   updateCoCreateRoomState,
   updateCoCreateRoomTheme,
 } from './services/roomApi';
@@ -229,6 +231,7 @@ const MAX_TIMED_TRACK_POINT_INTERVAL_MS = 5000;
 const MAX_REASONABLE_WALKING_SPEED_MPS = 6;
 const SHORT_INTERVAL_JUMP_WINDOW_MS = 15000;
 const MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS = 120;
+const ACTIVE_ROOM_CODE_STORAGE_KEY = 'citywalk_active_room_code';
 
 declare global {
   interface Window {
@@ -239,6 +242,31 @@ declare global {
 
 function getAmapJsKey() {
   return import.meta.env.VITE_AMAP_JS_KEY?.trim() || '';
+}
+
+function readStoredActiveRoomCode() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+  return window.sessionStorage.getItem(ACTIVE_ROOM_CODE_STORAGE_KEY)?.trim().toUpperCase() || '';
+}
+
+function writeStoredActiveRoomCode(roomCode: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const normalized = roomCode.trim().toUpperCase();
+  if (!normalized) {
+    return;
+  }
+  window.sessionStorage.setItem(ACTIVE_ROOM_CODE_STORAGE_KEY, normalized);
+}
+
+function clearStoredActiveRoomCode() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.sessionStorage.removeItem(ACTIVE_ROOM_CODE_STORAGE_KEY);
 }
 
 function loadAmapJsApi(): Promise<any> {
@@ -2062,12 +2090,15 @@ export default function App() {
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [coCreateRoom, setCoCreateRoom] = useState<CoCreateRoom | null>(null);
   const [isRoomSubmitting, setIsRoomSubmitting] = useState(false);
+  const [isRoomSocketConnected, setIsRoomSocketConnected] = useState(false);
   const [roomError, setRoomError] = useState('');
   const [roomMessage, setRoomMessage] = useState('');
   const searchTimeoutRef = useRef<number | null>(null);
   const hasAutoLocatedRef = useRef(false);
   const roomSyncTimeoutRef = useRef<number | null>(null);
   const roomThemeSyncTimeoutRef = useRef<number | null>(null);
+  const roomRestoreAttemptedRef = useRef(false);
+  const roomSocketRef = useRef<WebSocket | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2095,6 +2126,7 @@ export default function App() {
     if (user) {
       return;
     }
+    roomRestoreAttemptedRef.current = false;
     setCoCreateRoom(null);
     setRoomCodeInput('');
     setRoomError('');
@@ -2467,6 +2499,7 @@ export default function App() {
     [coCreateRoom?.theme],
   );
   const isRoomOwner = !!(user && coCreateRoom && user.id === coCreateRoom.ownerUserId);
+  const canModifySharedTheme = walkMode !== 'advanced' || !coCreateRoom || isRoomOwner;
   const roomMemberCount = coCreateRoom?.members.length ?? 0;
   const roomMapMembers = useMemo<RoomMapMember[]>(() => {
     if (!coCreateRoom) {
@@ -2494,9 +2527,26 @@ export default function App() {
       }));
   }, [coCreateRoom, currentPosition, path, user]);
 
+  const closeCoCreateRoomSocket = () => {
+    roomSocketRef.current?.close();
+    roomSocketRef.current = null;
+    setIsRoomSocketConnected(false);
+  };
+
   const applyCoCreateRoom = (room: CoCreateRoom, options?: { syncTheme?: boolean }) => {
+    writeStoredActiveRoomCode(room.roomCode);
     setCoCreateRoom(room);
-    if (options?.syncTheme !== false && room.theme) {
+    setRoomCodeInput(room.roomCode);
+    const nextRoomThemeKey = room.theme ? JSON.stringify(room.theme) : '';
+    const shouldSyncTheme =
+      options?.syncTheme !== false &&
+      !!room.theme &&
+      (!isRoomOwner ||
+        !roomThemeSnapshotKey ||
+        roomThemeSnapshotKey === activeRoomThemeKey ||
+        nextRoomThemeKey === roomThemeSnapshotKey);
+
+    if (shouldSyncTheme && room.theme) {
       setCurrentTheme({
         title: room.theme.title,
         description: room.theme.description,
@@ -2510,7 +2560,96 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode) {
+    if (!user) {
+      return;
+    }
+    if (coCreateRoom?.roomCode) {
+      roomRestoreAttemptedRef.current = true;
+      return;
+    }
+    if (roomRestoreAttemptedRef.current) {
+      return;
+    }
+
+    const storedRoomCode = readStoredActiveRoomCode();
+    if (!storedRoomCode) {
+      roomRestoreAttemptedRef.current = true;
+      return;
+    }
+
+    roomRestoreAttemptedRef.current = true;
+    setRoomCodeInput(storedRoomCode);
+    fetchCoCreateRoom(storedRoomCode)
+      .then((room) => {
+        applyCoCreateRoom(room);
+        setRoomMessage(`已自动恢复房间 ${room.roomCode}。`);
+        setRoomError('');
+      })
+      .catch((error) => {
+        console.error('Restore co-create room error:', error);
+        clearStoredActiveRoomCode();
+        if (error instanceof Error && (error.message === 'room_not_found' || error.message === 'room_membership_required')) {
+          setRoomCodeInput('');
+          return;
+        }
+        setRoomError('恢复共创房间失败，请稍后重试。');
+      });
+  }, [coCreateRoom?.roomCode, user]);
+
+  useEffect(() => {
+    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode || !user) {
+      closeCoCreateRoomSocket();
+      return;
+    }
+
+    const socket = openCoCreateRoomSocket(coCreateRoom.roomCode);
+    roomSocketRef.current = socket;
+
+    socket.onopen = () => {
+      setIsRoomSocketConnected(true);
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as CoCreateRoomSocketEvent;
+        if (payload.type === 'room_snapshot' && payload.room) {
+          applyCoCreateRoom(payload.room);
+          return;
+        }
+        if (payload.type === 'room_closed' && payload.roomCode === coCreateRoom.roomCode) {
+          clearStoredActiveRoomCode();
+          roomRestoreAttemptedRef.current = false;
+          setCoCreateRoom(null);
+          setRoomMessage('房间已解散。');
+          setRoomError('');
+        }
+      } catch (error) {
+        console.error('Parse co-create room websocket payload error:', error);
+      }
+    };
+
+    socket.onclose = () => {
+      if (roomSocketRef.current === socket) {
+        roomSocketRef.current = null;
+        setIsRoomSocketConnected(false);
+      }
+    };
+
+    socket.onerror = () => {
+      setIsRoomSocketConnected(false);
+    };
+
+    return () => {
+      if (roomSocketRef.current === socket) {
+        closeCoCreateRoomSocket();
+      } else if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+        socket.close();
+      }
+    };
+  }, [coCreateRoom?.roomCode, user, walkMode]);
+
+  useEffect(() => {
+    if (walkMode !== 'advanced' || !coCreateRoom?.roomCode || isRoomSocketConnected) {
       return;
     }
 
@@ -2525,6 +2664,8 @@ export default function App() {
       } catch (error) {
         if (!isDisposed) {
           if (error instanceof Error && (error.message === 'room_not_found' || error.message === 'room_membership_required')) {
+            clearStoredActiveRoomCode();
+            roomRestoreAttemptedRef.current = false;
             setCoCreateRoom(null);
             setRoomMessage('房间已自动解散。');
             setRoomError('');
@@ -2544,7 +2685,7 @@ export default function App() {
       isDisposed = true;
       window.clearInterval(timer);
     };
-  }, [coCreateRoom?.roomCode, walkMode]);
+  }, [coCreateRoom?.roomCode, isRoomSocketConnected, walkMode]);
 
   useEffect(() => {
     if (walkMode !== 'advanced' || !coCreateRoom?.roomCode || !roomThemeSnapshot || !isRoomOwner) {
@@ -3015,7 +3156,10 @@ export default function App() {
     setRoomError('');
     try {
       await leaveCoCreateRoom(coCreateRoom.roomCode);
+      clearStoredActiveRoomCode();
+      roomRestoreAttemptedRef.current = false;
       setCoCreateRoom(null);
+      setRoomCodeInput('');
       setRoomMessage('已退出共创房间，纯净模式和个人记录不受影响。');
     } catch (error) {
       console.error('Leave co-create room error:', error);
@@ -3039,6 +3183,11 @@ export default function App() {
   };
 
   const handleGenerateRandomTheme = async () => {
+    if (!canModifySharedTheme) {
+      setRoomError('当前只有房主可以修改共创主题。');
+      setRoomMessage('');
+      return;
+    }
     setIsGenerating(true);
     try {
       const { locationName, locationContextText } = await resolveCurrentContext();
@@ -3051,6 +3200,11 @@ export default function App() {
   };
 
   const handleGenerateAiTheme = async () => {
+    if (!canModifySharedTheme) {
+      setRoomError('当前只有房主可以修改共创主题。');
+      setRoomMessage('');
+      return;
+    }
     setIsGenerating(true);
     try {
       const { locationName, locationContextText } = await resolveCurrentContext();
@@ -3202,6 +3356,10 @@ export default function App() {
   };
 
   const handleApplyAgentResult = async () => {
+    if (!canModifySharedTheme) {
+      setAgentStatus('当前只有房主可以把 Agent 结果应用为房间主题。');
+      return;
+    }
     const normalizedAnswer = normalizeAgentMarkdown(agentAnswer || '');
     if (!normalizedAnswer) {
       setAgentStatus('当前还没有可应用的 Agent 结果。');
@@ -3211,6 +3369,8 @@ export default function App() {
     setIsApplyingAgentResult(true);
     try {
       const routeCandidates = extractRoutePointCandidatesFromAnswer(normalizedAnswer);
+      // 把 Agent 的最终答案重新整理成主题/任务结构，
+      // 这样就能直接复用页面上现有的 Current Theme 卡片。
       const agentTheme = buildThemeFromAgentAnswer(normalizedAnswer, routeCandidates, currentLocationName);
       const routeAnchor =
         selectedLocation ??
@@ -3227,6 +3387,7 @@ export default function App() {
         await Promise.all(
           routeCandidates.map(async (candidate) => {
             try {
+              // 先带着本地上下文搜一遍，尽量减少“同名地点落到别的城市”的误匹配。
               const queryOptions = [
                 `${routeContextKeyword} ${candidate}`.trim(),
                 `${currentLocationName} ${candidate}`.trim(),
@@ -3275,6 +3436,8 @@ export default function App() {
         )
       ).filter((item): item is NonNullable<typeof item> => item !== null);
       const toolSuggestedPois = extractAgentSuggestedPois(agentEvents);
+      // 优先使用从最终答案里解析出来的路线点；
+      // 如果解析不稳定，再退回到工具执行过程里拿到的点位结果。
       const suggestedPois = resolvedRoutePois.length > 0 ? resolvedRoutePois : toolSuggestedPois;
       const notePrefix = '【Agent 路线规划建议】';
       setNoteText((prev) => {
@@ -3353,6 +3516,11 @@ export default function App() {
   };
 
   const handleCombineThemes = async () => {
+    if (!canModifySharedTheme) {
+      setRoomError('当前只有房主可以修改共创主题。');
+      setRoomMessage('');
+      return;
+    }
     if (selectedThemesForCombine.length < 2) {
       alert('请至少选择两个主题方向。');
       return;
@@ -3531,6 +3699,8 @@ export default function App() {
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
+      clearStoredActiveRoomCode();
+      roomRestoreAttemptedRef.current = false;
       setUser(null);
       setMyWalks([]);
       setLikedWalks([]);
@@ -3558,6 +3728,8 @@ export default function App() {
       return;
     }
 
+    clearStoredActiveRoomCode();
+    roomRestoreAttemptedRef.current = false;
     setUser(null);
     setMyWalks([]);
     setLikedWalks([]);
@@ -4465,6 +4637,7 @@ export default function App() {
                         <p className="mt-1 text-xs leading-6 text-slate-500">
                           在左侧描述需求、发起规划、查看状态；右侧会固定显示当前路线建议。
                         </p>
+                        {!canModifySharedTheme ? <p className="mt-2 text-xs text-amber-700">当前为共创房员身份，可以查看 Agent 规划结果，但不能把结果应用为房间主题。</p> : null}
                       </div>
                       <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
                         {isAgentStreaming ? '流式规划中' : '工作台模式'}
@@ -4565,7 +4738,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => void handleApplyAgentResult()}
-                            disabled={isApplyingAgentResult}
+                            disabled={isApplyingAgentResult || !canModifySharedTheme}
                             className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
                           >
                             {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
@@ -5090,6 +5263,7 @@ export default function App() {
                       return (
                         <button
                           key={category}
+                          disabled={!canModifySharedTheme}
                           onClick={() => {
                             setSelectedThemesForCombine((prev) => {
                               if (prev.includes(category)) {
@@ -5101,7 +5275,7 @@ export default function App() {
                               return [...prev, category];
                             });
                           }}
-                          className={`rounded-full px-4 py-2 text-sm ${selected ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white'}`}
+                          className={`rounded-full px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white'}`}
                         >
                           {category}
                         </button>
@@ -5110,23 +5284,30 @@ export default function App() {
                   </div>
                 </div>
 
+                {!canModifySharedTheme ? (
+                  <p className="mt-3 text-xs text-amber-700">当前在共创房间内只有房主可以修改主题，房员仍然可以继续打卡和记录轨迹。</p>
+                ) : null}
+
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button
                     onClick={handleCombineThemes}
-                    className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white"
+                    disabled={!canModifySharedTheme}
+                    className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     组合生成主题
                   </button>
                   <button
                     onClick={handleGenerateAiTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white"
+                    disabled={!canModifySharedTheme}
+                    className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Sparkles className="h-4 w-4" />
                     AI 生成
                   </button>
                   <button
                     onClick={handleGenerateRandomTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                    disabled={!canModifySharedTheme}
+                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Shuffle className="h-4 w-4" />
                     随机生成
