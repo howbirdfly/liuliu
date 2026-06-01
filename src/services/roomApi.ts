@@ -71,6 +71,10 @@ export async function fetchCoCreateRoom(roomCode: string): Promise<CoCreateRoom>
   return apiRequest<CoCreateRoom>(`/api/v1/co-create/rooms/${encodeURIComponent(roomCode)}`);
 }
 
+export async function fetchCurrentCoCreateRoom(): Promise<CoCreateRoom | null> {
+  return apiRequest<CoCreateRoom | null>('/api/v1/co-create/rooms/current');
+}
+
 export async function updateCoCreateRoomState(
   roomCode: string,
   payload: UpdateCoCreateRoomStatePayload,

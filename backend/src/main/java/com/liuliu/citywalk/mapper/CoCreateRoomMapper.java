@@ -17,6 +17,8 @@ public interface CoCreateRoomMapper {
 
     CoCreateRoomEntity findActiveRoomById(@Param("roomId") Long roomId);
 
+    CoCreateRoomEntity findLatestActiveRoomByMemberUserId(@Param("userId") Long userId);
+
     int updateRoomTheme(@Param("roomId") Long roomId, @Param("themeSnapshot") String themeSnapshot);
 
     int changeOwner(@Param("roomId") Long roomId, @Param("ownerUserId") Long ownerUserId);

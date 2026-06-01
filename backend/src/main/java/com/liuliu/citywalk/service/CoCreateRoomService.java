@@ -110,6 +110,14 @@ public class CoCreateRoomService {
         return toResponse(room);
     }
 
+    public CoCreateRoomResponse getCurrentRoom(String authorizationHeader) {
+        UserSessionService.StoredUser user = requireUser(authorizationHeader);
+        RoomRecord room = findLatestRoomByMemberUserId(user.id())
+                .orElseThrow(() -> new IllegalStateException("room_not_found"));
+        findMember(room.id(), user.id()).orElseThrow(() -> new IllegalStateException("room_membership_required"));
+        return toResponse(room);
+    }
+
     @Transactional
     public CoCreateRoomResponse updateRoomState(String authorizationHeader, String roomCode, UpdateCoCreateRoomStateRequest request) {
         UserSessionService.StoredUser user = requireUser(authorizationHeader);
@@ -226,6 +234,15 @@ public class CoCreateRoomService {
         }
         cleanupInactiveMembers(roomId);
         return loadRoomById(roomId);
+    }
+
+    private Optional<RoomRecord> findLatestRoomByMemberUserId(Long userId) {
+        CoCreateRoomEntity entity = roomMapper.findLatestActiveRoomByMemberUserId(userId);
+        if (entity == null) {
+            return Optional.empty();
+        }
+        cleanupInactiveMembers(entity.getId());
+        return loadRoomById(entity.getId());
     }
 
     private Optional<RoomRecord> loadRoomByCode(String roomCode) {

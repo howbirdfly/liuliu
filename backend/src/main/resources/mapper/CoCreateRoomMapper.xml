@@ -62,6 +62,16 @@
         limit 1
     </select>
 
+    <select id="findLatestActiveRoomByMemberUserId" resultMap="CoCreateRoomEntityMap">
+        select r.id, r.room_code, r.owner_user_id, r.theme_snapshot, r.status, r.created_at, r.updated_at
+        from co_create_rooms r
+        inner join co_create_room_members m on m.room_id = r.id
+        where r.status = 'active'
+          and m.user_id = #{userId}
+        order by r.updated_at desc, r.created_at desc
+        limit 1
+    </select>
+
     <update id="updateRoomTheme">
         update co_create_rooms
         set theme_snapshot = #{themeSnapshot}, updated_at = now()

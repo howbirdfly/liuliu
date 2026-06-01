@@ -82,6 +82,7 @@ import {
   CoCreateRoom,
   CoCreateRoomMember,
   createCoCreateRoom,
+  fetchCurrentCoCreateRoom,
   fetchCoCreateRoom,
   joinCoCreateRoom,
   leaveCoCreateRoom,
@@ -2091,6 +2092,8 @@ export default function App() {
   const [coCreateRoom, setCoCreateRoom] = useState<CoCreateRoom | null>(null);
   const [isRoomSubmitting, setIsRoomSubmitting] = useState(false);
   const [isRoomSocketConnected, setIsRoomSocketConnected] = useState(false);
+  const [isRoomSocketConnecting, setIsRoomSocketConnecting] = useState(false);
+  const [isRestoringCoCreateRoom, setIsRestoringCoCreateRoom] = useState(false);
   const [roomError, setRoomError] = useState('');
   const [roomMessage, setRoomMessage] = useState('');
   const searchTimeoutRef = useRef<number | null>(null);
@@ -2501,6 +2504,27 @@ export default function App() {
   const isRoomOwner = !!(user && coCreateRoom && user.id === coCreateRoom.ownerUserId);
   const canModifySharedTheme = walkMode !== 'advanced' || !coCreateRoom || isRoomOwner;
   const roomMemberCount = coCreateRoom?.members.length ?? 0;
+  const roomRealtimeStatus = isRestoringCoCreateRoom
+    ? {
+        text: '正在恢复房间',
+        className: 'border border-amber-200 bg-amber-50 text-amber-700',
+      }
+    : coCreateRoom
+      ? isRoomSocketConnected
+        ? {
+            text: '实时已连接',
+            className: 'border border-emerald-200 bg-emerald-50 text-emerald-700',
+          }
+        : isRoomSocketConnecting
+          ? {
+              text: '实时连接中',
+              className: 'border border-sky-200 bg-sky-50 text-sky-700',
+            }
+          : {
+              text: '实时断开，轮询兜底',
+              className: 'border border-slate-200 bg-slate-50 text-slate-600',
+            }
+      : null;
   const roomMapMembers = useMemo<RoomMapMember[]>(() => {
     if (!coCreateRoom) {
       return [];
@@ -2531,10 +2555,12 @@ export default function App() {
     roomSocketRef.current?.close();
     roomSocketRef.current = null;
     setIsRoomSocketConnected(false);
+    setIsRoomSocketConnecting(false);
   };
 
   const applyCoCreateRoom = (room: CoCreateRoom, options?: { syncTheme?: boolean }) => {
     writeStoredActiveRoomCode(room.roomCode);
+    setWalkMode('advanced');
     setCoCreateRoom(room);
     setRoomCodeInput(room.roomCode);
     const nextRoomThemeKey = room.theme ? JSON.stringify(room.theme) : '';
@@ -2559,12 +2585,25 @@ export default function App() {
     }
   };
 
+  const handleSelectWalkMode = (nextMode: 'pure' | 'advanced') => {
+    if (nextMode === 'pure' && coCreateRoom) {
+      setRoomMessage('当前已在共创房间中，请先退出房间再切回纯净模式。');
+      setRoomError('');
+      return;
+    }
+
+    setWalkMode(nextMode);
+  };
+
   useEffect(() => {
     if (!user) {
+      roomRestoreAttemptedRef.current = false;
+      setIsRestoringCoCreateRoom(false);
       return;
     }
     if (coCreateRoom?.roomCode) {
       roomRestoreAttemptedRef.current = true;
+      setIsRestoringCoCreateRoom(false);
       return;
     }
     if (roomRestoreAttemptedRef.current) {
@@ -2572,24 +2611,33 @@ export default function App() {
     }
 
     const storedRoomCode = readStoredActiveRoomCode();
-    if (!storedRoomCode) {
-      roomRestoreAttemptedRef.current = true;
-      return;
-    }
-
     roomRestoreAttemptedRef.current = true;
-    setRoomCodeInput(storedRoomCode);
-    fetchCoCreateRoom(storedRoomCode)
+    setIsRestoringCoCreateRoom(true);
+    if (storedRoomCode) {
+      setWalkMode('advanced');
+      setRoomCodeInput(storedRoomCode);
+    }
+    const restoreRoomPromise = storedRoomCode ? fetchCoCreateRoom(storedRoomCode) : fetchCurrentCoCreateRoom();
+    restoreRoomPromise
       .then((room) => {
+        if (!room) {
+          setIsRestoringCoCreateRoom(false);
+          return;
+        }
         applyCoCreateRoom(room);
         setRoomMessage(`已自动恢复房间 ${room.roomCode}。`);
         setRoomError('');
+        setRoomMessage(storedRoomCode ? `已自动恢复房间 ${room.roomCode}。` : `已从账号恢复房间 ${room.roomCode}。`);
+        setIsRestoringCoCreateRoom(false);
       })
       .catch((error) => {
         console.error('Restore co-create room error:', error);
-        clearStoredActiveRoomCode();
+        if (storedRoomCode) {
+          clearStoredActiveRoomCode();
+        }
         if (error instanceof Error && (error.message === 'room_not_found' || error.message === 'room_membership_required')) {
           setRoomCodeInput('');
+          setIsRestoringCoCreateRoom(false);
           return;
         }
         setRoomError('恢复共创房间失败，请稍后重试。');
@@ -2602,10 +2650,12 @@ export default function App() {
       return;
     }
 
+    setIsRoomSocketConnecting(true);
     const socket = openCoCreateRoomSocket(coCreateRoom.roomCode);
     roomSocketRef.current = socket;
 
     socket.onopen = () => {
+      setIsRoomSocketConnecting(false);
       setIsRoomSocketConnected(true);
     };
 
@@ -2631,11 +2681,13 @@ export default function App() {
     socket.onclose = () => {
       if (roomSocketRef.current === socket) {
         roomSocketRef.current = null;
+        setIsRoomSocketConnecting(false);
         setIsRoomSocketConnected(false);
       }
     };
 
     socket.onerror = () => {
+      setIsRoomSocketConnecting(false);
       setIsRoomSocketConnected(false);
     };
 
@@ -4953,13 +5005,14 @@ export default function App() {
                   <div className="flex flex-wrap gap-3">
                     <div className="flex rounded-full bg-slate-100 p-1">
                       <button
-                        onClick={() => setWalkMode('pure')}
-                        className={`rounded-full px-4 py-2 text-sm ${walkMode === 'pure' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
+                        onClick={() => handleSelectWalkMode('pure')}
+                        disabled={!!coCreateRoom}
+                        className={`rounded-full px-4 py-2 text-sm ${walkMode === 'pure' ? 'bg-white shadow text-slate-900' : 'text-slate-500'} disabled:cursor-not-allowed disabled:opacity-50`}
                       >
                         纯净模式
                       </button>
                       <button
-                        onClick={() => setWalkMode('advanced')}
+                        onClick={() => handleSelectWalkMode('advanced')}
                         className={`rounded-full px-4 py-2 text-sm ${walkMode === 'advanced' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
                       >
                         进阶模式
@@ -4991,6 +5044,12 @@ export default function App() {
                           </div>
                         )}
                       </div>
+
+                      {roomRealtimeStatus && (
+                        <div className={`mt-4 inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${roomRealtimeStatus.className}`}>
+                          {roomRealtimeStatus.text}
+                        </div>
+                      )}
 
                       {!coCreateRoom ? (
                         <div className="mt-4 flex flex-col gap-3 lg:flex-row">

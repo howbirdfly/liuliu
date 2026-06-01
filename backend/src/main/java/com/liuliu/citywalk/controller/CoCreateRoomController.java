@@ -56,6 +56,18 @@ public class CoCreateRoomController {
         }
     }
 
+    @GetMapping("/rooms/current")
+    public ApiResponse<CoCreateRoomResponse> current(HttpServletRequest request) {
+        try {
+            return ApiResponse.success(coCreateRoomService.getCurrentRoom(request.getHeader(HttpHeaders.AUTHORIZATION)));
+        } catch (IllegalStateException error) {
+            if ("room_not_found".equals(error.getMessage())) {
+                return ApiResponse.success(null);
+            }
+            return ApiResponse.fail("login_required".equals(error.getMessage()) ? 401 : 400, error.getMessage());
+        }
+    }
+
     @PutMapping("/rooms/{roomCode}/state")
     public ApiResponse<CoCreateRoomResponse> updateState(HttpServletRequest request,
                                                          @PathVariable String roomCode,
