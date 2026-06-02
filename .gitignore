@@ -11,3 +11,6 @@ backend/target/
 .idea
 *.iml
 *.class
+
+# Local runtime / container data
+volumes/
