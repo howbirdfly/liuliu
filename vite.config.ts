@@ -13,5 +13,13 @@ export default defineConfig({
   server: {
     hmr: process.env.DISABLE_HMR !== 'true',
     allowedHosts: ['7c6c7ed5.r8.cpolar.top', '78e189b3.r8.cpolar.top'],
+    watch: {
+      ignored: [
+        '**/volumes/**',
+        '**/backend/**',
+        '**/.git/**',
+        '**/dist/**',
+      ],
+    },
   },
 });
