@@ -33,6 +33,7 @@ export interface CreateWalkPayload {
   noteText?: string;
   path: PathPoint[];
   completedMissions: CompletedMissionPayload[];
+  tags?: string[];
   roomCode?: string;
   roomMembers?: RoomMemberTrack[];
   photoUrl?: string;

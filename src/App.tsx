@@ -2101,6 +2101,7 @@ export default function App() {
   const [agentSuggestedPois, setAgentSuggestedPois] = useState<MapPOI[]>([]);
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
+  const [walkTags, setWalkTags] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [path, setPath] = useState<PathPoint[]>([]);
   const [isTracking, setIsTracking] = useState(false);
@@ -4303,7 +4304,7 @@ export default function App() {
     });
   };
 
-  const parseWalkEditTags = (value: string) =>
+  const parseWalkTags = (value: string) =>
     value
       .split(/[#,，、\s]+/)
       .map((tag) => tag.trim())
@@ -4345,7 +4346,7 @@ export default function App() {
         themeCategory: editingWalk.themeCategory || '',
         noteText: editWalkNote.trim(),
         isPublic: editWalkIsPublic,
-        tags: parseWalkEditTags(editWalkTags),
+        tags: parseWalkTags(editWalkTags),
       });
       applyUpdatedWalk(updated);
       if (!updated.isPublic && selectedCommunityWalk?.id === updated.id) {
@@ -4630,6 +4631,7 @@ export default function App() {
           mediaUrl: '',
           mediaType: '',
         })),
+        tags: parseWalkTags(walkTags),
         roomCode: walkMode === 'advanced' ? coCreateRoom?.roomCode : undefined,
         roomMembers: savedRoomMembers,
         photoUrl,
@@ -4656,6 +4658,7 @@ export default function App() {
       setIsTracking(false);
       setLivePosition(null);
       setCheckedMissions([]);
+      setWalkTags('');
       setWalkUploadPreview(null);
       setWalkUploadName('');
     } catch (error) {
@@ -5680,6 +5683,14 @@ export default function App() {
                   placeholder="写一点这次漫步的感受"
                   className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 outline-none"
                 />
+
+                <input
+                  value={walkTags}
+                  onChange={(event) => setWalkTags(event.target.value)}
+                  placeholder="#情侣路 #野狸岛 #凤凰山"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                />
+                <p className="mt-2 text-xs text-slate-500">可选，保存时会一起写入标签，最多 8 个。</p>
 
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm">
                   <div className="flex items-center justify-between">

@@ -18,6 +18,7 @@ public record CreateWalkRequest(
         List<PathPointRequest> path,
         @Valid
         List<CompletedMissionRequest> completedMissions,
+        List<String> tags,
         String roomCode,
         @Valid
         List<RoomMemberTrackRequest> roomMembers,

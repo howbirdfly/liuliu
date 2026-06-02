@@ -42,6 +42,7 @@ public class WalkService {
     public WalkResponse create(Long userId, CreateWalkRequest request) {
         ensureUserExists(userId);
         List<String> completedMissions = normalizeCompletedMissions(request.completedMissions());
+        List<String> tags = normalizeTags(request.tags());
         List<Map<String, Object>> routePoints = normalizeRoutePoints(request.path());
         List<String> photoList = normalizePhotoList(request.photoUrl());
         String coverImage = photoList.isEmpty() ? "" : photoList.get(0);
@@ -66,6 +67,9 @@ public class WalkService {
 
         if (entity.getId() == null) {
             throw new IllegalStateException("failed_to_create_walk");
+        }
+        if (!tags.isEmpty()) {
+            walkRecordMapper.insertTags(entity.getId(), tags);
         }
         return getDetail(entity.getId());
     }
@@ -227,6 +231,7 @@ public class WalkService {
         snapshot.put("description", safeText(request.noteText(), ""));
         snapshot.put("category", safeText(request.themeCategory(), ""));
         snapshot.put("missions", missions);
+        snapshot.put("tags", normalizeTags(request.tags()));
         snapshot.put("vibeColor", "#5a5a40");
         snapshot.put("provider", "web-debug");
         if (request.roomCode() != null && !request.roomCode().isBlank()) {
