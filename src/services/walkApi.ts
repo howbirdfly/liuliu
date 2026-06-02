@@ -52,6 +52,15 @@ export interface WalkItem {
   id: number;
   themeTitle: string;
   themeCategory?: string;
+  theme?: {
+    title: string;
+    description: string;
+    category: string;
+    missions: string[];
+    vibeColor: string;
+    provider?: string;
+    coverImageUrl?: string;
+  } | null;
   locationName?: string;
   authorId?: number;
   authorNickname?: string;
@@ -70,6 +79,31 @@ export interface WalkItem {
   createdAt?: number;
 }
 
+export interface SingleWalkSession {
+  walkMode?: 'pure' | 'advanced' | string;
+  theme?: {
+    title: string;
+    description: string;
+    category: string;
+    missions: string[];
+    vibeColor: string;
+    provider?: string;
+    coverImageUrl?: string;
+  } | null;
+  noteText?: string;
+  checkedMissions?: string[];
+  selectedLocation?: {
+    name: string;
+    lat: number;
+    lng: number;
+  } | null;
+  path?: PathPoint[];
+  isTracking?: boolean;
+  locationContext?: string;
+  searchLocation?: string;
+  updatedAt?: number;
+}
+
 export async function createWalk(payload: CreateWalkPayload): Promise<WalkItem> {
   return apiRequest<WalkItem>('/api/v1/walks', {
     method: 'POST',
@@ -79,6 +113,27 @@ export async function createWalk(payload: CreateWalkPayload): Promise<WalkItem> 
 
 export async function fetchMyWalks(page = 1, pageSize = 10): Promise<WalkItem[]> {
   return apiRequest<WalkItem[]>(`/api/v1/walks/me?page=${page}&pageSize=${pageSize}`);
+}
+
+export async function fetchLatestMyWalk(): Promise<WalkItem | null> {
+  return apiRequest<WalkItem | null>('/api/v1/walks/me/latest');
+}
+
+export async function fetchCurrentWalkSession(): Promise<SingleWalkSession | null> {
+  return apiRequest<SingleWalkSession | null>('/api/v1/walks/session/current');
+}
+
+export async function saveCurrentWalkSession(payload: SingleWalkSession): Promise<boolean> {
+  return apiRequest<boolean>('/api/v1/walks/session/current', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function clearCurrentWalkSession(): Promise<boolean> {
+  return apiRequest<boolean>('/api/v1/walks/session/current', {
+    method: 'DELETE',
+  });
 }
 
 export async function fetchPublicWalks(page = 1, pageSize = 20): Promise<WalkItem[]> {

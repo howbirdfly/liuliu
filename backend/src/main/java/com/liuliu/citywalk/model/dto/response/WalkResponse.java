@@ -6,6 +6,7 @@ public record WalkResponse(
         Long id,
         String themeTitle,
         String themeCategory,
+        WalkThemeSnapshotResponse theme,
         String locationName,
         Long authorId,
         String authorNickname,

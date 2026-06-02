@@ -2,10 +2,13 @@ package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.model.dto.request.CreateWalkRequest;
+import com.liuliu.citywalk.model.dto.request.SingleWalkSessionRequest;
 import com.liuliu.citywalk.model.dto.request.UpdateWalkRequest;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
+import com.liuliu.citywalk.model.dto.response.SingleWalkSessionResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
+import com.liuliu.citywalk.service.SingleWalkSessionService;
 import com.liuliu.citywalk.service.WalkService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,10 +31,16 @@ public class WalkController {
 
     private final WalkService walkService;
     private final AuthTokenService authTokenService;
+    private final SingleWalkSessionService singleWalkSessionService;
 
-    public WalkController(WalkService walkService, AuthTokenService authTokenService) {
+    public WalkController(
+            WalkService walkService,
+            AuthTokenService authTokenService,
+            SingleWalkSessionService singleWalkSessionService
+    ) {
         this.walkService = walkService;
         this.authTokenService = authTokenService;
+        this.singleWalkSessionService = singleWalkSessionService;
     }
 
     @PostMapping
@@ -47,6 +56,32 @@ public class WalkController {
                                                    @RequestParam(defaultValue = "20") Integer pageSize) {
         Long userId = resolveUserId(request);
         return ApiResponse.success(walkService.listMyWalks(userId, pageSize));
+    }
+
+    @GetMapping("/me/latest")
+    public ApiResponse<WalkResponse> latestMyWalk(HttpServletRequest request) {
+        Long userId = resolveUserId(request);
+        return ApiResponse.success(walkService.getLatestMyWalk(userId));
+    }
+
+    @GetMapping("/session/current")
+    public ApiResponse<SingleWalkSessionResponse> currentSession(HttpServletRequest request) {
+        Long userId = resolveUserId(request);
+        return ApiResponse.success(singleWalkSessionService.loadSession(userId));
+    }
+
+    @PutMapping("/session/current")
+    public ApiResponse<Boolean> updateCurrentSession(HttpServletRequest request, @Valid @RequestBody SingleWalkSessionRequest body) {
+        Long userId = resolveUserId(request);
+        singleWalkSessionService.saveSession(userId, body);
+        return ApiResponse.success(Boolean.TRUE);
+    }
+
+    @DeleteMapping("/session/current")
+    public ApiResponse<Boolean> clearCurrentSession(HttpServletRequest request) {
+        Long userId = resolveUserId(request);
+        singleWalkSessionService.clearSession(userId);
+        return ApiResponse.success(Boolean.TRUE);
     }
 
     @GetMapping("/public")

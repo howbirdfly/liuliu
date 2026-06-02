@@ -15,6 +15,7 @@ import com.liuliu.citywalk.model.dto.request.UpdateWalkRequest;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.model.dto.response.RoomMemberTrackResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
+import com.liuliu.citywalk.model.dto.response.WalkThemeSnapshotResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,6 +74,12 @@ public class WalkService {
         return walkRecordMapper.findMyActive(userId, limit).stream()
                 .map(this::toWalkResponse)
                 .toList();
+    }
+
+    public WalkResponse getLatestMyWalk(Long userId) {
+        return Optional.ofNullable(walkRecordMapper.findLatestMyActive(userId))
+                .map(this::toWalkResponse)
+                .orElse(null);
     }
 
     public List<WalkResponse> listPublicWalks(int limit) {
@@ -154,6 +161,7 @@ public class WalkService {
                 entity.getId(),
                 entity.getThemeTitle(),
                 themeCategory,
+                buildThemeSnapshotResponse(snapshot, completedMissions, photoUrl),
                 entity.getLocationName(),
                 entity.getUserId(),
                 resolveAuthorNickname(author),
@@ -170,6 +178,25 @@ public class WalkService {
                 parseRoomMembers(snapshot.get("roomMembers")),
                 walkRecordMapper.listTagsByWalkId(entity.getId()),
                 toEpochMilli(entity.getCreatedAt())
+        );
+    }
+
+    private WalkThemeSnapshotResponse buildThemeSnapshotResponse(Map<String, Object> snapshot,
+                                                                List<String> completedMissions,
+                                                                String photoUrl) {
+        List<String> missions = snapshot.get("missions") instanceof List<?> items
+                ? items.stream().filter(String.class::isInstance).map(String.class::cast).toList()
+                : completedMissions;
+        return new WalkThemeSnapshotResponse(
+                snapshot.get("title") instanceof String title ? safeText(title, "") : "",
+                snapshot.get("description") instanceof String description ? safeText(description, "") : "",
+                snapshot.get("category") instanceof String category ? safeText(category, "") : "",
+                missions,
+                snapshot.get("vibeColor") instanceof String vibeColor ? safeText(vibeColor, "#5a5a40") : "#5a5a40",
+                snapshot.get("provider") instanceof String provider ? safeText(provider, "") : "",
+                snapshot.get("coverImageUrl") instanceof String coverImageUrl
+                        ? safeText(coverImageUrl, photoUrl == null ? "" : photoUrl)
+                        : (photoUrl == null ? "" : photoUrl)
         );
     }
 

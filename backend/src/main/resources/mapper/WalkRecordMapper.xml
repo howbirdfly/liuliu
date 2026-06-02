@@ -51,6 +51,14 @@
         limit #{limit}
     </select>
 
+    <select id="findLatestMyActive" resultMap="WalkRecordEntityMap">
+        select <include refid="WalkRecordColumns"/>
+        from walk_records
+        where user_id = #{userId} and status = 'active'
+        order by created_at desc
+        limit 1
+    </select>
+
     <select id="findPublicActive" resultMap="WalkRecordEntityMap">
         select <include refid="WalkRecordColumns"/>
         from walk_records

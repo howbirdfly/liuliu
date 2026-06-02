@@ -74,7 +74,17 @@ import {
   type UserNotificationItem,
 } from './services/notificationApi';
 import { clearAgentMemory, openAgentStream, type AgentStreamEvent } from './services/agentApi';
-import { createWalk, deleteWalk, fetchMyWalks, fetchWalkDetail, updateWalk, WalkItem } from './services/walkApi';
+import {
+  clearCurrentWalkSession,
+  createWalk,
+  deleteWalk,
+  fetchCurrentWalkSession,
+  fetchMyWalks,
+  fetchWalkDetail,
+  saveCurrentWalkSession,
+  updateWalk,
+  WalkItem,
+} from './services/walkApi';
 import { fetchNearbyPois, searchLocations } from './services/mapApi';
 import { uploadDataUrl } from './services/fileApi';
 import { getAuthRequiredEventName } from './services/apiClient';
@@ -1012,6 +1022,25 @@ function stripMarkdownSyntax(value: string) {
     .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeWalkCompletedMissionStrings(
+  completedMissions: { mission?: string }[] | string[] | undefined,
+): string[] {
+  if (!Array.isArray(completedMissions)) {
+    return [];
+  }
+  return completedMissions
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item.trim();
+      }
+      if (item && typeof item === 'object' && typeof item.mission === 'string') {
+        return item.mission.trim();
+      }
+      return '';
+    })
+    .filter(Boolean);
 }
 
 function extractAgentThemeTitle(answer: string, routeCandidates: string[], fallbackLocationName: string) {
@@ -2101,6 +2130,8 @@ export default function App() {
   const roomSyncTimeoutRef = useRef<number | null>(null);
   const roomThemeSyncTimeoutRef = useRef<number | null>(null);
   const roomRestoreAttemptedRef = useRef(false);
+  const personalRestoreAttemptedRef = useRef(false);
+  const personalSessionSyncTimeoutRef = useRef<number | null>(null);
   const roomSocketRef = useRef<WebSocket | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
@@ -2110,6 +2141,208 @@ export default function App() {
   useEffect(() => {
     setCheckedMissions([]);
   }, [currentTheme?.title]);
+
+  useEffect(() => {
+    return;
+    if (!user) {
+      personalRestoreAttemptedRef.current = false;
+      return;
+    }
+    if (coCreateRoom?.roomCode || walkMode !== 'pure' || personalRestoreAttemptedRef.current) {
+      return;
+    }
+
+    personalRestoreAttemptedRef.current = true;
+    Promise.resolve<any>(null)
+      .then((walk) => {
+        if (!walk || walk.roomCode) {
+          return;
+        }
+
+        const restoredTheme = walk.theme
+          ? {
+              title: walk.theme.title || walk.themeTitle || '继续漫步',
+              description: walk.theme.description || walk.noteText || '已从服务端恢复你上一次的单人漫步状态。',
+              category: walk.theme.category || walk.themeCategory || '个人漫步',
+              missions:
+                walk.theme.missions && walk.theme.missions.length > 0
+                  ? walk.theme.missions
+                  : (walk.completedMissions as string[] | undefined) || [],
+              vibeColor: walk.theme.vibeColor || '#5a5a40',
+              provider: walk.theme.provider || 'server-restore',
+              coverImageUrl: walk.theme.coverImageUrl || walk.photoUrl || '',
+            }
+          : {
+              title: walk.themeTitle || '继续漫步',
+              description: walk.noteText || '已从服务端恢复你上一次的单人漫步状态。',
+              category: walk.themeCategory || '个人漫步',
+              missions: (walk.completedMissions as string[] | undefined) || [],
+              vibeColor: '#5a5a40',
+              provider: 'server-restore',
+              coverImageUrl: walk.photoUrl || '',
+            };
+
+        setCurrentTheme(restoredTheme);
+        setNoteText(walk.noteText || '');
+        setCheckedMissions(((walk.completedMissions as string[] | undefined) || []).filter(Boolean));
+
+        const restoredPath = Array.isArray(walk.path)
+          ? walk.path
+              .map((point) => {
+                const candidate = point as Partial<PathPoint>;
+                if (
+                  typeof candidate?.lat !== 'number' ||
+                  typeof candidate?.lng !== 'number' ||
+                  typeof candidate?.timestamp !== 'number'
+                ) {
+                  return null;
+                }
+                return {
+                  lat: candidate.lat,
+                  lng: candidate.lng,
+                  timestamp: candidate.timestamp,
+                } satisfies PathPoint;
+              })
+              .filter((point): point is PathPoint => point !== null)
+          : [];
+
+        setPath(restoredPath);
+        if (restoredPath.length > 0) {
+          const lastPoint = restoredPath[restoredPath.length - 1];
+          setSelectedLocation({
+            name: walk.locationName || '上次漫步位置',
+            lat: lastPoint.lat,
+            lng: lastPoint.lng,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error('Restore latest personal walk error:', error);
+      });
+  }, [coCreateRoom?.roomCode, user, walkMode]);
+
+  useEffect(() => {
+    if (!user) {
+      personalRestoreAttemptedRef.current = false;
+      return;
+    }
+    if (coCreateRoom?.roomCode || walkMode !== 'pure' || personalRestoreAttemptedRef.current) {
+      return;
+    }
+
+    personalRestoreAttemptedRef.current = true;
+    fetchCurrentWalkSession()
+      .then((session) => {
+        if (!session || session.walkMode === 'advanced') {
+          return;
+        }
+
+        if (session.theme) {
+          setCurrentTheme({
+            title: session.theme.title || '继续漫步',
+            description: session.theme.description || '已从服务端恢复你上一次的单人漫步状态。',
+            category: session.theme.category || '个人漫步',
+            missions: Array.isArray(session.theme.missions) ? session.theme.missions.filter(Boolean) : [],
+            vibeColor: session.theme.vibeColor || '#5a5a40',
+            provider: session.theme.provider || 'redis-session',
+            coverImageUrl: session.theme.coverImageUrl || '',
+          });
+        }
+
+        setNoteText(session.noteText || '');
+        setCheckedMissions(Array.isArray(session.checkedMissions) ? session.checkedMissions.filter(Boolean) : []);
+        setLocationContext(session.locationContext || '城市街道');
+        setSearchLocation(session.searchLocation || '');
+        setIsTracking(Boolean(session.isTracking));
+
+        const restoredPath = Array.isArray(session.path)
+          ? session.path.filter(
+              (point): point is PathPoint =>
+                typeof point?.lat === 'number' &&
+                typeof point?.lng === 'number' &&
+                typeof point?.timestamp === 'number',
+            )
+          : [];
+        setPath(restoredPath);
+
+        if (session.selectedLocation && typeof session.selectedLocation.lat === 'number' && typeof session.selectedLocation.lng === 'number') {
+          setSelectedLocation({
+            name: session.selectedLocation.name || '上次漫步位置',
+            lat: session.selectedLocation.lat,
+            lng: session.selectedLocation.lng,
+          });
+        } else if (restoredPath.length > 0) {
+          const lastPoint = restoredPath[restoredPath.length - 1];
+          setSelectedLocation({
+            name: '上次漫步位置',
+            lat: lastPoint.lat,
+            lng: lastPoint.lng,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error('Restore personal walk session error:', error);
+      });
+  }, [coCreateRoom?.roomCode, user, walkMode]);
+
+  useEffect(() => {
+    if (!user || walkMode !== 'pure' || coCreateRoom?.roomCode || !personalRestoreAttemptedRef.current) {
+      return;
+    }
+
+    if (personalSessionSyncTimeoutRef.current) {
+      window.clearTimeout(personalSessionSyncTimeoutRef.current);
+    }
+
+    const hasMeaningfulState =
+      !!currentTheme ||
+      noteText.trim().length > 0 ||
+      path.length > 0 ||
+      checkedMissions.length > 0 ||
+      !!selectedLocation ||
+      isTracking;
+
+    personalSessionSyncTimeoutRef.current = window.setTimeout(() => {
+      if (!hasMeaningfulState) {
+        void clearCurrentWalkSession();
+        return;
+      }
+
+      void saveCurrentWalkSession({
+        walkMode: 'pure',
+        theme: currentTheme
+          ? {
+              title: currentTheme.title,
+              description: currentTheme.description,
+              category: currentTheme.category,
+              missions: currentTheme.missions,
+              vibeColor: currentTheme.vibeColor,
+              provider: currentTheme.provider,
+              coverImageUrl: currentTheme.coverImageUrl,
+            }
+          : null,
+        noteText,
+        checkedMissions,
+        selectedLocation: selectedLocation
+          ? {
+              name: selectedLocation.name,
+              lat: selectedLocation.lat,
+              lng: selectedLocation.lng,
+            }
+          : null,
+        path,
+        isTracking,
+        locationContext,
+        searchLocation,
+      });
+    }, 600);
+
+    return () => {
+      if (personalSessionSyncTimeoutRef.current) {
+        window.clearTimeout(personalSessionSyncTimeoutRef.current);
+      }
+    };
+  }, [checkedMissions, coCreateRoom?.roomCode, currentTheme, isTracking, locationContext, noteText, path, searchLocation, selectedLocation, user, walkMode]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -3210,6 +3443,7 @@ export default function App() {
       await leaveCoCreateRoom(coCreateRoom.roomCode);
       clearStoredActiveRoomCode();
       roomRestoreAttemptedRef.current = false;
+      personalRestoreAttemptedRef.current = false;
       setCoCreateRoom(null);
       setRoomCodeInput('');
       setRoomMessage('已退出共创房间，纯净模式和个人记录不受影响。');
@@ -3753,6 +3987,7 @@ export default function App() {
     } finally {
       clearStoredActiveRoomCode();
       roomRestoreAttemptedRef.current = false;
+      personalRestoreAttemptedRef.current = false;
       setUser(null);
       setMyWalks([]);
       setLikedWalks([]);
@@ -3782,6 +4017,7 @@ export default function App() {
 
     clearStoredActiveRoomCode();
     roomRestoreAttemptedRef.current = false;
+    personalRestoreAttemptedRef.current = false;
     setUser(null);
     setMyWalks([]);
     setLikedWalks([]);
@@ -4413,6 +4649,10 @@ export default function App() {
       setRecordCardFilename(`walk-record-${card.dateLabel.replaceAll('.', '-')}.svg`);
       setShowRecordCardModal(true);
       await refreshRecentWalks();
+      if (walkMode === 'pure') {
+        await clearCurrentWalkSession();
+        personalRestoreAttemptedRef.current = false;
+      }
       setNoteText('');
       setPath([]);
       setIsTracking(false);
