@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.response.RagHealthResponse;
 import com.liuliu.citywalk.model.dto.response.RagIngestionResponse;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/v1/rag")
+@ConditionalOnProperty(prefix = "liuliu.rag", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RagController {
 
     private final VectorStore vectorStore;

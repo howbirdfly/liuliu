@@ -3,6 +3,7 @@ package com.liuliu.citywalk.service.agent.tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.rag.KnowledgeHit;
 import com.liuliu.citywalk.service.rag.KnowledgeSearchService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@ConditionalOnProperty(prefix = "liuliu.rag", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SearchKnowledgeBaseAgentTool extends AbstractJsonAgentTool {
 
     private final KnowledgeSearchService knowledgeSearchService;

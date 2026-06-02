@@ -9,6 +9,7 @@ import com.liuliu.citywalk.config.EmbeddingProperties;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.config.MilvusProperties;
 import com.liuliu.citywalk.config.NotificationCacheProperties;
+import com.liuliu.citywalk.config.RagProperties;
 import com.liuliu.citywalk.config.SingleWalkSessionProperties;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
@@ -29,7 +30,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         CommunityCacheProperties.class,
         AgentMemoryProperties.class,
         CoCreateRoomProperties.class,
-        SingleWalkSessionProperties.class
+        SingleWalkSessionProperties.class,
+        RagProperties.class
 })
 public class CityWalkBackendApplication {
 

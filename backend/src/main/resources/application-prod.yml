@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+spring:
+  threads:
+    virtual:
+      enabled: true
+  main:
+    keep-alive: true
+
+liuliu:
+  rag:
+    enabled: false
+
+milvus:
+  enabled: false
+
+embedding:
+  enabled: false

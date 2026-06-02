@@ -813,6 +813,10 @@ function summarizeAgentInput(event: AgentStreamEvent) {
     const pageSize = payload.pageSize ? `，最多 ${payload.pageSize} 条` : '';
     return payload.keyword ? `检索关键词：${payload.keyword}${pageSize}` : '';
   }
+  if (event.name === 'search_knowledge_base') {
+    const topK = payload.topK ? `，最多 ${payload.topK} 条` : '';
+    return payload.query ? `知识库检索：${payload.query}${topK}` : '';
+  }
   if (event.name === 'get_walk_detail') {
     return payload.walkId ? `查看 Walk 详情：#${payload.walkId}` : '';
   }
@@ -852,6 +856,14 @@ function summarizeAgentOutput(event: AgentStreamEvent) {
     return items.length > 0
       ? `从社区召回了 ${items.length} 条公开攻略，较相关的有 ${names.join('、')}。`
       : '社区里暂时没有找到强相关的公开攻略。';
+  }
+
+  if (event.name === 'search_knowledge_base') {
+    const items = getAgentResultItems(payload);
+    const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 3);
+    return items.length > 0
+      ? `知识库召回了 ${items.length} 条相关片段，重点参考 ${names.join('、')}。`
+      : '知识库里暂时没有召回到强相关片段。';
   }
 
   if (event.name === 'get_walk_detail') {
