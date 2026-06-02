@@ -1,5 +1,7 @@
 package com.liuliu.citywalk.service.rag;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.mapper.CommunityMapper;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
 import org.springframework.stereotype.Service;
@@ -18,15 +20,18 @@ public class CommunityKnowledgeIngestionService {
     private final CommunityMapper communityMapper;
     private final EmbeddingService embeddingService;
     private final KnowledgeIngestionService knowledgeIngestionService;
+    private final ObjectMapper objectMapper;
 
     public CommunityKnowledgeIngestionService(
             CommunityMapper communityMapper,
             EmbeddingService embeddingService,
-            KnowledgeIngestionService knowledgeIngestionService
+            KnowledgeIngestionService knowledgeIngestionService,
+            ObjectMapper objectMapper
     ) {
         this.communityMapper = communityMapper;
         this.embeddingService = embeddingService;
         this.knowledgeIngestionService = knowledgeIngestionService;
+        this.objectMapper = objectMapper;
     }
 
     public CommunityKnowledgeIngestionResult ingestLatestPublicWalks(int limit, int offset) {
@@ -43,8 +48,12 @@ public class CommunityKnowledgeIngestionService {
             if (walk == null || walk.getId() == null) {
                 continue;
             }
+            String knowledgeText = buildWalkKnowledgeText(walk);
+            if (knowledgeText.isBlank()) {
+                continue;
+            }
             walkIds.add(walk.getId());
-            List<String> chunks = splitIntoChunks(buildWalkKnowledgeText(walk), DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
+            List<String> chunks = splitIntoChunks(knowledgeText, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
             for (int index = 0; index < chunks.size(); index++) {
                 String chunk = chunks.get(index);
                 Map<String, Object> metadata = new LinkedHashMap<>();
@@ -92,14 +101,13 @@ public class CommunityKnowledgeIngestionService {
 
     private String buildWalkKnowledgeText(CommunityWalkQueryRow walk) {
         StringBuilder builder = new StringBuilder();
-        appendSection(builder, "主题标题", walk.getThemeTitle());
-        appendSection(builder, "地点名称", walk.getLocationName());
-        appendSection(builder, "作者昵称", walk.getAuthorNickname());
-        appendSection(builder, "标签", walk.getTags() == null ? "" : walk.getTags().replace("||", "、"));
-        appendSection(builder, "主题快照", walk.getThemeSnapshot());
-        appendSection(builder, "路线点位", walk.getRoutePoints());
-        appendSection(builder, "已完成任务", walk.getMissionsCompleted());
-        appendSection(builder, "漫步备注", walk.getNoteText());
+        appendSection(builder, "主题标题", cleanSentence(walk.getThemeTitle()));
+        appendSection(builder, "地点名称", cleanSentence(walk.getLocationName()));
+        appendSection(builder, "标签", normalizeTags(walk.getTags()));
+        appendSection(builder, "主题分类", extractThemeField(walk.getThemeSnapshot(), "category"));
+        appendSection(builder, "主题描述", extractThemeField(walk.getThemeSnapshot(), "description"));
+        appendSection(builder, "路线任务", normalizeMissionList(walk.getMissionsCompleted()));
+        appendSection(builder, "漫步备注", cleanNoteText(walk.getNoteText()));
         return builder.toString().trim();
     }
 
@@ -143,6 +151,73 @@ public class CommunityKnowledgeIngestionService {
         }
         String normalized = text.trim();
         return normalized.isEmpty() ? fallback : normalized;
+    }
+
+    private String extractThemeField(String themeSnapshot, String fieldName) {
+        String normalizedSnapshot = defaultText(themeSnapshot, "");
+        if (normalizedSnapshot.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(normalizedSnapshot);
+            return cleanSentence(root.path(fieldName).asText(""));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String normalizeTags(String tags) {
+        String normalized = defaultText(tags, "")
+                .replace("||", "、")
+                .replace(",", "、")
+                .replace("，", "、")
+                .trim();
+        return cleanSentence(normalized);
+    }
+
+    private String normalizeMissionList(String missionsCompleted) {
+        String normalizedMissions = defaultText(missionsCompleted, "");
+        if (normalizedMissions.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(normalizedMissions);
+            if (!root.isArray()) {
+                return "";
+            }
+            List<String> missions = new ArrayList<>();
+            for (JsonNode item : root) {
+                String mission = cleanSentence(item.asText(""));
+                if (!mission.isBlank()) {
+                    missions.add(mission);
+                }
+            }
+            return String.join("；", missions);
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String cleanNoteText(String noteText) {
+        String normalized = cleanSentence(noteText);
+        if (normalized.matches("[0-9\\p{Punct}\\s]+")) {
+            return "";
+        }
+        return normalized;
+    }
+
+    private String cleanSentence(String text) {
+        String normalized = defaultText(text, "")
+                .replace("\\n", " ")
+                .replace("\n", " ")
+                .replace("\r", " ")
+                .replace("\t", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (normalized.startsWith("{") || normalized.startsWith("[")) {
+            return "";
+        }
+        return normalized;
     }
 
     private record ChunkDraft(

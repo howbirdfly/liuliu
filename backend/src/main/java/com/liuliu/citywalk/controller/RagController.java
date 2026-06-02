@@ -58,13 +58,17 @@ public class RagController {
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset
     ) {
-        BaseContext.requireCurrentUserId();
-        CommunityKnowledgeIngestionResult result = communityKnowledgeIngestionService.ingestLatestPublicWalks(limit, offset);
-        return ApiResponse.success(new RagIngestionResponse(
-                result.walkCount(),
-                result.chunkCount(),
-                result.walkIds()
-        ));
+        try {
+            BaseContext.requireCurrentUserId();
+            CommunityKnowledgeIngestionResult result = communityKnowledgeIngestionService.ingestLatestPublicWalks(limit, offset);
+            return ApiResponse.success(new RagIngestionResponse(
+                    result.walkCount(),
+                    result.chunkCount(),
+                    result.walkIds()
+            ));
+        } catch (Exception error) {
+            return ApiResponse.fail(500, extractErrorMessage(error));
+        }
     }
 
     @GetMapping("/search")
@@ -94,5 +98,17 @@ public class RagController {
                         ))
                         .toList()
         ));
+    }
+
+    private String extractErrorMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            message = error.getMessage();
+        }
+        return message == null || message.isBlank() ? "rag_ingest_failed" : message;
     }
 }

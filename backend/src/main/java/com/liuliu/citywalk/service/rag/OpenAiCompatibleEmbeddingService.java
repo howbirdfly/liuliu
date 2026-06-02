@@ -71,44 +71,54 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
         }
 
         try {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("model", properties.getModel());
-            body.put("input", normalizedTexts);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeUrl(properties.getBaseUrl(), properties.getPath())))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + properties.getApiKey())
-                    .timeout(Duration.ofMillis(Math.max(2000L, properties.getRequestTimeoutMs())))
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 400) {
-                throw new IOException("Embedding HTTP " + response.statusCode() + ": " + response.body());
-            }
-
-            JsonNode dataNode = objectMapper.readTree(response.body()).path("data");
-            if (!dataNode.isArray()) {
-                throw new IOException("embedding_response_invalid");
-            }
-
             List<List<Float>> embeddings = new ArrayList<>();
-            for (JsonNode item : dataNode) {
-                JsonNode embeddingNode = item.path("embedding");
-                if (!embeddingNode.isArray()) {
-                    continue;
-                }
-                List<Float> vector = new ArrayList<>(embeddingNode.size());
-                for (JsonNode value : embeddingNode) {
-                    vector.add((float) value.asDouble());
-                }
-                embeddings.add(vector);
+            int batchSize = Math.max(1, Math.min(properties.getBatchSize(), 10));
+            for (int start = 0; start < normalizedTexts.size(); start += batchSize) {
+                int end = Math.min(normalizedTexts.size(), start + batchSize);
+                embeddings.addAll(requestEmbeddings(normalizedTexts.subList(start, end)));
             }
             return embeddings;
         } catch (Exception error) {
             throw new IllegalStateException("embedding_request_failed: " + error.getMessage(), error);
         }
+    }
+
+    private List<List<Float>> requestEmbeddings(List<String> texts) throws IOException, InterruptedException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", properties.getModel());
+        body.put("input", texts);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(normalizeUrl(properties.getBaseUrl(), properties.getPath())))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + properties.getApiKey())
+                .timeout(Duration.ofMillis(Math.max(2000L, properties.getRequestTimeoutMs())))
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 400) {
+            throw new IOException("Embedding HTTP " + response.statusCode() + ": " + response.body());
+        }
+
+        JsonNode dataNode = objectMapper.readTree(response.body()).path("data");
+        if (!dataNode.isArray()) {
+            throw new IOException("embedding_response_invalid");
+        }
+
+        List<List<Float>> embeddings = new ArrayList<>();
+        for (JsonNode item : dataNode) {
+            JsonNode embeddingNode = item.path("embedding");
+            if (!embeddingNode.isArray()) {
+                continue;
+            }
+            List<Float> vector = new ArrayList<>(embeddingNode.size());
+            for (JsonNode value : embeddingNode) {
+                vector.add((float) value.asDouble());
+            }
+            embeddings.add(vector);
+        }
+        return embeddings;
     }
 
     private String normalizeUrl(String baseUrl, String path) {

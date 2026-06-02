@@ -11,7 +11,7 @@ public class EmbeddingProperties {
     private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private String path = "/embeddings";
     private int requestTimeoutMs = 15000;
-    private int batchSize = 16;
+    private int batchSize = 10;
 
     public boolean isEnabled() {
         return enabled;
