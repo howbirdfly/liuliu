@@ -4,9 +4,12 @@ import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.context.BaseContext;
 import com.liuliu.citywalk.model.dto.response.RagHealthResponse;
 import com.liuliu.citywalk.model.dto.response.RagIngestionResponse;
+import com.liuliu.citywalk.model.dto.response.RagSearchResponse;
 import com.liuliu.citywalk.service.rag.CommunityKnowledgeIngestionResult;
 import com.liuliu.citywalk.service.rag.CommunityKnowledgeIngestionService;
 import com.liuliu.citywalk.service.rag.EmbeddingService;
+import com.liuliu.citywalk.service.rag.KnowledgeHit;
+import com.liuliu.citywalk.service.rag.KnowledgeSearchService;
 import com.liuliu.citywalk.service.rag.VectorStore;
 import com.liuliu.citywalk.service.rag.VectorStoreHealth;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,15 +25,18 @@ public class RagController {
     private final VectorStore vectorStore;
     private final EmbeddingService embeddingService;
     private final CommunityKnowledgeIngestionService communityKnowledgeIngestionService;
+    private final KnowledgeSearchService knowledgeSearchService;
 
     public RagController(
             VectorStore vectorStore,
             EmbeddingService embeddingService,
-            CommunityKnowledgeIngestionService communityKnowledgeIngestionService
+            CommunityKnowledgeIngestionService communityKnowledgeIngestionService,
+            KnowledgeSearchService knowledgeSearchService
     ) {
         this.vectorStore = vectorStore;
         this.embeddingService = embeddingService;
         this.communityKnowledgeIngestionService = communityKnowledgeIngestionService;
+        this.knowledgeSearchService = knowledgeSearchService;
     }
 
     @GetMapping("/health")
@@ -58,6 +64,35 @@ public class RagController {
                 result.walkCount(),
                 result.chunkCount(),
                 result.walkIds()
+        ));
+    }
+
+    @GetMapping("/search")
+    public ApiResponse<RagSearchResponse> search(
+            @RequestParam("query") String query,
+            @RequestParam(defaultValue = "5") int topK,
+            @RequestParam(required = false) String sourceType
+    ) {
+        BaseContext.requireCurrentUserId();
+        java.util.Map<String, Object> filters = new java.util.LinkedHashMap<>();
+        if (sourceType != null && !sourceType.isBlank()) {
+            filters.put("source_type", sourceType.trim());
+        }
+        java.util.List<KnowledgeHit> hits = knowledgeSearchService.search(query, topK, filters);
+        return ApiResponse.success(new RagSearchResponse(
+                query,
+                Math.max(1, topK),
+                hits.stream()
+                        .map(item -> new RagSearchResponse.RagSearchHitResponse(
+                                item.chunkId(),
+                                item.sourceId(),
+                                item.sourceType(),
+                                item.title(),
+                                item.content(),
+                                item.score(),
+                                item.metadata()
+                        ))
+                        .toList()
         ));
     }
 }
