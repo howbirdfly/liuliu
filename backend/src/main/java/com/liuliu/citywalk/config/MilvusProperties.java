@@ -13,6 +13,9 @@ public class MilvusProperties {
     private String vectorField = "embedding";
     private String contentField = "content";
     private String chunkIdField = "chunk_id";
+    private String sourceIdField = "source_id";
+    private String sourceTypeField = "source_type";
+    private String titleField = "title";
     private int dimension = 1024;
     private int defaultTopK = 5;
 
@@ -78,6 +81,30 @@ public class MilvusProperties {
 
     public void setChunkIdField(String chunkIdField) {
         this.chunkIdField = chunkIdField;
+    }
+
+    public String getSourceIdField() {
+        return sourceIdField;
+    }
+
+    public void setSourceIdField(String sourceIdField) {
+        this.sourceIdField = sourceIdField;
+    }
+
+    public String getSourceTypeField() {
+        return sourceTypeField;
+    }
+
+    public void setSourceTypeField(String sourceTypeField) {
+        this.sourceTypeField = sourceTypeField;
+    }
+
+    public String getTitleField() {
+        return titleField;
+    }
+
+    public void setTitleField(String titleField) {
+        this.titleField = titleField;
     }
 
     public int getDimension() {
