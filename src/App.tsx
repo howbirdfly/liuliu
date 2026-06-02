@@ -1167,18 +1167,6 @@ function buildAgentThemeMissions(routeCandidates: string[], answer: string) {
   return merged.slice(0, 3);
 }
 
-function buildThemeFromAgentAnswer(answer: string, routeCandidates: string[], fallbackLocationName: string): WalkTheme {
-  const title = extractAgentThemeTitle(answer, routeCandidates, fallbackLocationName);
-  return {
-    title,
-    description: extractAgentThemeDescription(answer, title),
-    category: inferAgentThemeCategory(answer),
-    missions: buildAgentThemeMissions(routeCandidates, answer),
-    vibeColor: inferAgentThemeColor(answer),
-    provider: 'agent',
-  };
-}
-
 function generateWalkRecordCard(params: {
   theme: WalkTheme;
   locationName: string;
@@ -3643,21 +3631,19 @@ export default function App() {
 
   const handleApplyAgentResult = async () => {
     if (!canModifySharedTheme) {
-      setAgentStatus('当前只有房主可以把 Agent 结果应用为房间主题。');
+      setAgentStatus('当前只有房主可以把 Agent 结果应用到共享任务与地图。');
       return;
     }
     const normalizedAnswer = normalizeAgentMarkdown(agentAnswer || '');
     if (!normalizedAnswer) {
-      setAgentStatus('当前还没有可应用的 Agent 结果。');
+      setAgentStatus('当前还没有可应用到任务与地图的 Agent 结果。');
       return;
     }
 
     setIsApplyingAgentResult(true);
     try {
       const routeCandidates = extractRoutePointCandidatesFromAnswer(normalizedAnswer);
-      // 把 Agent 的最终答案重新整理成主题/任务结构，
-      // 这样就能直接复用页面上现有的 Current Theme 卡片。
-      const agentTheme = buildThemeFromAgentAnswer(normalizedAnswer, routeCandidates, currentLocationName);
+      const fallbackRouteLocationName = routeCandidates[0] || currentLocationName;
       const routeAnchor =
         selectedLocation ??
         currentPosition ?? {
@@ -3725,13 +3711,8 @@ export default function App() {
       // 优先使用从最终答案里解析出来的路线点；
       // 如果解析不稳定，再退回到工具执行过程里拿到的点位结果。
       const suggestedPois = resolvedRoutePois.length > 0 ? resolvedRoutePois : toolSuggestedPois;
-      const notePrefix = '【Agent 路线规划建议】';
-      setNoteText((prev) => {
-        const cleanedPrev = prev.includes(notePrefix) ? prev.split(notePrefix)[0].trimEnd() : prev.trim();
-        const nextContent = `${notePrefix}\n${normalizedAnswer}`;
-        return cleanedPrev ? `${cleanedPrev}\n\n${nextContent}` : nextContent;
-      });
-      setCurrentTheme(agentTheme);
+      let nextThemeLocationName = fallbackRouteLocationName;
+      let nextThemeLocationContext = locationContext;
       setCheckedMissions([]);
 
       if (suggestedPois.length > 0) {
@@ -3745,47 +3726,64 @@ export default function App() {
           });
           setSelectedPoiKey(`${firstPoi.title}-${firstPoi.lat}-${firstPoi.lng}`);
           setSearchLocation(firstPoi.title);
+          nextThemeLocationName = firstPoi.title;
           try {
             const [geoContext, nameContext] = await Promise.all([
               getLocationContext(firstPoi.lat, firstPoi.lng),
               searchLocationContext(firstPoi.title),
             ]);
-            setLocationContext(nameContext && nameContext !== firstPoi.title ? nameContext : geoContext);
+            nextThemeLocationContext = nameContext && nameContext !== firstPoi.title ? nameContext : geoContext;
+            setLocationContext(nextThemeLocationContext);
           } catch (error) {
             console.error('Refresh applied agent point context error:', error);
           }
         }
+      }
+
+      const routeLocationNames =
+        (suggestedPois.length > 0
+          ? suggestedPois.map((poi) => poi.title).filter(Boolean)
+          : routeCandidates
+        ).slice(0, 4);
+      if (routeLocationNames.length > 0) {
+        nextThemeLocationName = routeLocationNames.join(' -> ');
+      }
+      if (routeLocationNames.length > 1) {
+        nextThemeLocationContext = `${nextThemeLocationContext}。路线候选地点：${routeLocationNames.join('、')}。`;
+      }
+
+      const regeneratedTheme =
+        selectedThemesForCombine.length === 1
+          ? await generateDynamicPreset(selectedThemesForCombine[0], nextThemeLocationName, nextThemeLocationContext, walkMode)
+          : await generateAITheme(
+              mood,
+              weather,
+              season,
+              preference,
+              nextThemeLocationName,
+              nextThemeLocationContext,
+              walkMode,
+            );
+
+      setCurrentTheme(regeneratedTheme);
+
+      if (suggestedPois.length > 0) {
         const unresolvedCount = Math.max(0, routeCandidates.length - resolvedRoutePois.length);
         setAgentStatus(
           unresolvedCount > 0
-            ? `已写入备注，并在地图上标出 ${suggestedPois.length} 个可信点位；另有 ${unresolvedCount} 个路线点未通过本地匹配校验，已跳过。`
-            : `已将路线建议写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`
+            ? `已更新当前任务，并在地图上标出 ${suggestedPois.length} 个可信点位；另有 ${unresolvedCount} 个路线点未通过本地匹配校验，已跳过。`
+            : `已更新当前任务，并在地图上标出 ${suggestedPois.length} 个相关点位。`
         );
       } else {
-        setAgentStatus('已将路线建议写入备注，但这次没有识别出足够可信的本地点位，所以没有直接上图。');
-      }
-
-      const unresolvedCount = Math.max(0, routeCandidates.length - resolvedRoutePois.length);
-      if (suggestedPois.length > 0) {
-        setAgentStatus(
-          unresolvedCount > 0
-            ? `已用 Agent 建议更新当前任务、写入备注，并在地图上标出 ${suggestedPois.length} 个可信点位；另有 ${unresolvedCount} 个路线点未通过本地匹配校验，已跳过。`
-            : `已用 Agent 建议更新当前任务、写入备注，并在地图上标出 ${suggestedPois.length} 个相关点位。`,
-        );
-      } else {
-        setAgentStatus('已用 Agent 建议更新当前任务，并写入备注；但这次没有识别出足够可信的本地点位，所以没有直接上图。');
+        setAgentStatus('已更新当前任务，但这次没有识别出足够可信的本地点位，所以没有直接上图。');
       }
 
       setShowAgentTimelineModal(false);
       setShowAgentPlannerModal(false);
       setActiveTab('explore');
-      window.setTimeout(() => {
-        noteTextareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        noteTextareaRef.current?.focus();
-      }, 120);
     } catch (error) {
       console.error('Apply agent result error:', error);
-      setAgentStatus('应用 Agent 结果失败，请稍后再试。');
+      setAgentStatus('应用 Agent 任务与地图建议失败，请稍后再试。');
     } finally {
       setIsApplyingAgentResult(false);
     }
@@ -5034,7 +5032,7 @@ export default function App() {
                             className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
                           >
                             {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-                            {isApplyingAgentResult ? '应用中...' : '应用为当前任务与地图'}
+                            {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
                           </button>
                         ) : null}
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
