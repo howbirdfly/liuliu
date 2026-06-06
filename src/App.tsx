@@ -15,6 +15,7 @@ import {
   Sparkles,
   UserRound,
   Users,
+  ChevronDown,
   Check,
   Heart,
   Bookmark,
@@ -2117,6 +2118,7 @@ export default function App() {
   const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
   const [agentSuggestedPois, setAgentSuggestedPois] = useState<MapPOI[]>([]);
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
+  const [isNearbyPoisExpanded, setIsNearbyPoisExpanded] = useState(true);
   const [noteText, setNoteText] = useState('');
   const [walkTags, setWalkTags] = useState('');
   const [isPublic, setIsPublic] = useState(true);
@@ -5590,31 +5592,48 @@ export default function App() {
                     </div>
                   </div>
 
-                  <h3 className="text-sm font-medium text-slate-700">附近可逛点</h3>
-                  {displayNearbyPois.length === 0 ? (
-                    <p className="mt-2 text-sm text-slate-500">选择地点后，这里会显示附近推荐点位。</p>
-                  ) : (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      {displayNearbyPois.map((poi, index) => (
-                        <button
-                          key={`${poi.title}-${index}`}
-                          onClick={() => void handleSelectPoi(poi)}
-                          className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
-                            selectedPoiKey === `${poi.title}-${poi.lat}-${poi.lng}`
-                              ? 'border-amber-300 bg-amber-50 shadow-sm'
-                              : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                          }`}
-                        >
-                          <div className="font-medium text-slate-800">{poi.title}</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {selectedPoiKey === `${poi.title}-${poi.lat}-${poi.lng}`
-                              ? '当前已选中，AI 将围绕这里生成环境和主题'
-                              : '点击切换到这里并刷新 AI 地点环境'}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsNearbyPoisExpanded((prev) => !prev)}
+                    className="flex w-full items-center justify-between rounded-2xl px-2 py-2 text-left transition hover:bg-slate-50"
+                    aria-expanded={isNearbyPoisExpanded}
+                  >
+                    <h3 className="text-sm font-medium text-slate-700">附近可逛点</h3>
+                    <span className="inline-flex items-center gap-2 text-xs text-slate-400">
+                      {isNearbyPoisExpanded ? '收起' : '展开'}
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform duration-200 ${
+                          isNearbyPoisExpanded ? 'rotate-180' : 'rotate-0'
+                        }`}
+                      />
+                    </span>
+                  </button>
+                  {isNearbyPoisExpanded ? (
+                    displayNearbyPois.length === 0 ? (
+                      <p className="mt-2 text-sm text-slate-500">选择地点后，这里会显示附近推荐点位。</p>
+                    ) : (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {displayNearbyPois.map((poi, index) => (
+                          <button
+                            key={`${poi.title}-${index}`}
+                            onClick={() => void handleSelectPoi(poi)}
+                            className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                              selectedPoiKey === `${poi.title}-${poi.lat}-${poi.lng}`
+                                ? 'border-amber-300 bg-amber-50 shadow-sm'
+                                : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="font-medium text-slate-800">{poi.title}</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {selectedPoiKey === `${poi.title}-${poi.lat}-${poi.lng}`
+                                ? '当前已选中，AI 将围绕这里生成环境和主题'
+                                : '点击切换到这里并刷新 AI 地点环境'}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  ) : null}
                 </div>
               </div>
 
@@ -5904,26 +5923,6 @@ export default function App() {
                   {(isSaving || isWalkUploading) && <LoaderCircle className="h-4 w-4 animate-spin" />}
                   {isWalkUploading ? '上传中...' : '保存漫步记录'}
                 </button>
-              </div>
-
-              <div className="rounded-[32px] border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 className="text-lg font-semibold">最近生成历史</h3>
-                <div className="mt-4 space-y-3">
-                  {history.length === 0 ? (
-                    <p className="text-sm text-slate-500">还没有生成历史。</p>
-                  ) : (
-                    history.map((theme, index) => (
-                      <button
-                        key={`${theme.title}-${index}`}
-                        onClick={() => setCurrentTheme(theme)}
-                        className="block w-full rounded-2xl border border-slate-200 px-4 py-3 text-left hover:bg-slate-50"
-                      >
-                        <div className="text-sm font-medium">{theme.title}</div>
-                        <div className="mt-1 text-xs text-slate-500">{theme.category}</div>
-                      </button>
-                    ))
-                  )}
-                </div>
               </div>
 
             </aside>
