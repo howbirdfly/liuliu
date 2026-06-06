@@ -4928,7 +4928,7 @@ export default function App() {
         </header>
         {showAgentPlannerModal ? (
           <div className="fixed inset-0 z-50 flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
-            <div className="flex max-h-[88vh] w-full flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl sm:max-w-4xl">
+            <div className="flex h-[88vh] w-full flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl sm:max-w-4xl">
               <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
                 <div>
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Agent Planner</div>
@@ -4945,9 +4945,9 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
-                  <div className="rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
+              <div className="min-h-0 flex-1 overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
+                <div className="grid h-full min-h-0 gap-4 overflow-hidden lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
+                  <div className="min-h-0 overflow-y-auto rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
@@ -5042,7 +5042,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="rounded-[28px] border border-amber-200 bg-white p-4">
+                  <div className="flex h-full min-h-0 max-h-full flex-col overflow-hidden rounded-[28px] border border-amber-200 bg-white p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-100 pb-3">
                       <div>
                         <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
@@ -5069,7 +5069,7 @@ export default function App() {
                     </div>
 
                     {agentAnswer ? (
-                      <div className="mt-4 max-h-[60vh] overflow-y-auto pr-1">
+                      <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-2 pb-8">
                         <div className="agent-markdown">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {normalizeAgentMarkdown(agentAnswer)}
