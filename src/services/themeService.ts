@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient';
+import { apiRequest, getApiBaseUrlForDebug } from './apiClient';
 
 export interface WalkTheme {
   title: string;
@@ -35,6 +35,16 @@ interface LocationContextApiResponse {
 export interface LocationContextDetails {
   locationContext: string;
   placeName: string;
+}
+
+export type ThemeGenerationStreamEventType = 'start' | 'content_delta' | 'complete';
+
+export interface ThemeGenerationStreamEvent {
+  type: ThemeGenerationStreamEventType;
+  delta?: string | null;
+  theme?: ThemeApiResponse | null;
+  provider?: string | null;
+  model?: string | null;
 }
 
 interface WalkRecordCardTextApiResponse {
@@ -261,6 +271,65 @@ export async function generateDynamicPreset(
 export async function getLocationContext(lat: number, lng: number): Promise<string> {
   const details = await getLocationContextDetails(lat, lng);
   return details.locationContext;
+}
+
+export function openThemeGenerationStream(params: {
+  mood: string;
+  weather: string;
+  season: string;
+  preference: string;
+  locationName: string;
+  locationContext: string;
+  walkMode: string;
+}): EventSource {
+  const query = new URLSearchParams(params);
+  return new EventSource(`${getApiBaseUrlForDebug()}/api/v1/ai/themes/generate/stream?${query.toString()}`);
+}
+
+function decodeStreamValue(value: string): string {
+  return value
+    .replace(/\\n/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
+function extractStreamField(raw: string, field: 'title' | 'description' | 'category' | 'vibeColor'): string {
+  const pattern = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`, 's');
+  const match = raw.match(pattern);
+  return match?.[1] ? decodeStreamValue(match[1]) : '';
+}
+
+function extractStreamMissions(raw: string): string[] {
+  const marker = raw.indexOf('"missions"');
+  if (marker < 0) {
+    return [];
+  }
+  const arrayStart = raw.indexOf('[', marker);
+  if (arrayStart < 0) {
+    return [];
+  }
+  const arrayChunk = raw.slice(arrayStart + 1);
+  const matches = [...arrayChunk.matchAll(/"((?:[^"\\]|\\.)*)"/g)];
+  return matches.map((item) => decodeStreamValue(item[1])).filter(Boolean).slice(0, 3);
+}
+
+export function buildStreamedThemePreview(raw: string, fallback: WalkTheme): WalkTheme {
+  const title = extractStreamField(raw, 'title');
+  const description = extractStreamField(raw, 'description');
+  const category = extractStreamField(raw, 'category');
+  const vibeColor = extractStreamField(raw, 'vibeColor');
+  const missions = extractStreamMissions(raw);
+
+  return {
+    title: title || fallback.title,
+    description: description || fallback.description,
+    category: category || fallback.category,
+    missions: missions.length > 0 ? missions : fallback.missions,
+    vibeColor: vibeColor || fallback.vibeColor,
+    provider: fallback.provider,
+    coverImageUrl: fallback.coverImageUrl,
+  };
 }
 
 export async function getLocationContextDetails(lat: number, lng: number): Promise<LocationContextDetails> {

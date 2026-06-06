@@ -16,11 +16,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +91,49 @@ public class DeepSeekThemeService {
                 request.walkMode()
         );
         return toThemeResponse(callThemePrompt(prompt, fallback), 1L);
+    }
+
+    public ThemeResponse streamGenerateTheme(GenerateThemeRequest request, ThemeStreamListener listener) {
+        ThemePayload fallback = new ThemePayload(
+                "鍩庡競鐏垫劅婕",
+                "娌跨潃浠婂ぉ鐨勫煄甯傛皼鍥存參涓嬫潵锛岃瀵熼偅浜涘彧鍦ㄦ鍒诲嚭鐜扮殑缁嗚妭銆?",
+                "鎺㈢储",
+                List.of("鎵惧埌涓€涓浣犲仠涓嬫潵鐨勮鏅?", "璁板綍涓€绉嶄粖澶╂渶鏄庢樉鐨勯鑹叉垨澹伴煶", "鐢ㄤ竴鍙ヨ瘽鎬荤粨杩欐璺殑姘旇川"),
+                "#f59e0b"
+        );
+
+        String prompt = """
+                浣犳槸涓€涓?City Walk 涓婚绛栧垝鍔╂墜銆傝鏍规嵁涓嬮潰淇℃伅锛岀敓鎴愪竴涓€傚悎鏁ｄ嫭鎺㈢储鐨勪腑鏂囦富棰樸€?
+                蹇冩儏锛?s
+                澶╂皵锛?s
+                瀛ｈ妭锛?s
+                鍋忓ソ锛?s
+                鍦扮偣锛?s
+                鍦扮偣鐜锛?s
+                婕妯″紡锛?s
+
+                璇锋妸鈥滃湴鐐光€濈悊瑙ｄ负鈥滀互杩欎釜鍦板潃涓轰腑蹇冿紝鍚戝懆鍥?3 鍏噷鑼冨洿鎵╁睍鈥濈殑鎺㈢储鍖哄煙锛?
+                涓嶈鍙洴鐫€鍗曚竴闂ㄧ墝鎴栧崟涓€鐐逛綅锛岃浠庡懆杈硅鍖恒€佽矾鍙ｃ€佸簵閾恒€佸叕鍥€佽鏅拰鐢熸椿姘涘洿閲岃璁′富棰樹笌浠诲姟銆?
+
+                璇蜂弗鏍艰緭鍑?JSON锛屼笉瑕佽緭鍑洪澶栬В閲娿€?
+                JSON 缁撴瀯锛?
+                {
+                  "title": "涓嶈秴杩?2涓瓧",
+                  "description": "1娈?30-60 瀛楃殑涓枃鎻忚堪",
+                  "category": "涓€涓煭鍒嗙被璇?,
+                  "missions": ["浠诲姟1", "浠诲姟2", "浠诲姟3"],
+                  "vibeColor": "#RRGGBB"
+                }
+                """.formatted(
+                request.mood(),
+                request.weather(),
+                request.season(),
+                request.preference(),
+                request.locationName(),
+                request.locationContext(),
+                request.walkMode()
+        );
+        return toThemeResponse(callThemePromptStreaming(prompt, fallback, listener), 1L);
     }
 
     public ThemeResponse generatePreset(GeneratePresetThemeRequest request) {
@@ -246,6 +293,14 @@ public class DeepSeekThemeService {
         return new LocationContextResponse(callTextPrompt(prompt, fallback), safeText(query, null));
     }
 
+    public String provider() {
+        return PROVIDER;
+    }
+
+    public String model() {
+        return properties.getModel();
+    }
+
     private String buildPoiSummary(List<PoiResponse> nearbyPois) {
         List<String> poiTitles = nearbyPois.stream()
                 .map(PoiResponse::title)
@@ -313,6 +368,25 @@ public class DeepSeekThemeService {
         }
     }
 
+    private ThemePayload callThemePromptStreaming(String prompt, ThemePayload fallback, ThemeStreamListener listener) {
+        if (!isConfigured()) {
+            log.info("DeepSeek skipped: api key not configured, using fallback streaming theme");
+            emitFallbackTheme(listener, fallback);
+            return fallback;
+        }
+
+        try {
+            String raw = callDeepSeekStreaming(prompt, true, listener);
+            ThemePayload parsed = objectMapper.readValue(extractJsonObject(raw), ThemePayload.class);
+            log.info("DeepSeek theme streamed successfully with model {}", properties.getModel());
+            return sanitizeThemePayload(parsed, fallback);
+        } catch (Exception error) {
+            log.warn("DeepSeek theme streaming failed, using fallback: {}", error.getMessage());
+            emitFallbackTheme(listener, fallback);
+            return fallback;
+        }
+    }
+
     private String callTextPrompt(String prompt, String fallback) {
         if (!isConfigured()) {
             log.info("DeepSeek skipped: api key not configured, using fallback text");
@@ -331,6 +405,67 @@ public class DeepSeekThemeService {
 
     private boolean isConfigured() {
         return properties.getApiKey() != null && !properties.getApiKey().isBlank();
+    }
+
+    private String callDeepSeekStreaming(String prompt, boolean expectJson, ThemeStreamListener listener) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(properties.getBaseUrl() + "/chat/completions"))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + properties.getApiKey())
+                .timeout(Duration.ofSeconds(60))
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(Map.of(
+                        "model", properties.getModel(),
+                        "messages", List.of(
+                                Map.of("role", "system", "content", "浣犳槸涓€涓搮闀夸腑鏂囧煄甯傛极姝ョ瓥鍒掔殑鍔╂墜銆?"),
+                                Map.of("role", "user", "content", prompt)
+                        ),
+                        "temperature", 0.8,
+                        "stream", true,
+                        "response_format", Map.of("type", expectJson ? "json_object" : "text")
+                ))))
+                .build();
+
+        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        if (response.statusCode() >= 400) {
+            String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+            throw new IOException("DeepSeek HTTP " + response.statusCode() + ": " + errorBody);
+        }
+
+        StringBuilder content = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank() || !line.startsWith("data:")) {
+                    continue;
+                }
+                String payload = line.substring(5).trim();
+                if (payload.isEmpty()) {
+                    continue;
+                }
+                if ("[DONE]".equals(payload)) {
+                    break;
+                }
+
+                JsonNode deltaNode = objectMapper.readTree(payload)
+                        .path("choices")
+                        .path(0)
+                        .path("delta")
+                        .path("content");
+                String delta = extractStreamingContent(deltaNode);
+                if (delta.isEmpty()) {
+                    continue;
+                }
+                content.append(delta);
+                if (listener != null) {
+                    listener.onContentDelta(delta);
+                }
+            }
+        }
+
+        if (content.isEmpty()) {
+            throw new IOException("DeepSeek returned empty streamed content");
+        }
+        return content.toString();
     }
 
     private String callDeepSeek(String prompt, boolean expectJson) throws IOException, InterruptedException {
@@ -363,6 +498,29 @@ public class DeepSeekThemeService {
             throw new IOException("DeepSeek returned empty content");
         }
         return contentNode.asText();
+    }
+
+    private String extractStreamingContent(JsonNode contentNode) {
+        if (contentNode == null || contentNode.isMissingNode() || contentNode.isNull()) {
+            return "";
+        }
+        if (contentNode.isTextual()) {
+            return contentNode.asText("");
+        }
+        if (contentNode.isArray()) {
+            StringBuilder builder = new StringBuilder();
+            for (JsonNode part : contentNode) {
+                if (part.isTextual()) {
+                    builder.append(part.asText(""));
+                    continue;
+                }
+                if ("text".equalsIgnoreCase(part.path("type").asText())) {
+                    builder.append(part.path("text").asText(""));
+                }
+            }
+            return builder.toString();
+        }
+        return contentNode.asText("");
     }
 
     private ThemePayload sanitizeThemePayload(ThemePayload payload, ThemePayload fallback) {
@@ -414,6 +572,21 @@ public class DeepSeekThemeService {
             throw new IllegalArgumentException("No JSON object found in DeepSeek response");
         }
         return trimmed.substring(start, end + 1);
+    }
+
+    private void emitFallbackTheme(ThemeStreamListener listener, ThemePayload fallback) {
+        if (listener == null) {
+            return;
+        }
+        try {
+            listener.onContentDelta(objectMapper.writeValueAsString(fallback));
+        } catch (Exception ignored) {
+            listener.onContentDelta("{\"title\":\"城市灵感漫步\"}");
+        }
+    }
+
+    public interface ThemeStreamListener {
+        void onContentDelta(String delta);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

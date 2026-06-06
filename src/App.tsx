@@ -37,6 +37,7 @@ import {
 import {
   PRESET_THEMES,
   WalkTheme,
+  buildStreamedThemePreview,
   generateAITheme,
   generateCombinedTheme,
   generateDynamicPreset,
@@ -44,7 +45,9 @@ import {
   MapPOI,
   getLocationContext,
   getLocationContextDetails,
+  openThemeGenerationStream,
   searchLocationContext,
+  type ThemeGenerationStreamEvent,
 } from './services/themeService';
 import {
   createCommunityComment,
@@ -2138,6 +2141,7 @@ export default function App() {
   const roomSocketRef = useRef<WebSocket | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
+  const themeGenerationStreamRef = useRef<EventSource | null>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const showNotificationCenterRef = useRef(false);
 
@@ -2409,6 +2413,8 @@ export default function App() {
     return () => {
       agentStreamRef.current?.close();
       agentStreamRef.current = null;
+      themeGenerationStreamRef.current?.close();
+      themeGenerationStreamRef.current = null;
     };
   }, []);
 
@@ -3497,10 +3503,96 @@ export default function App() {
     setIsGenerating(true);
     try {
       const { locationName, locationContextText } = await resolveCurrentContext();
-      const theme =
-        selectedThemesForCombine.length === 1
-          ? await generateDynamicPreset(selectedThemesForCombine[0], locationName, locationContextText, walkMode)
-          : await generateAITheme(
+      if (selectedThemesForCombine.length === 1) {
+        const theme = await generateDynamicPreset(selectedThemesForCombine[0], locationName, locationContextText, walkMode);
+        pushThemeHistory(theme);
+        return;
+      }
+
+      closeThemeGenerationStream();
+
+      const streamingFallbackTheme: WalkTheme = {
+        title: currentTheme?.title || '正在生成主题...',
+        description: `AI 正在结合 ${locationName} 和当前偏好整理新的漫步主题。`,
+        category: currentTheme?.category || '探索',
+        missions:
+          currentTheme?.missions && currentTheme.missions.length > 0
+            ? currentTheme.missions
+            : ['正在提炼漫步氛围', '正在生成任务提示', '正在整理路线主题'],
+        vibeColor: currentTheme?.vibeColor || '#f59e0b',
+        provider: 'deepseek-stream',
+        coverImageUrl: currentTheme?.coverImageUrl,
+      };
+      setCurrentTheme(streamingFallbackTheme);
+
+      const stream = openThemeGenerationStream({
+        mood,
+        weather,
+        season,
+        preference,
+        locationName,
+        locationContext: locationContextText,
+        walkMode,
+      });
+      themeGenerationStreamRef.current = stream;
+
+      let streamedRaw = '';
+      let streamFinished = false;
+
+      const finalizeThemeStream = () => {
+        stream.close();
+        if (themeGenerationStreamRef.current === stream) {
+          themeGenerationStreamRef.current = null;
+        }
+      };
+
+      const handleThemeEvent = (event: Event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent<string>).data) as ThemeGenerationStreamEvent;
+
+          if (payload.type === 'content_delta') {
+            streamedRaw += payload.delta || '';
+            setCurrentTheme(buildStreamedThemePreview(streamedRaw, streamingFallbackTheme));
+            return;
+          }
+
+          if (payload.type === 'complete') {
+            streamFinished = true;
+            const finalTheme = payload.theme
+              ? {
+                  title: payload.theme.title || streamingFallbackTheme.title,
+                  description: payload.theme.description || streamingFallbackTheme.description,
+                  category: payload.theme.category || streamingFallbackTheme.category,
+                  missions:
+                    Array.isArray(payload.theme.missions) && payload.theme.missions.length > 0
+                      ? payload.theme.missions
+                      : streamingFallbackTheme.missions,
+                  vibeColor: payload.theme.vibeColor || streamingFallbackTheme.vibeColor,
+                  provider: payload.theme.provider || payload.provider || streamingFallbackTheme.provider,
+                  coverImageUrl: payload.theme.coverImageUrl || streamingFallbackTheme.coverImageUrl,
+                }
+              : buildStreamedThemePreview(streamedRaw, streamingFallbackTheme);
+            pushThemeHistory(finalTheme);
+            setIsGenerating(false);
+            finalizeThemeStream();
+          }
+        } catch (error) {
+          console.error('Theme stream parse error:', error);
+        }
+      };
+
+      stream.addEventListener('start', handleThemeEvent);
+      stream.addEventListener('content_delta', handleThemeEvent);
+      stream.addEventListener('complete', handleThemeEvent);
+
+      stream.onerror = () => {
+        if (streamFinished) {
+          return;
+        }
+        finalizeThemeStream();
+        void (async () => {
+          try {
+            const theme = await generateAITheme(
               mood,
               weather,
               season,
@@ -3509,10 +3601,24 @@ export default function App() {
               locationContextText,
               walkMode,
             );
-      pushThemeHistory(theme);
+            pushThemeHistory(theme);
+          } catch (error) {
+            console.error('Theme stream fallback generation error:', error);
+          } finally {
+            setIsGenerating(false);
+          }
+        })();
+      };
     } finally {
-      setIsGenerating(false);
+      if (selectedThemesForCombine.length === 1) {
+        setIsGenerating(false);
+      }
     }
+  };
+
+  const closeThemeGenerationStream = () => {
+    themeGenerationStreamRef.current?.close();
+    themeGenerationStreamRef.current = null;
   };
 
   const closeAgentPlanningStream = () => {
