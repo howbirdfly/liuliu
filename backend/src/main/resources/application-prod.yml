@@ -1,5 +1,6 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
+  forward-headers-strategy: framework
 
 spring:
   threads:
@@ -7,13 +8,112 @@ spring:
       enabled: true
   main:
     keep-alive: true
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/liuliu_citywalk?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${MYSQL_USERNAME:liuliu}
+    password: ${MYSQL_PASSWORD:please_change_me}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:1}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 10
+          max-idle: 10
+          min-idle: 1
+          time-between-eviction-runs: 10s
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+
+amap:
+  web-key: ${AMAP_WEB_KEY:replace_with_real_key}
+  base-url: ${AMAP_BASE_URL:https://restapi.amap.com}
+
+deepseek:
+  api-key: ${DEEPSEEK_API_KEY:replace_with_real_key}
+  model: ${DEEPSEEK_MODEL:deepseek-chat}
+  base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+
+mission-verify-ai:
+  api-key: ${MISSION_VERIFY_AI_API_KEY:}
+  model: ${MISSION_VERIFY_AI_MODEL:qwen-vl-plus}
+  base-url: ${MISSION_VERIFY_AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  request-timeout-ms: 2200
+
+sky:
+  alioss:
+    endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
+    access-key-id: ${OSS_ACCESS_KEY_ID:replace_with_real_key}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:replace_with_real_secret}
+    bucket-name: ${OSS_BUCKET_NAME:replace_with_bucket_name}
+
+jwt:
+  secret: ${JWT_SECRET:replace_with_a_long_random_secret}
+  issuer: ${JWT_ISSUER:liuliu-backend}
+  access-expire-seconds: ${JWT_ACCESS_EXPIRE_SECONDS:7200}
+  refresh-expire-seconds: ${JWT_REFRESH_EXPIRE_SECONDS:2592000}
 
 liuliu:
   rag:
-    enabled: false
+    enabled: ${LIULIU_RAG_ENABLED:false}
+  co-create-room:
+    member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
+  redis:
+    notification-cache:
+      enabled: ${NOTIFICATION_CACHE_ENABLED:true}
+      key-prefix: ${NOTIFICATION_CACHE_KEY_PREFIX:liuliu:notification:unread:}
+      ttl-seconds: ${NOTIFICATION_CACHE_TTL_SECONDS:43200}
+    community-cache:
+      enabled: ${COMMUNITY_CACHE_ENABLED:true}
+      key-prefix: ${COMMUNITY_CACHE_KEY_PREFIX:liuliu:community:}
+      feed-ttl-seconds: ${COMMUNITY_CACHE_FEED_TTL_SECONDS:60}
+      detail-ttl-seconds: ${COMMUNITY_CACHE_DETAIL_TTL_SECONDS:120}
+      comment-ttl-seconds: ${COMMUNITY_CACHE_COMMENT_TTL_SECONDS:60}
+      view-buffer-ttl-seconds: ${COMMUNITY_CACHE_VIEW_BUFFER_TTL_SECONDS:43200}
+      view-flush-interval-ms: ${COMMUNITY_CACHE_VIEW_FLUSH_INTERVAL_MS:15000}
+    agent-memory:
+      enabled: ${AGENT_MEMORY_ENABLED:true}
+      key-prefix: ${AGENT_MEMORY_KEY_PREFIX:liuliu:agent:memory:}
+      ttl-seconds: ${AGENT_MEMORY_TTL_SECONDS:21600}
+      max-turns: ${AGENT_MEMORY_MAX_TURNS:6}
+    single-walk-session:
+      enabled: ${SINGLE_WALK_SESSION_ENABLED:true}
+      key-prefix: ${SINGLE_WALK_SESSION_KEY_PREFIX:liuliu:walk:session:}
+      ttl-seconds: ${SINGLE_WALK_SESSION_TTL_SECONDS:21600}
 
 milvus:
-  enabled: false
+  enabled: ${MILVUS_ENABLED:false}
+  uri: ${MILVUS_URI:http://127.0.0.1:19530}
+  token: ${MILVUS_TOKEN:root:Milvus}
+  database: ${MILVUS_DATABASE:default}
+  collection: ${MILVUS_COLLECTION:citywalk_knowledge}
+  vector-field: ${MILVUS_VECTOR_FIELD:embedding}
+  content-field: ${MILVUS_CONTENT_FIELD:content}
+  chunk-id-field: ${MILVUS_CHUNK_ID_FIELD:chunk_id}
+  source-id-field: ${MILVUS_SOURCE_ID_FIELD:source_id}
+  source-type-field: ${MILVUS_SOURCE_TYPE_FIELD:source_type}
+  title-field: ${MILVUS_TITLE_FIELD:title}
+  metadata-field: ${MILVUS_METADATA_FIELD:metadata}
+  dimension: ${MILVUS_DIMENSION:1024}
+  default-top-k: ${MILVUS_DEFAULT_TOP_K:5}
 
 embedding:
-  enabled: false
+  enabled: ${EMBEDDING_ENABLED:false}
+  api-key: ${EMBEDDING_API_KEY:}
+  model: ${EMBEDDING_MODEL:text-embedding-v4}
+  base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  path: ${EMBEDDING_PATH:/embeddings}
+  request-timeout-ms: ${EMBEDDING_REQUEST_TIMEOUT_MS:15000}
+  batch-size: ${EMBEDDING_BATCH_SIZE:10}

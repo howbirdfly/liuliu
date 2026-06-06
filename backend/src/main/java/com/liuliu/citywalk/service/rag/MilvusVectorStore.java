@@ -7,8 +7,10 @@ import com.google.gson.JsonObject;
 import com.liuliu.citywalk.config.MilvusProperties;
 import io.milvus.v2.common.DataType;
 import io.milvus.v2.common.IndexParam;
+import io.milvus.v2.service.collection.request.AddCollectionFieldReq;
 import io.milvus.v2.service.collection.request.AddFieldReq;
 import io.milvus.v2.service.collection.request.CreateCollectionReq;
+import io.milvus.v2.service.collection.request.DescribeCollectionReq;
 import io.milvus.v2.service.collection.request.DropCollectionReq;
 import io.milvus.v2.service.collection.request.HasCollectionReq;
 import io.milvus.v2.service.utility.response.CheckHealthResp;
@@ -85,6 +87,7 @@ public class MilvusVectorStore implements VectorStore {
                 .collectionName(properties.getCollection())
                 .build());
         if (exists) {
+            ensureMetadataField(properties);
             return;
         }
 
@@ -122,6 +125,7 @@ public class MilvusVectorStore implements VectorStore {
                 .dataType(DataType.FloatVector)
                 .dimension(properties.getDimension())
                 .build());
+        schema.addField(buildMetadataField(properties));
 
         List<IndexParam> indexParams = List.of(
                 IndexParam.builder()
@@ -158,6 +162,7 @@ public class MilvusVectorStore implements VectorStore {
             row.addProperty(properties.getTitleField(), truncate(document.title(), MAX_TITLE_LENGTH));
             row.addProperty(properties.getContentField(), truncate(document.content(), MAX_CONTENT_LENGTH));
             row.add(properties.getVectorField(), gson.toJsonTree(document.embedding()));
+            row.add(properties.getMetadataField(), gson.toJsonTree(normalizeMetadata(document.metadata())));
             rows.add(row);
         }
 
@@ -191,7 +196,8 @@ public class MilvusVectorStore implements VectorStore {
                         properties.getSourceIdField(),
                         properties.getSourceTypeField(),
                         properties.getTitleField(),
-                        properties.getContentField()
+                        properties.getContentField(),
+                        properties.getMetadataField()
                 ))
                 .build());
 
@@ -206,6 +212,7 @@ public class MilvusVectorStore implements VectorStore {
             }
             for (SearchResp.SearchResult item : batch) {
                 Map<String, Object> entity = convertEntityMap(item.getEntity());
+                Map<String, Object> metadata = extractMetadata(entity.get(properties.getMetadataField()));
                 hits.add(new KnowledgeHit(
                         defaultText(entity.get(properties.getChunkIdField())),
                         defaultText(entity.get(properties.getSourceIdField())),
@@ -213,7 +220,7 @@ public class MilvusVectorStore implements VectorStore {
                         defaultText(entity.get(properties.getTitleField())),
                         defaultText(entity.get(properties.getContentField())),
                         item.getScore(),
-                        new LinkedHashMap<>(entity)
+                        metadata
                 ));
             }
         }
@@ -290,6 +297,64 @@ public class MilvusVectorStore implements VectorStore {
         }
         return objectMapper.convertValue(entity, new TypeReference<>() {
         });
+    }
+
+    private void ensureMetadataField(MilvusProperties properties) {
+        String metadataField = properties.getMetadataField();
+        if (metadataField == null || metadataField.isBlank()) {
+            return;
+        }
+
+        List<String> fieldNames = milvusClientProvider.getClient().describeCollection(DescribeCollectionReq.builder()
+                        .collectionName(properties.getCollection())
+                        .build())
+                .getFieldNames();
+        if (fieldNames != null && fieldNames.contains(metadataField)) {
+            return;
+        }
+
+        AddCollectionFieldReq request = AddCollectionFieldReq.builder()
+                .databaseName(properties.getDatabase())
+                .collectionName(properties.getCollection())
+                .build();
+        request.setFieldName(metadataField);
+        request.setDataType(DataType.JSON);
+        request.setIsNullable(true);
+        milvusClientProvider.getClient().addCollectionField(request);
+    }
+
+    private AddFieldReq buildMetadataField(MilvusProperties properties) {
+        return AddFieldReq.builder()
+                .fieldName(properties.getMetadataField())
+                .dataType(DataType.JSON)
+                .isNullable(true)
+                .build();
+    }
+
+    private Map<String, Object> extractMetadata(Object metadataValue) {
+        if (metadataValue == null) {
+            return Map.of();
+        }
+        if (metadataValue instanceof Map<?, ?>) {
+            return convertEntityMap(metadataValue);
+        }
+        if (metadataValue instanceof String text) {
+            try {
+                return objectMapper.readValue(text, new TypeReference<>() {
+                });
+            } catch (Exception ignored) {
+                return Map.of("raw", text);
+            }
+        }
+        return objectMapper.convertValue(metadataValue, new TypeReference<>() {
+        });
+    }
+
+    private Map<String, Object> normalizeMetadata(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(metadata);
     }
 
     private String truncate(String value, int maxLength) {

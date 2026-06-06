@@ -719,6 +719,8 @@ function getAgentEventLabel(type: AgentStreamEvent['type']) {
       return '调用工具';
     case 'tool_result':
       return '工具结果';
+    case 'answer_delta':
+      return '生成回答';
     case 'final_answer':
       return '最终回答';
     case 'complete':
@@ -3553,7 +3555,7 @@ export default function App() {
         const messageEvent = event as MessageEvent<string>;
         const payload = JSON.parse(messageEvent.data) as AgentStreamEvent;
 
-        if (payload.type !== 'complete') {
+        if (payload.type !== 'complete' && payload.type !== 'answer_delta') {
           setAgentEvents((prev) => [...prev, payload]);
         }
 
@@ -3563,12 +3565,21 @@ export default function App() {
         }
 
         if (payload.type === 'tool_call') {
+          setAgentAnswer('');
           setAgentStatus(`正在调用工具：${payload.name}`);
           return;
         }
 
         if (payload.type === 'tool_result') {
           setAgentStatus(`已拿到工具结果：${payload.name}`);
+          return;
+        }
+
+        if (payload.type === 'answer_delta') {
+          if (payload.output) {
+            setAgentAnswer((prev) => `${prev}${payload.output || ''}`);
+          }
+          setAgentStatus('Agent 正在生成路线建议...');
           return;
         }
 
@@ -3595,6 +3606,7 @@ export default function App() {
     stream.addEventListener('start', handleAgentEvent);
     stream.addEventListener('tool_call', handleAgentEvent);
     stream.addEventListener('tool_result', handleAgentEvent);
+    stream.addEventListener('answer_delta', handleAgentEvent);
     stream.addEventListener('final_answer', handleAgentEvent);
     stream.addEventListener('complete', handleAgentEvent);
 

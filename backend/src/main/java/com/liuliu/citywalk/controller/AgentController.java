@@ -98,8 +98,8 @@ public class AgentController {
                     event.input(),
                     event.output(),
                     event.iteration(),
-                    null,
-                    null
+                    event.provider(),
+                    event.model()
             );
             emitter.send(
                     SseEmitter.event()

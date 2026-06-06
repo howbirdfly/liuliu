@@ -16,6 +16,7 @@ public class MilvusProperties {
     private String sourceIdField = "source_id";
     private String sourceTypeField = "source_type";
     private String titleField = "title";
+    private String metadataField = "metadata";
     private int dimension = 1024;
     private int defaultTopK = 5;
 
@@ -105,6 +106,14 @@ public class MilvusProperties {
 
     public void setTitleField(String titleField) {
         this.titleField = titleField;
+    }
+
+    public String getMetadataField() {
+        return metadataField;
+    }
+
+    public void setMetadataField(String metadataField) {
+        this.metadataField = metadataField;
     }
 
     public int getDimension() {

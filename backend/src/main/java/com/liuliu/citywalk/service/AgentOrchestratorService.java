@@ -76,17 +76,29 @@ public class AgentOrchestratorService {
         // 先把 Redis 里最近几轮对话取出来，再拼上当前这一轮用户输入。
         messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
-        emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0));
+        emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model()));
 
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
+            final int currentRound = round;
             // 每一轮都会把当前对话上下文和所有可用工具一起发给模型。
-            LlmResponse response = llmClient.createResponse(new LlmRequest(
-                    DEFAULT_INSTRUCTIONS,
-                    messages,
-                    toolDefinitions,
-                    0.2
-            ));
+            LlmResponse response = llmClient.createStreamingResponse(
+                    new LlmRequest(
+                            DEFAULT_INSTRUCTIONS,
+                            messages,
+                            toolDefinitions,
+                            0.2
+                    ),
+                    delta -> emit(listener, new AgentExecutionEvent(
+                            "answer_delta",
+                            "assistant",
+                            null,
+                            delta,
+                            currentRound,
+                            llmClient.provider(),
+                            llmClient.model()
+                    ))
+            );
 
             if (response.hasToolCalls()) {
                 // 先把“模型刚刚请求过哪些工具”记进上下文，下一轮模型才能接着往下推理。
@@ -97,7 +109,9 @@ public class AgentOrchestratorService {
                             toolCall.name(),
                             toolCall.argumentsJson(),
                             null,
-                            round
+                            round,
+                            llmClient.provider(),
+                            llmClient.model()
                     ));
                     String toolOutput = executeTool(toolCall, steps, round, listener);
                     messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
@@ -119,7 +133,9 @@ public class AgentOrchestratorService {
                         "assistant",
                         null,
                         answer,
-                        round
+                        round,
+                        llmClient.provider(),
+                        llmClient.model()
                 ));
             }
 
@@ -131,14 +147,14 @@ public class AgentOrchestratorService {
                     llmClient.model()
             );
             rememberConversation(userId, normalizedPrompt, answer);
-            emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round));
+            emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model()));
             return result;
         }
 
         String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
         steps.add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
         rememberConversation(userId, normalizedPrompt, fallback);
-        emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS));
+        emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS, llmClient.provider(), llmClient.model()));
         return new AgentChatResponse(
                 fallback,
                 steps,
@@ -167,7 +183,7 @@ public class AgentOrchestratorService {
                     "name", toolCall.name()
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
             return output;
         }
 
@@ -176,7 +192,7 @@ public class AgentOrchestratorService {
             String output = tool.execute(arguments);
             // 工具结果要重新塞回对话里，模型下一轮才能基于这些真实数据继续推理。
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
             return output;
         } catch (Exception error) {
             String output = json(Map.of(
@@ -185,7 +201,7 @@ public class AgentOrchestratorService {
                     "message", safeText(error.getMessage(), "unknown_error")
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
             return output;
         }
     }
@@ -239,7 +255,9 @@ public class AgentOrchestratorService {
             String name,
             String input,
             String output,
-            int iteration
+            int iteration,
+            String provider,
+            String model
     ) {
     }
 }

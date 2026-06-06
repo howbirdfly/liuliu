@@ -1,6 +1,6 @@
 import { apiRequest, getApiBaseUrlForDebug, readAuthToken } from './apiClient';
 
-export type AgentStreamEventType = 'start' | 'tool_call' | 'tool_result' | 'final_answer' | 'complete';
+export type AgentStreamEventType = 'start' | 'tool_call' | 'tool_result' | 'answer_delta' | 'final_answer' | 'complete';
 
 export interface AgentStreamEvent {
   type: AgentStreamEventType;
