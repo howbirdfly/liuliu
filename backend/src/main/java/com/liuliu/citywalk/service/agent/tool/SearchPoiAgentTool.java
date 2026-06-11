@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.MapSearchService;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -45,9 +46,17 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
     @Override
     public String execute(Map<String, Object> arguments) {
         String query = stringArg(arguments, "query");
-        return json(Map.of(
-                "query", query,
-                "results", mapSearchService.search(query)
-        ));
+        MapSearchService.AgentMapSearchResult<?> searchResult = mapSearchService.searchForAgent(query);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("query", query);
+        payload.put("success", searchResult.success());
+        payload.put("results", searchResult.results());
+        if (searchResult.error() != null) {
+            payload.put("error", searchResult.error());
+        }
+        if (searchResult.message() != null) {
+            payload.put("message", searchResult.message());
+        }
+        return json(payload);
     }
 }

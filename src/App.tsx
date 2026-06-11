@@ -840,6 +840,23 @@ function summarizeAgentOutput(event: AgentStreamEvent) {
     return truncateAgentEventText(event.output, 280);
   }
 
+  const errorCode = typeof payload.error === 'string' ? payload.error.trim() : '';
+  const errorMessage = typeof payload.message === 'string' ? payload.message.trim() : '';
+  if (errorCode) {
+    if (errorCode === 'map_search_unavailable') {
+      return '地图工具当前不可用，Agent 这一步没拿到真实地图结果。';
+    }
+    if (errorCode === 'map_search_failed') {
+      return errorMessage ? `地图工具调用失败：${errorMessage}` : '地图工具调用失败，Agent 这一步没拿到真实地图结果。';
+    }
+    if (errorCode === 'tool_not_found') {
+      return '工具不存在，这一步没有成功执行。';
+    }
+    if (errorCode === 'tool_execution_failed') {
+      return errorMessage ? `工具执行失败：${errorMessage}` : '工具执行失败。';
+    }
+  }
+
   if (event.name === 'search_poi') {
     const items = getAgentResultItems(payload);
     const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 3);

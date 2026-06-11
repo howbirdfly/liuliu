@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.MapSearchService;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,10 +45,21 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
     public String execute(Map<String, Object> arguments) {
         double lat = doubleArg(arguments, "lat", Double.NaN);
         double lng = doubleArg(arguments, "lng", Double.NaN);
-        return json(Map.of(
-                "lat", lat,
-                "lng", lng,
-                "results", mapSearchService.nearbyPois(Double.isNaN(lat) ? null : lat, Double.isNaN(lng) ? null : lng)
-        ));
+        MapSearchService.AgentMapSearchResult<?> searchResult = mapSearchService.nearbyPoisForAgent(
+                Double.isNaN(lat) ? null : lat,
+                Double.isNaN(lng) ? null : lng
+        );
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("lat", lat);
+        payload.put("lng", lng);
+        payload.put("success", searchResult.success());
+        payload.put("results", searchResult.results());
+        if (searchResult.error() != null) {
+            payload.put("error", searchResult.error());
+        }
+        if (searchResult.message() != null) {
+            payload.put("message", searchResult.message());
+        }
+        return json(payload);
     }
 }
