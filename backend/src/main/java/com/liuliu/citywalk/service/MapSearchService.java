@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.AmapProperties;
 import com.liuliu.citywalk.model.dto.response.LocationSearchResponse;
 import com.liuliu.citywalk.model.dto.response.PoiResponse;
+import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -119,6 +120,10 @@ public class MapSearchService {
             }
             return new AgentMapSearchResult<>(true, null, null, results);
         } catch (Exception error) {
+            if (error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw new AgentExecutionCancelledException("agent_execution_cancelled", error);
+            }
             log.warn("Agent map search failed for query={}: {}", keyword, error.getMessage());
             return new AgentMapSearchResult<>(
                     false,
@@ -220,6 +225,10 @@ public class MapSearchService {
             }
             return new AgentMapSearchResult<>(true, null, null, results);
         } catch (Exception error) {
+            if (error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw new AgentExecutionCancelledException("agent_execution_cancelled", error);
+            }
             log.warn("Agent nearby poi search failed for lat={}, lng={}: {}", lat, lng, error.getMessage());
             return new AgentMapSearchResult<>(
                     false,

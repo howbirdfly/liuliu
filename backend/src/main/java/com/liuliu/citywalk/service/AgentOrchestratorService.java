@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
+import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.AgentTool;
 import com.liuliu.citywalk.service.agent.LlmClient;
 import com.liuliu.citywalk.service.agent.LlmMessage;
@@ -21,7 +22,6 @@ import java.util.Map;
 @Service
 public class AgentOrchestratorService {
 
-    // 限制单次请求最多循环多少轮工具调用，避免 Agent 卡在无限循环里。
     private static final int MAX_TOOL_ROUNDS = 6;
 
     private static final String DEFAULT_INSTRUCTIONS = """
@@ -59,21 +59,32 @@ public class AgentOrchestratorService {
     }
 
     public AgentChatResponse chat(Long userId, String prompt) {
-        return execute(userId, prompt, null);
+        return execute(userId, prompt, null, null);
     }
 
-    public AgentChatResponse stream(Long userId, String prompt, AgentExecutionListener listener) {
-        return execute(userId, prompt, listener);
+    public AgentChatResponse stream(
+            Long userId,
+            String prompt,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
+        return execute(userId, prompt, executionHandle, listener);
     }
 
     public void clearConversation(Long userId) {
         agentMemoryService.clearConversation(userId);
     }
 
-    private AgentChatResponse execute(Long userId, String prompt, AgentExecutionListener listener) {
+    private AgentChatResponse execute(
+            Long userId,
+            String prompt,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
+        checkCancelled(executionHandle);
+
         List<LlmMessage> messages = new ArrayList<>();
-        // 先把 Redis 里最近几轮对话取出来，再拼上当前这一轮用户输入。
         messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
         emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model()));
@@ -81,7 +92,8 @@ public class AgentOrchestratorService {
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             final int currentRound = round;
-            // 每一轮都会把当前对话上下文和所有可用工具一起发给模型。
+            checkCancelled(executionHandle);
+
             LlmResponse response = llmClient.createStreamingResponse(
                     new LlmRequest(
                             DEFAULT_INSTRUCTIONS,
@@ -89,21 +101,25 @@ public class AgentOrchestratorService {
                             toolDefinitions,
                             0.2
                     ),
-                    delta -> emit(listener, new AgentExecutionEvent(
-                            "answer_delta",
-                            "assistant",
-                            null,
-                            delta,
-                            currentRound,
-                            llmClient.provider(),
-                            llmClient.model()
-                    ))
+                    delta -> {
+                        checkCancelled(executionHandle);
+                        emit(listener, new AgentExecutionEvent(
+                                "answer_delta",
+                                "assistant",
+                                null,
+                                delta,
+                                currentRound,
+                                llmClient.provider(),
+                                llmClient.model()
+                        ));
+                    }
             );
+            checkCancelled(executionHandle);
 
             if (response.hasToolCalls()) {
-                // 先把“模型刚刚请求过哪些工具”记进上下文，下一轮模型才能接着往下推理。
                 messages.add(LlmMessage.assistant(response.content(), response.toolCalls()));
                 for (LlmToolCall toolCall : response.toolCalls()) {
+                    checkCancelled(executionHandle);
                     emit(listener, new AgentExecutionEvent(
                             "tool_call",
                             toolCall.name(),
@@ -113,21 +129,16 @@ public class AgentOrchestratorService {
                             llmClient.provider(),
                             llmClient.model()
                     ));
-                    String toolOutput = executeTool(toolCall, steps, round, listener);
+                    String toolOutput = executeTool(toolCall, steps, round, executionHandle, listener);
                     messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
                 }
                 continue;
             }
 
-            // 没有继续发起工具调用，说明模型已经准备直接给最终答案了。
             String answer = normalizeAssistantAnswer(response.content());
+            checkCancelled(executionHandle);
             if (!answer.isBlank()) {
-                steps.add(new AgentStepResponse(
-                        "assistant",
-                        "final_answer",
-                        null,
-                        answer
-                ));
+                steps.add(new AgentStepResponse("assistant", "final_answer", null, answer));
                 emit(listener, new AgentExecutionEvent(
                         "final_answer",
                         "assistant",
@@ -165,7 +176,6 @@ public class AgentOrchestratorService {
     }
 
     private void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
-        // Redis 里只记最终的问答轮次，不把工具过程塞进去，避免上下文越来越臃肿。
         agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
     }
 
@@ -173,11 +183,12 @@ public class AgentOrchestratorService {
             LlmToolCall toolCall,
             List<AgentStepResponse> steps,
             int round,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener
     ) {
+        checkCancelled(executionHandle);
         AgentTool tool = toolsByName.get(toolCall.name());
         if (tool == null) {
-            // 工具不存在时返回结构化错误，而不是让整个 Agent 直接中断。
             String output = json(Map.of(
                     "error", "tool_not_found",
                     "name", toolCall.name()
@@ -190,10 +201,12 @@ public class AgentOrchestratorService {
         try {
             Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
             String output = tool.execute(arguments);
-            // 工具结果要重新塞回对话里，模型下一轮才能基于这些真实数据继续推理。
+            checkCancelled(executionHandle);
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
             return output;
+        } catch (AgentExecutionCancelledException error) {
+            throw error;
         } catch (Exception error) {
             String output = json(Map.of(
                     "error", "tool_execution_failed",
@@ -211,7 +224,6 @@ public class AgentOrchestratorService {
             return Map.of();
         }
         try {
-            // 模型传回来的工具参数本质上是一段 JSON 文本，这里统一解析一次。
             return objectMapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {
             });
         } catch (Exception error) {
@@ -244,6 +256,17 @@ public class AgentOrchestratorService {
             return;
         }
         listener.onEvent(event);
+    }
+
+    private void checkCancelled(AgentExecutionRegistryService.AgentExecutionHandle executionHandle) {
+        if (executionHandle == null) {
+            if (Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw new AgentExecutionCancelledException("agent_execution_cancelled");
+            }
+            return;
+        }
+        executionHandle.checkCancelled();
     }
 
     public interface AgentExecutionListener {

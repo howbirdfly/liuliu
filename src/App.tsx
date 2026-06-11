@@ -77,7 +77,7 @@ import {
   type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
-import { clearAgentMemory, openAgentStream, type AgentStreamEvent } from './services/agentApi';
+import { cancelAgentExecution, clearAgentMemory, openAgentStream, type AgentStreamEvent } from './services/agentApi';
 import {
   clearCurrentWalkSession,
   createWalk,
@@ -755,6 +755,13 @@ function buildAgentPoiUri(title: string, lng?: number, lat?: number) {
     return '';
   }
   return `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(title)}`;
+}
+
+function createAgentExecutionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -2160,6 +2167,8 @@ export default function App() {
   const roomSocketRef = useRef<WebSocket | null>(null);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
+  const agentExecutionIdRef = useRef<string | null>(null);
+  const agentStopRequestedRef = useRef(false);
   const themeGenerationStreamRef = useRef<EventSource | null>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const showNotificationCenterRef = useRef(false);
@@ -2432,6 +2441,8 @@ export default function App() {
     return () => {
       agentStreamRef.current?.close();
       agentStreamRef.current = null;
+      agentExecutionIdRef.current = null;
+      agentStopRequestedRef.current = false;
       themeGenerationStreamRef.current?.close();
       themeGenerationStreamRef.current = null;
     };
@@ -3645,6 +3656,21 @@ export default function App() {
     agentStreamRef.current = null;
   };
 
+  const stopActiveAgentPlanning = async () => {
+    const executionId = agentExecutionIdRef.current;
+    agentStopRequestedRef.current = true;
+    agentExecutionIdRef.current = null;
+    closeAgentPlanningStream();
+    if (!executionId) {
+      return;
+    }
+    try {
+      await cancelAgentExecution(executionId);
+    } catch (error) {
+      console.error('Cancel agent execution error:', error);
+    }
+  };
+
   const resetAgentWorkspace = (nextStatus = '') => {
     setAgentAnswer('');
     setAgentEvents([]);
@@ -3667,11 +3693,14 @@ export default function App() {
       return;
     }
 
-    closeAgentPlanningStream();
+    void stopActiveAgentPlanning();
     setIsAgentStreaming(true);
     resetAgentWorkspace('Agent 正在整理需求并准备调用工具...');
 
-    const stream = openAgentStream(prompt);
+    const executionId = createAgentExecutionId();
+    agentExecutionIdRef.current = executionId;
+    agentStopRequestedRef.current = false;
+    const stream = openAgentStream(prompt, executionId);
     agentStreamRef.current = stream;
     let streamFinished = false;
 
@@ -3717,6 +3746,8 @@ export default function App() {
         if (payload.type === 'complete') {
           streamFinished = true;
           setIsAgentStreaming(false);
+          agentExecutionIdRef.current = null;
+          agentStopRequestedRef.current = false;
           setAgentStatus('路线规划完成，可以继续追问或修改需求。');
           stream.close();
           if (agentStreamRef.current === stream) {
@@ -3736,11 +3767,12 @@ export default function App() {
     stream.addEventListener('complete', handleAgentEvent);
 
     stream.onerror = () => {
-      if (streamFinished) {
+      if (streamFinished || agentStopRequestedRef.current) {
         return;
       }
       console.error('Agent stream connection error');
       setIsAgentStreaming(false);
+      agentExecutionIdRef.current = null;
       setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
       stream.close();
       if (agentStreamRef.current === stream) {
@@ -3750,7 +3782,7 @@ export default function App() {
   };
 
   const handleStopAgentPlanning = () => {
-    closeAgentPlanningStream();
+    void stopActiveAgentPlanning();
     setIsAgentStreaming(false);
     setAgentStatus('已停止当前 Agent 规划。');
   };
@@ -3764,7 +3796,7 @@ export default function App() {
     }
 
     if (isAgentStreaming) {
-      closeAgentPlanningStream();
+      void stopActiveAgentPlanning();
       setIsAgentStreaming(false);
     }
 
@@ -3941,7 +3973,7 @@ export default function App() {
 
   const closeAgentPlannerModal = () => {
     if (isAgentStreaming) {
-      closeAgentPlanningStream();
+      void stopActiveAgentPlanning();
       setIsAgentStreaming(false);
       setAgentStatus('已关闭 Agent 窗口，本次规划已停止。');
     }

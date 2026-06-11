@@ -2,12 +2,15 @@ package com.liuliu.citywalk.controller;
 
 import com.liuliu.citywalk.common.ApiResponse;
 import com.liuliu.citywalk.context.BaseContext;
+import com.liuliu.citywalk.model.dto.request.AgentCancelRequest;
 import com.liuliu.citywalk.model.dto.request.AgentChatRequest;
 import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStreamEventResponse;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
+import com.liuliu.citywalk.service.AgentExecutionRegistryService;
 import com.liuliu.citywalk.service.AgentOrchestratorService;
 import com.liuliu.citywalk.service.UserSessionService;
+import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -28,10 +31,16 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class AgentController {
 
     private final AgentOrchestratorService agentOrchestratorService;
+    private final AgentExecutionRegistryService agentExecutionRegistryService;
     private final UserSessionService userSessionService;
 
-    public AgentController(AgentOrchestratorService agentOrchestratorService, UserSessionService userSessionService) {
+    public AgentController(
+            AgentOrchestratorService agentOrchestratorService,
+            AgentExecutionRegistryService agentExecutionRegistryService,
+            UserSessionService userSessionService
+    ) {
         this.agentOrchestratorService = agentOrchestratorService;
+        this.agentExecutionRegistryService = agentExecutionRegistryService;
         this.userSessionService = userSessionService;
     }
 
@@ -46,33 +55,63 @@ public class AgentController {
         return ApiResponse.success(new OperationResultResponse(true));
     }
 
+    @PostMapping("/cancel")
+    public ApiResponse<OperationResultResponse> cancel(@Valid @RequestBody AgentCancelRequest request) {
+        boolean cancelled = agentExecutionRegistryService.cancel(BaseContext.requireCurrentUserId(), request.executionId());
+        return ApiResponse.success(new OperationResultResponse(cancelled));
+    }
+
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> stream(
             @RequestParam String prompt,
+            @RequestParam String executionId,
             @RequestParam(required = false) String token,
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorizationHeader
     ) {
-        // SSE 会保持一条长连接，所以这里主要负责校验请求，
-        // 再把后续编排过程产生的事件持续转发给前端。
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         if (normalizedPrompt.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "prompt_required");
         }
+        String normalizedExecutionId = executionId == null ? "" : executionId.trim();
+        if (normalizedExecutionId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "execution_id_required");
+        }
+
         UserSessionService.StoredUser currentUser = resolveStreamUser(token, authorizationHeader);
         if (currentUser == null || currentUser.isGuest()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "login_required");
         }
 
         SseEmitter emitter = new SseEmitter(5L * 60L * 1000L);
-        Thread.startVirtualThread(() -> {
+        AgentExecutionRegistryService.AgentExecutionHandle executionHandle =
+                agentExecutionRegistryService.register(currentUser.id(), normalizedExecutionId);
+
+        emitter.onCompletion(executionHandle::cancel);
+        emitter.onTimeout(executionHandle::cancel);
+        emitter.onError(error -> executionHandle.cancel());
+
+        Thread workerThread = Thread.startVirtualThread(() -> {
             try {
-                // 把编排过程中的每一步实时推回浏览器。
-                agentOrchestratorService.stream(currentUser.id(), normalizedPrompt, event -> sendEvent(emitter, event));
+                agentOrchestratorService.stream(
+                        currentUser.id(),
+                        normalizedPrompt,
+                        executionHandle,
+                        event -> sendEvent(emitter, event)
+                );
+                emitter.complete();
+            } catch (AgentExecutionCancelledException ignored) {
                 emitter.complete();
             } catch (Exception error) {
-                emitter.completeWithError(error);
+                if (executionHandle.isCancelled()) {
+                    emitter.complete();
+                } else {
+                    emitter.completeWithError(error);
+                }
+            } finally {
+                agentExecutionRegistryService.unregister(executionHandle);
             }
         });
+        executionHandle.attachThread(workerThread);
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
@@ -81,8 +120,6 @@ public class AgentController {
     }
 
     private UserSessionService.StoredUser resolveStreamUser(String token, String authorizationHeader) {
-        // 这个项目里 EventSource 不方便自定义鉴权头，
-        // 所以前端也可以把 token 放在 query 参数里传过来。
         if (token != null && !token.isBlank()) {
             return userSessionService.resolveUserByToken(token.trim());
         }
@@ -91,7 +128,6 @@ public class AgentController {
 
     private void sendEvent(SseEmitter emitter, AgentOrchestratorService.AgentExecutionEvent event) {
         try {
-            // 统一所有 Agent SSE 事件的返回结构，前端就只需要处理一种 payload。
             AgentStreamEventResponse payload = new AgentStreamEventResponse(
                     event.type(),
                     event.name(),

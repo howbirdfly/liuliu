@@ -12,20 +12,26 @@ export interface AgentStreamEvent {
   model?: string | null;
 }
 
-export function openAgentStream(prompt: string): EventSource {
-  // 这个项目里 EventSource 不方便自定义 Authorization 头，
-  // 所以后端允许把登录 token 放在 query 参数里。
+export function openAgentStream(prompt: string, executionId: string): EventSource {
   const token = readAuthToken();
   const params = new URLSearchParams({
     prompt,
+    executionId,
     ...(token ? { token } : {}),
   });
   const streamUrl = `${getApiBaseUrlForDebug()}/api/v1/agent/stream?${params.toString()}`;
   return new EventSource(streamUrl);
 }
 
+export async function cancelAgentExecution(executionId: string): Promise<boolean> {
+  const response = await apiRequest<{ success?: boolean }>('/api/v1/agent/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ executionId }),
+  });
+  return Boolean(response?.success);
+}
+
 export async function clearAgentMemory(): Promise<void> {
-  // 清空当前登录用户最近几轮 Agent 对话记忆。
   await apiRequest('/api/v1/agent/memory/clear', {
     method: 'POST',
   });

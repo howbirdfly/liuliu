@@ -3,6 +3,7 @@ package com.liuliu.citywalk.service.rag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.EmbeddingProperties;
+import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -78,7 +79,13 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
                 embeddings.addAll(requestEmbeddings(normalizedTexts.subList(start, end)));
             }
             return embeddings;
+        } catch (AgentExecutionCancelledException error) {
+            throw error;
         } catch (Exception error) {
+            if (error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw new AgentExecutionCancelledException("agent_execution_cancelled", error);
+            }
             throw new IllegalStateException("embedding_request_failed: " + error.getMessage(), error);
         }
     }
