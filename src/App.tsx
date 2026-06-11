@@ -958,6 +958,25 @@ function extractAgentSuggestedPois(events: AgentStreamEvent[]): MapPOI[] {
   return results.slice(0, 8);
 }
 
+function buildAgentResumePrompt(originalPrompt: string, partialAnswer: string, events: AgentStreamEvent[]) {
+  const toolSummaries = events
+    .filter((event) => event.type === 'tool_result')
+    .slice(-6)
+    .map((event) => `- ${event.name}: ${summarizeAgentOutput(event)}`)
+    .filter((line) => !line.endsWith('：') && !line.endsWith(':'));
+  const normalizedDraft = normalizeAgentMarkdown(partialAnswer).trim();
+
+  return [
+    '继续上一次未完成的 Agent 规划，不要从头重写。',
+    `原始需求：${originalPrompt.trim()}`,
+    toolSummaries.length > 0 ? `已完成的工具结果摘要：\n${toolSummaries.join('\n')}` : '',
+    normalizedDraft ? `当前未完成草稿：\n${normalizedDraft}` : '',
+    '请基于这些已有结果继续补完路线建议，尽量延续前面的判断；只有在信息不足时再补充必要工具调用。',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function mergeMapPois(primary: MapPOI[], secondary: MapPOI[]) {
   const merged: MapPOI[] = [];
   const seen = new Set<string>();
@@ -2125,6 +2144,8 @@ export default function App() {
   const [agentEvents, setAgentEvents] = useState<AgentStreamEvent[]>([]);
   const [agentStatus, setAgentStatus] = useState('');
   const [isAgentStreaming, setIsAgentStreaming] = useState(false);
+  const [isAgentPlanPaused, setIsAgentPlanPaused] = useState(false);
+  const [hasAgentFinalAnswer, setHasAgentFinalAnswer] = useState(false);
   const [isClearingAgentMemory, setIsClearingAgentMemory] = useState(false);
   const [isApplyingAgentResult, setIsApplyingAgentResult] = useState(false);
   const [showAgentPlannerModal, setShowAgentPlannerModal] = useState(false);
@@ -2169,6 +2190,8 @@ export default function App() {
   const agentStreamRef = useRef<EventSource | null>(null);
   const agentExecutionIdRef = useRef<string | null>(null);
   const agentStopRequestedRef = useRef(false);
+  const pausedAgentAnswerRef = useRef('');
+  const pausedAgentEventsRef = useRef<AgentStreamEvent[]>([]);
   const themeGenerationStreamRef = useRef<EventSource | null>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const showNotificationCenterRef = useRef(false);
@@ -3676,10 +3699,22 @@ export default function App() {
     setAgentEvents([]);
     setAgentSuggestedPois([]);
     setShowAgentTimelineModal(false);
+    setIsAgentPlanPaused(false);
+    setHasAgentFinalAnswer(false);
     setAgentStatus(nextStatus);
   };
 
-  const handleStartAgentPlanning = () => {
+  const clearPausedAgentSnapshot = () => {
+    pausedAgentAnswerRef.current = '';
+    pausedAgentEventsRef.current = [];
+  };
+
+  const cachePausedAgentSnapshot = () => {
+    pausedAgentAnswerRef.current = agentAnswer;
+    pausedAgentEventsRef.current = agentEvents;
+  };
+
+  const handleStartAgentPlanningLegacy = () => {
     const prompt = agentPrompt.trim();
     if (!prompt) {
       setAgentStatus('先告诉 Agent 你想怎么逛，我再帮你开始规划。');
@@ -3781,10 +3816,122 @@ export default function App() {
     };
   };
 
-  const handleStopAgentPlanning = () => {
+  const handleStopAgentPlanningLegacy = () => {
     void stopActiveAgentPlanning();
     setIsAgentStreaming(false);
     setAgentStatus('已停止当前 Agent 规划。');
+  };
+
+  const handleStartAgentPlanning = async () => {
+    const prompt = agentPrompt.trim();
+    if (!prompt) {
+      setAgentStatus('请先告诉 Agent 你想怎么逛，我再帮你开始规划。');
+      return;
+    }
+
+    if (!getStoredToken()) {
+      setAgentStatus('请先登录后再使用 Agent 路线规划。');
+      setShowEmailLogin(true);
+      setEmailLoginMode('login');
+      return;
+    }
+
+    await stopActiveAgentPlanning();
+    setIsAgentStreaming(true);
+    resetAgentWorkspace('Agent 正在整理需求并准备调用工具...');
+
+    const executionId = createAgentExecutionId();
+    agentExecutionIdRef.current = executionId;
+    agentStopRequestedRef.current = false;
+    const stream = openAgentStream(prompt, executionId);
+    agentStreamRef.current = stream;
+    let streamFinished = false;
+
+    const handleAgentEvent = (event: Event) => {
+      try {
+        const messageEvent = event as MessageEvent<string>;
+        const payload = JSON.parse(messageEvent.data) as AgentStreamEvent;
+
+        if (payload.type !== 'complete' && payload.type !== 'answer_delta') {
+          setAgentEvents((prev) => [...prev, payload]);
+        }
+
+        if (payload.type === 'start') {
+          setAgentStatus('Agent 已开始规划路线...');
+          return;
+        }
+
+        if (payload.type === 'tool_call') {
+          setAgentStatus(`正在调用工具：${payload.name}`);
+          return;
+        }
+
+        if (payload.type === 'tool_result') {
+          setAgentStatus(`已拿到工具结果：${payload.name}`);
+          return;
+        }
+
+        if (payload.type === 'answer_delta') {
+          if (payload.output) {
+            setAgentAnswer((prev) => `${prev}${payload.output || ''}`);
+          }
+          setAgentStatus('Agent 正在生成路线建议...');
+          return;
+        }
+
+        if (payload.type === 'final_answer') {
+          const finalAnswer = payload.output || '';
+          setAgentAnswer(finalAnswer);
+          setHasAgentFinalAnswer(Boolean(normalizeAgentMarkdown(finalAnswer).trim()));
+          setIsAgentPlanPaused(false);
+          setAgentStatus('Agent 已生成路线建议。');
+          return;
+        }
+
+        if (payload.type === 'complete') {
+          streamFinished = true;
+          setIsAgentStreaming(false);
+          setIsAgentPlanPaused(false);
+          agentExecutionIdRef.current = null;
+          agentStopRequestedRef.current = false;
+          setAgentStatus('路线规划完成，可以继续追问或修改需求。');
+          stream.close();
+          if (agentStreamRef.current === stream) {
+            agentStreamRef.current = null;
+          }
+        }
+      } catch (error) {
+        console.error('Agent stream parse error:', error);
+      }
+    };
+
+    stream.addEventListener('start', handleAgentEvent);
+    stream.addEventListener('tool_call', handleAgentEvent);
+    stream.addEventListener('tool_result', handleAgentEvent);
+    stream.addEventListener('answer_delta', handleAgentEvent);
+    stream.addEventListener('final_answer', handleAgentEvent);
+    stream.addEventListener('complete', handleAgentEvent);
+
+    stream.onerror = () => {
+      if (streamFinished || agentStopRequestedRef.current) {
+        return;
+      }
+      console.error('Agent stream connection error');
+      setIsAgentStreaming(false);
+      setIsAgentPlanPaused(false);
+      agentExecutionIdRef.current = null;
+      setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
+      stream.close();
+      if (agentStreamRef.current === stream) {
+        agentStreamRef.current = null;
+      }
+    };
+  };
+
+  const handleStopAgentPlanning = async () => {
+    await stopActiveAgentPlanning();
+    setIsAgentStreaming(false);
+    resetAgentWorkspace('已停止当前 Agent 规划。');
   };
 
   const handleClearAgentMemory = async () => {
@@ -3971,11 +4118,11 @@ export default function App() {
     }
   };
 
-  const closeAgentPlannerModal = () => {
+  const closeAgentPlannerModal = async () => {
     if (isAgentStreaming) {
-      void stopActiveAgentPlanning();
+      await stopActiveAgentPlanning();
       setIsAgentStreaming(false);
-      setAgentStatus('已关闭 Agent 窗口，本次规划已停止。');
+      resetAgentWorkspace('已关闭 Agent 窗口，本次规划已结束。');
     }
     setShowAgentTimelineModal(false);
     setShowAgentPlannerModal(false);
@@ -5114,7 +5261,7 @@ export default function App() {
                         {!canModifySharedTheme ? <p className="mt-2 text-xs text-amber-700">当前为共创房员身份，可以查看 Agent 规划结果，但不能把结果应用为房间主题。</p> : null}
                       </div>
                       <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
-                        {isAgentStreaming ? '流式规划中' : '工作台模式'}
+                        {isAgentStreaming ? '\u6d41\u5f0f\u89c4\u5212\u4e2d' : '\u5de5\u4f5c\u53f0\u6a21\u5f0f'}
                       </span>
                     </div>
 
@@ -5149,7 +5296,7 @@ export default function App() {
                         className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
                       >
                         {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                        {isAgentStreaming ? '规划中...' : '开始 Agent 规划'}
+                        {isAgentStreaming ? '\u89c4\u5212\u4e2d...' : '\u5f00\u59cb Agent \u89c4\u5212'}
                       </button>
                       <button
                         type="button"
@@ -5208,7 +5355,7 @@ export default function App() {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        {agentAnswer ? (
+                        {hasAgentFinalAnswer && agentAnswer ? (
                           <button
                             type="button"
                             onClick={() => void handleApplyAgentResult()}
@@ -5220,12 +5367,12 @@ export default function App() {
                           </button>
                         ) : null}
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                          {agentAnswer ? '已生成路线建议' : '等待生成结果'}
+                          {hasAgentFinalAnswer && agentAnswer ? '\u5df2\u751f\u6210\u8def\u7ebf\u5efa\u8bae' : '\u7b49\u5f85\u751f\u6210\u7ed3\u679c'}
                         </span>
                       </div>
                     </div>
 
-                    {agentAnswer ? (
+                    {hasAgentFinalAnswer && agentAnswer ? (
                       <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-2 pb-8">
                         <div className="agent-markdown">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -5235,7 +5382,7 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="mt-4 flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm leading-6 text-slate-500">
-                        还没有生成路线建议。输入你的需求后开始规划，结果会固定显示在这里。
+                        {'\u8fd8\u6ca1\u6709\u751f\u6210\u8def\u7ebf\u5efa\u8bae\u3002\u8f93\u5165\u4f60\u7684\u9700\u6c42\u540e\u5f00\u59cb\u89c4\u5212\uff0c\u7ed3\u679c\u4f1a\u56fa\u5b9a\u663e\u793a\u5728\u8fd9\u91cc\u3002'}
                       </div>
                     )}
                   </div>
