@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   Bell,
-  Plus,
   Compass,
   History,
   ImagePlus,
@@ -14,7 +13,6 @@ import {
   Search,
   Shuffle,
   Sparkles,
-  AudioLines,
   ArrowUp,
   UserRound,
   Users,
@@ -4191,10 +4189,6 @@ export default function App() {
 
       <div className="mt-4 rounded-[30px] border border-slate-200 bg-white px-3 py-3 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
         <div className="flex items-end gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-            <Plus className="h-5 w-5" />
-          </div>
-
           <textarea
             value={agentPrompt}
             onChange={(event) => setAgentPrompt(event.target.value)}
@@ -4213,10 +4207,6 @@ export default function App() {
           >
             <History className="h-4 w-4" />
           </button>
-
-          <div className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 sm:inline-flex">
-            <AudioLines className="h-4 w-4" />
-          </div>
 
           {isAgentStreaming ? (
             <button
