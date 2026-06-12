@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
   Bell,
+  Plus,
   Compass,
   History,
   ImagePlus,
@@ -13,6 +14,8 @@ import {
   Search,
   Shuffle,
   Sparkles,
+  AudioLines,
+  ArrowUp,
   UserRound,
   Users,
   ChevronDown,
@@ -129,6 +132,13 @@ type PathPoint = {
 type CommunityReplyTarget = {
   id: number;
   authorNickname: string;
+};
+
+type AgentChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  state?: 'streaming' | 'done' | 'stopped';
 };
 
 type WalkRecordCard = {
@@ -956,25 +966,6 @@ function extractAgentSuggestedPois(events: AgentStreamEvent[]): MapPOI[] {
   }
 
   return results.slice(0, 8);
-}
-
-function buildAgentResumePrompt(originalPrompt: string, partialAnswer: string, events: AgentStreamEvent[]) {
-  const toolSummaries = events
-    .filter((event) => event.type === 'tool_result')
-    .slice(-6)
-    .map((event) => `- ${event.name}: ${summarizeAgentOutput(event)}`)
-    .filter((line) => !line.endsWith('：') && !line.endsWith(':'));
-  const normalizedDraft = normalizeAgentMarkdown(partialAnswer).trim();
-
-  return [
-    '继续上一次未完成的 Agent 规划，不要从头重写。',
-    `原始需求：${originalPrompt.trim()}`,
-    toolSummaries.length > 0 ? `已完成的工具结果摘要：\n${toolSummaries.join('\n')}` : '',
-    normalizedDraft ? `当前未完成草稿：\n${normalizedDraft}` : '',
-    '请基于这些已有结果继续补完路线建议，尽量延续前面的判断；只有在信息不足时再补充必要工具调用。',
-  ]
-    .filter(Boolean)
-    .join('\n\n');
 }
 
 function mergeMapPois(primary: MapPOI[], secondary: MapPOI[]) {
@@ -2142,9 +2133,9 @@ export default function App() {
   const [agentPrompt, setAgentPrompt] = useState('我想在上海找一条适合傍晚散步、拍照好看的 City Walk 路线');
   const [agentAnswer, setAgentAnswer] = useState('');
   const [agentEvents, setAgentEvents] = useState<AgentStreamEvent[]>([]);
+  const [agentMessages, setAgentMessages] = useState<AgentChatMessage[]>([]);
   const [agentStatus, setAgentStatus] = useState('');
   const [isAgentStreaming, setIsAgentStreaming] = useState(false);
-  const [isAgentPlanPaused, setIsAgentPlanPaused] = useState(false);
   const [hasAgentFinalAnswer, setHasAgentFinalAnswer] = useState(false);
   const [isClearingAgentMemory, setIsClearingAgentMemory] = useState(false);
   const [isApplyingAgentResult, setIsApplyingAgentResult] = useState(false);
@@ -2189,9 +2180,9 @@ export default function App() {
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
   const agentExecutionIdRef = useRef<string | null>(null);
+  const activeAgentAssistantMessageIdRef = useRef<string | null>(null);
   const agentStopRequestedRef = useRef(false);
-  const pausedAgentAnswerRef = useRef('');
-  const pausedAgentEventsRef = useRef<AgentStreamEvent[]>([]);
+  const agentChatViewportRef = useRef<HTMLDivElement | null>(null);
   const themeGenerationStreamRef = useRef<EventSource | null>(null);
   const noteTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const showNotificationCenterRef = useRef(false);
@@ -3699,128 +3690,44 @@ export default function App() {
     setAgentEvents([]);
     setAgentSuggestedPois([]);
     setShowAgentTimelineModal(false);
-    setIsAgentPlanPaused(false);
     setHasAgentFinalAnswer(false);
     setAgentStatus(nextStatus);
   };
 
-  const clearPausedAgentSnapshot = () => {
-    pausedAgentAnswerRef.current = '';
-    pausedAgentEventsRef.current = [];
+  const appendAgentChatTurn = (prompt: string, assistantMessageId: string) => {
+    setAgentMessages((prev) => [
+      ...prev,
+      { id: `user-${assistantMessageId}`, role: 'user', content: prompt, state: 'done' },
+      { id: assistantMessageId, role: 'assistant', content: '', state: 'streaming' },
+    ]);
   };
 
-  const cachePausedAgentSnapshot = () => {
-    pausedAgentAnswerRef.current = agentAnswer;
-    pausedAgentEventsRef.current = agentEvents;
+  const updateAgentChatMessage = (
+    messageId: string,
+    updater: (message: AgentChatMessage) => AgentChatMessage,
+  ) => {
+    setAgentMessages((prev) => prev.map((message) => (message.id === messageId ? updater(message) : message)));
   };
 
-  const handleStartAgentPlanningLegacy = () => {
-    const prompt = agentPrompt.trim();
-    if (!prompt) {
-      setAgentStatus('先告诉 Agent 你想怎么逛，我再帮你开始规划。');
+  const finishActiveAgentAssistantMessage = (state: 'done' | 'stopped') => {
+    const assistantMessageId = activeAgentAssistantMessageIdRef.current;
+    if (!assistantMessageId) {
       return;
     }
+    updateAgentChatMessage(assistantMessageId, (message) => ({ ...message, state }));
+    activeAgentAssistantMessageIdRef.current = null;
+  };
 
-    if (!getStoredToken()) {
-      setAgentStatus('请先登录后再使用 Agent 路线规划。');
-      setShowEmailLogin(true);
-      setEmailLoginMode('login');
+  useEffect(() => {
+    if (!showAgentPlannerModal) {
       return;
     }
-
-    void stopActiveAgentPlanning();
-    setIsAgentStreaming(true);
-    resetAgentWorkspace('Agent 正在整理需求并准备调用工具...');
-
-    const executionId = createAgentExecutionId();
-    agentExecutionIdRef.current = executionId;
-    agentStopRequestedRef.current = false;
-    const stream = openAgentStream(prompt, executionId);
-    agentStreamRef.current = stream;
-    let streamFinished = false;
-
-    const handleAgentEvent = (event: Event) => {
-      try {
-        const messageEvent = event as MessageEvent<string>;
-        const payload = JSON.parse(messageEvent.data) as AgentStreamEvent;
-
-        if (payload.type !== 'complete' && payload.type !== 'answer_delta') {
-          setAgentEvents((prev) => [...prev, payload]);
-        }
-
-        if (payload.type === 'start') {
-          setAgentStatus('Agent 已开始规划路线...');
-          return;
-        }
-
-        if (payload.type === 'tool_call') {
-          setAgentAnswer('');
-          setAgentStatus(`正在调用工具：${payload.name}`);
-          return;
-        }
-
-        if (payload.type === 'tool_result') {
-          setAgentStatus(`已拿到工具结果：${payload.name}`);
-          return;
-        }
-
-        if (payload.type === 'answer_delta') {
-          if (payload.output) {
-            setAgentAnswer((prev) => `${prev}${payload.output || ''}`);
-          }
-          setAgentStatus('Agent 正在生成路线建议...');
-          return;
-        }
-
-        if (payload.type === 'final_answer') {
-          setAgentAnswer(payload.output || '');
-          setAgentStatus('Agent 已生成路线建议。');
-          return;
-        }
-
-        if (payload.type === 'complete') {
-          streamFinished = true;
-          setIsAgentStreaming(false);
-          agentExecutionIdRef.current = null;
-          agentStopRequestedRef.current = false;
-          setAgentStatus('路线规划完成，可以继续追问或修改需求。');
-          stream.close();
-          if (agentStreamRef.current === stream) {
-            agentStreamRef.current = null;
-          }
-        }
-      } catch (error) {
-        console.error('Agent stream parse error:', error);
-      }
-    };
-
-    stream.addEventListener('start', handleAgentEvent);
-    stream.addEventListener('tool_call', handleAgentEvent);
-    stream.addEventListener('tool_result', handleAgentEvent);
-    stream.addEventListener('answer_delta', handleAgentEvent);
-    stream.addEventListener('final_answer', handleAgentEvent);
-    stream.addEventListener('complete', handleAgentEvent);
-
-    stream.onerror = () => {
-      if (streamFinished || agentStopRequestedRef.current) {
-        return;
-      }
-      console.error('Agent stream connection error');
-      setIsAgentStreaming(false);
-      agentExecutionIdRef.current = null;
-      setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
-      stream.close();
-      if (agentStreamRef.current === stream) {
-        agentStreamRef.current = null;
-      }
-    };
-  };
-
-  const handleStopAgentPlanningLegacy = () => {
-    void stopActiveAgentPlanning();
-    setIsAgentStreaming(false);
-    setAgentStatus('已停止当前 Agent 规划。');
-  };
+    const viewport = agentChatViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' });
+  }, [agentMessages, showAgentPlannerModal]);
 
   const handleStartAgentPlanning = async () => {
     const prompt = agentPrompt.trim();
@@ -3838,9 +3745,18 @@ export default function App() {
 
     await stopActiveAgentPlanning();
     setIsAgentStreaming(true);
-    resetAgentWorkspace('Agent 正在整理需求并准备调用工具...');
+    setAgentAnswer('');
+    setAgentEvents([]);
+    setAgentSuggestedPois([]);
+    setShowAgentTimelineModal(false);
+    setHasAgentFinalAnswer(false);
+    setAgentStatus('Agent 正在整理需求并准备调用工具...');
 
     const executionId = createAgentExecutionId();
+    const assistantMessageId = `assistant-${executionId}`;
+    appendAgentChatTurn(prompt, assistantMessageId);
+    activeAgentAssistantMessageIdRef.current = assistantMessageId;
+    setAgentPrompt('');
     agentExecutionIdRef.current = executionId;
     agentStopRequestedRef.current = false;
     const stream = openAgentStream(prompt, executionId);
@@ -3873,7 +3789,13 @@ export default function App() {
 
         if (payload.type === 'answer_delta') {
           if (payload.output) {
-            setAgentAnswer((prev) => `${prev}${payload.output || ''}`);
+            const delta = payload.output || '';
+            setAgentAnswer((prev) => `${prev}${delta}`);
+            updateAgentChatMessage(assistantMessageId, (message) => ({
+              ...message,
+              content: `${message.content}${delta}`,
+              state: 'streaming',
+            }));
           }
           setAgentStatus('Agent 正在生成路线建议...');
           return;
@@ -3883,7 +3805,12 @@ export default function App() {
           const finalAnswer = payload.output || '';
           setAgentAnswer(finalAnswer);
           setHasAgentFinalAnswer(Boolean(normalizeAgentMarkdown(finalAnswer).trim()));
-          setIsAgentPlanPaused(false);
+          updateAgentChatMessage(assistantMessageId, (message) => ({
+            ...message,
+            content: finalAnswer,
+            state: 'done',
+          }));
+          activeAgentAssistantMessageIdRef.current = null;
           setAgentStatus('Agent 已生成路线建议。');
           return;
         }
@@ -3891,9 +3818,9 @@ export default function App() {
         if (payload.type === 'complete') {
           streamFinished = true;
           setIsAgentStreaming(false);
-          setIsAgentPlanPaused(false);
           agentExecutionIdRef.current = null;
           agentStopRequestedRef.current = false;
+          finishActiveAgentAssistantMessage('done');
           setAgentStatus('路线规划完成，可以继续追问或修改需求。');
           stream.close();
           if (agentStreamRef.current === stream) {
@@ -3918,8 +3845,8 @@ export default function App() {
       }
       console.error('Agent stream connection error');
       setIsAgentStreaming(false);
-      setIsAgentPlanPaused(false);
       agentExecutionIdRef.current = null;
+      finishActiveAgentAssistantMessage('stopped');
       setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
       stream.close();
       if (agentStreamRef.current === stream) {
@@ -3928,10 +3855,21 @@ export default function App() {
     };
   };
 
+  const handleAgentPromptKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || isAgentStreaming) {
+      return;
+    }
+    event.preventDefault();
+    void handleStartAgentPlanning();
+  };
+
   const handleStopAgentPlanning = async () => {
     await stopActiveAgentPlanning();
     setIsAgentStreaming(false);
-    resetAgentWorkspace('已停止当前 Agent 规划。');
+    setAgentAnswer('');
+    setHasAgentFinalAnswer(false);
+    finishActiveAgentAssistantMessage('stopped');
+    setAgentStatus('已停止当前 Agent 规划。');
   };
 
   const handleClearAgentMemory = async () => {
@@ -3945,12 +3883,15 @@ export default function App() {
     if (isAgentStreaming) {
       void stopActiveAgentPlanning();
       setIsAgentStreaming(false);
+      finishActiveAgentAssistantMessage('stopped');
     }
 
     setIsClearingAgentMemory(true);
     try {
       await clearAgentMemory();
       resetAgentWorkspace('已开始新对话，Agent 记忆已清空。');
+      setAgentMessages([]);
+      activeAgentAssistantMessageIdRef.current = null;
     } catch (error) {
       setAgentStatus(error instanceof Error ? error.message : '清空 Agent 记忆失败，请稍后再试。');
     } finally {
@@ -4122,11 +4063,175 @@ export default function App() {
     if (isAgentStreaming) {
       await stopActiveAgentPlanning();
       setIsAgentStreaming(false);
-      resetAgentWorkspace('已关闭 Agent 窗口，本次规划已结束。');
+      setAgentAnswer('');
+      setHasAgentFinalAnswer(false);
+      finishActiveAgentAssistantMessage('stopped');
+      setAgentStatus('已关闭 Agent 窗口，本次规划已结束。');
     }
     setShowAgentTimelineModal(false);
     setShowAgentPlannerModal(false);
   };
+
+  const renderAgentPlannerConversation = () => (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#fff7ed,transparent_42%),linear-gradient(180deg,#fffdf8_0%,#ffffff_32%,#fffaf2_100%)] px-4 py-4 sm:px-6 sm:py-5">
+      <div className="flex flex-wrap gap-2">
+        {AGENT_QUICK_PROMPTS.map((item) => (
+          <button
+            key={item.label}
+            type="button"
+            onClick={() => setAgentPrompt(item.prompt)}
+            className="rounded-full border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {agentStatus ? (
+        <div className="mt-3 rounded-2xl border border-amber-100 bg-white/90 px-4 py-3 text-sm text-slate-600 shadow-sm">
+          {agentStatus}
+        </div>
+      ) : null}
+
+      {!canModifySharedTheme ? (
+        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-6 text-amber-800">
+          当前为共创房员身份，可以查看 Agent 结果，但不能把路线直接应用为房间主题。
+        </div>
+      ) : null}
+
+      <div
+        ref={agentChatViewportRef}
+        className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-[28px] border border-slate-200/80 bg-white/80 px-4 py-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:px-5"
+      >
+        {agentMessages.length === 0 ? (
+          <div className="flex h-full min-h-[320px] flex-col items-center justify-center text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <h4 className="mt-5 text-lg font-semibold text-slate-900">和 Agent 像聊天一样规划路线</h4>
+            <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
+              直接输入你想怎么逛、想拍什么、偏好什么氛围。Agent 会边调用工具边回答，最后给出可落到地图上的路线建议。
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5 pb-2">
+            {agentMessages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                {message.role === 'assistant' ? (
+                  <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
+                ) : null}
+
+                <div
+                  className={`max-w-[85%] rounded-[24px] px-4 py-3 text-sm leading-7 shadow-sm ${
+                    message.role === 'user'
+                      ? 'bg-slate-900 text-white'
+                      : 'border border-slate-200 bg-white text-slate-700'
+                  }`}
+                >
+                  {message.role === 'assistant' ? (
+                    message.content ? (
+                      <div className="agent-markdown">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeAgentMarkdown(message.content)}</ReactMarkdown>
+                      </div>
+                    ) : message.state === 'stopped' ? (
+                      <div className="text-slate-500">本轮回答已停止。</div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        <span>Agent 正在思考中...</span>
+                      </div>
+                    )
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                  )}
+
+                  {message.role === 'assistant' && message.state === 'stopped' ? (
+                    <div className="mt-3 text-xs text-amber-600">本轮回答已停止，已保留当前生成内容。</div>
+                  ) : null}
+                </div>
+
+                {message.role === 'user' ? (
+                  <div className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-700">
+                    <UserRound className="h-4 w-4" />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-[30px] border border-slate-200 bg-white px-3 py-3 shadow-[0_16px_40px_rgba(15,23,42,0.08)]">
+        <div className="flex items-end gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+            <Plus className="h-5 w-5" />
+          </div>
+
+          <textarea
+            value={agentPrompt}
+            onChange={(event) => setAgentPrompt(event.target.value)}
+            onKeyDown={handleAgentPromptKeyDown}
+            placeholder="有问题，尽管问。比如：想要一条适合下班后散步、拍照、顺手喝咖啡的 City Walk 路线"
+            className="min-h-[44px] flex-1 resize-none border-0 bg-transparent px-1 py-2 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400"
+            rows={1}
+          />
+
+          <button
+            type="button"
+            onClick={() => setShowAgentTimelineModal(true)}
+            disabled={agentEvents.length === 0}
+            className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-40 sm:inline-flex"
+            title="查看执行过程"
+          >
+            <History className="h-4 w-4" />
+          </button>
+
+          <div className="hidden h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 sm:inline-flex">
+            <AudioLines className="h-4 w-4" />
+          </div>
+
+          {isAgentStreaming ? (
+            <button
+              type="button"
+              onClick={() => void handleStopAgentPlanning()}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition hover:bg-slate-800"
+              title="停止生成"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleStartAgentPlanning()}
+              disabled={!agentPrompt.trim()}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition hover:bg-slate-800 disabled:opacity-40"
+              title="发送给 Agent"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 px-1">
+          <div className="text-xs text-slate-400">{isAgentStreaming ? 'Agent 正在流式回复中' : 'Enter 发送，Shift + Enter 换行'}</div>
+          <button
+            type="button"
+            onClick={() => void handleClearAgentMemory()}
+            disabled={isClearingAgentMemory}
+            className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 disabled:opacity-50"
+          >
+            {isClearingAgentMemory && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+            {isClearingAgentMemory ? '清空中...' : '开始新对话'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   const handleCombineThemes = async () => {
     if (!canModifySharedTheme) {
@@ -5232,162 +5337,49 @@ export default function App() {
         </header>
         {showAgentPlannerModal ? (
           <div className="fixed inset-0 z-50 flex items-end bg-slate-900/45 px-3 py-3 sm:items-center sm:justify-center sm:px-4">
-            <div className="flex h-[88vh] w-full flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl sm:max-w-4xl">
+            <div className="flex h-[88vh] w-full flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl sm:max-w-5xl">
               <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
-                <div>
+                <div className="min-w-0">
                   <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Agent Planner</div>
-                  <h3 className="mt-1 text-lg font-semibold text-slate-900">Agent 路线规划窗口</h3>
-                  <p className="mt-1 text-xs text-slate-500">在这里专门和 Agent 对话、看工具调用过程、查看最终路线建议。</p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">Agent 对话窗口</h3>
+                  <p className="mt-1 text-xs text-slate-500">像传统大模型一样和 Agent 对话，同时保留工具调用过程与路线应用能力。</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeAgentPlannerModal}
-                  className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
-                  aria-label="关闭 Agent 规划窗口"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="min-h-0 flex-1 overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
-                <div className="grid h-full min-h-0 gap-4 overflow-hidden lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
-                  <div className="min-h-0 overflow-y-auto rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
-                        <p className="mt-1 text-xs leading-6 text-slate-500">
-                          在左侧描述需求、发起规划、查看状态；右侧会固定显示当前路线建议。
-                        </p>
-                        {!canModifySharedTheme ? <p className="mt-2 text-xs text-amber-700">当前为共创房员身份，可以查看 Agent 规划结果，但不能把结果应用为房间主题。</p> : null}
-                      </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
-                        {isAgentStreaming ? '\u6d41\u5f0f\u89c4\u5212\u4e2d' : '\u5de5\u4f5c\u53f0\u6a21\u5f0f'}
-                      </span>
-                    </div>
-
-                    <div className="mt-4">
-                      <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Quick Prompts</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {AGENT_QUICK_PROMPTS.map((item) => (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => setAgentPrompt(item.prompt)}
-                            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-amber-200 hover:bg-amber-50 hover:text-amber-700"
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <textarea
-                      value={agentPrompt}
-                      onChange={(event) => setAgentPrompt(event.target.value)}
-                      placeholder="比如：我想在上海找一条适合傍晚散步、拍照好看、能顺便喝咖啡的 City Walk 路线"
-                      className="mt-4 min-h-36 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
-                    />
-
-                    <div className="mt-3 flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={handleStartAgentPlanning}
-                        disabled={isAgentStreaming}
-                        className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      >
-                        {isAgentStreaming && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                        {isAgentStreaming ? '\u89c4\u5212\u4e2d...' : '\u5f00\u59cb Agent \u89c4\u5212'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleStopAgentPlanning}
-                        disabled={!isAgentStreaming}
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 disabled:opacity-50"
-                      >
-                        停止规划
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleClearAgentMemory()}
-                        disabled={isClearingAgentMemory}
-                        className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 disabled:opacity-50"
-                      >
-                        {isClearingAgentMemory && <LoaderCircle className="h-4 w-4 animate-spin" />}
-                        {isClearingAgentMemory ? '清空中...' : '开始新对话'}
-                      </button>
-                    </div>
-
-                    {agentStatus ? (
-                      <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">Status</p>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">{agentStatus}</p>
-                      </div>
-                    ) : null}
-
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">执行过程</p>
-                          <p className="mt-1 text-xs leading-5 text-slate-500">
-                            {agentEvents.length > 0
-                              ? `已记录 ${agentEvents.length} 条 Agent 事件，建议单独打开时间线查看。`
-                              : '开始规划后，这里会记录工具调用和结果摘要。'}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowAgentTimelineModal(true)}
-                          disabled={agentEvents.length === 0}
-                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-                        >
-                          查看执行过程
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex h-full min-h-0 max-h-full flex-col overflow-hidden rounded-[28px] border border-amber-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-100 pb-3">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-[0.2em] text-amber-500">Agent Final Answer</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">
-                          这里固定展示当前规划结果，你可以一边改需求一边对照查看。
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {hasAgentFinalAnswer && agentAnswer ? (
-                          <button
-                            type="button"
-                            onClick={() => void handleApplyAgentResult()}
-                            disabled={isApplyingAgentResult || !canModifySharedTheme}
-                            className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
-                          >
-                            {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-                            {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
-                          </button>
-                        ) : null}
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                          {hasAgentFinalAnswer && agentAnswer ? '\u5df2\u751f\u6210\u8def\u7ebf\u5efa\u8bae' : '\u7b49\u5f85\u751f\u6210\u7ed3\u679c'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {hasAgentFinalAnswer && agentAnswer ? (
-                      <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-2 pb-8">
-                        <div className="agent-markdown">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {normalizeAgentMarkdown(agentAnswer)}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-4 flex min-h-[300px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm leading-6 text-slate-500">
-                        {'\u8fd8\u6ca1\u6709\u751f\u6210\u8def\u7ebf\u5efa\u8bae\u3002\u8f93\u5165\u4f60\u7684\u9700\u6c42\u540e\u5f00\u59cb\u89c4\u5212\uff0c\u7ed3\u679c\u4f1a\u56fa\u5b9a\u663e\u793a\u5728\u8fd9\u91cc\u3002'}
-                      </div>
-                    )}
-                  </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                    {isAgentStreaming ? '流式规划中' : agentMessages.length > 0 ? '多轮对话模式' : '随时开始提问'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAgentTimelineModal(true)}
+                    disabled={agentEvents.length === 0}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 disabled:opacity-50"
+                  >
+                    <History className="h-3.5 w-3.5" />
+                    执行过程
+                  </button>
+                  {hasAgentFinalAnswer && agentAnswer ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleApplyAgentResult()}
+                      disabled={isApplyingAgentResult || !canModifySharedTheme}
+                      className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
+                    >
+                      {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+                      {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={closeAgentPlannerModal}
+                    className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50"
+                    aria-label="关闭 Agent 对话窗口"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
+
+              {renderAgentPlannerConversation()}
             </div>
           </div>
         ) : null}

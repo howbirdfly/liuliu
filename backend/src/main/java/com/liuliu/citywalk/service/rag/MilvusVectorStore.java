@@ -3,7 +3,11 @@ package com.liuliu.citywalk.service.rag;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.liuliu.citywalk.config.MilvusProperties;
 import io.milvus.v2.common.DataType;
 import io.milvus.v2.common.IndexParam;
@@ -282,10 +286,11 @@ public class MilvusVectorStore implements VectorStore {
     }
 
     private Map<String, Object> convertEntityMap(Object entity) {
-        if (entity == null) {
+        Object normalizedEntity = unwrapJsonValue(entity);
+        if (normalizedEntity == null) {
             return Map.of();
         }
-        if (entity instanceof Map<?, ?> map) {
+        if (normalizedEntity instanceof Map<?, ?> map) {
             Map<String, Object> converted = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (entry.getKey() == null) {
@@ -295,7 +300,7 @@ public class MilvusVectorStore implements VectorStore {
             }
             return converted;
         }
-        return objectMapper.convertValue(entity, new TypeReference<>() {
+        return objectMapper.convertValue(normalizedEntity, new TypeReference<>() {
         });
     }
 
@@ -332,13 +337,14 @@ public class MilvusVectorStore implements VectorStore {
     }
 
     private Map<String, Object> extractMetadata(Object metadataValue) {
-        if (metadataValue == null) {
+        Object normalizedMetadata = unwrapJsonValue(metadataValue);
+        if (normalizedMetadata == null) {
             return Map.of();
         }
-        if (metadataValue instanceof Map<?, ?>) {
-            return convertEntityMap(metadataValue);
+        if (normalizedMetadata instanceof Map<?, ?>) {
+            return convertEntityMap(normalizedMetadata);
         }
-        if (metadataValue instanceof String text) {
+        if (normalizedMetadata instanceof String text) {
             try {
                 return objectMapper.readValue(text, new TypeReference<>() {
                 });
@@ -346,8 +352,57 @@ public class MilvusVectorStore implements VectorStore {
                 return Map.of("raw", text);
             }
         }
-        return objectMapper.convertValue(metadataValue, new TypeReference<>() {
+        return objectMapper.convertValue(normalizedMetadata, new TypeReference<>() {
         });
+    }
+
+    private Object unwrapJsonValue(Object value) {
+        if (value == null || value instanceof JsonNull) {
+            return null;
+        }
+        if (value instanceof JsonPrimitive primitive) {
+            if (primitive.isBoolean()) {
+                return primitive.getAsBoolean();
+            }
+            if (primitive.isNumber()) {
+                return primitive.getAsNumber();
+            }
+            if (primitive.isString()) {
+                return primitive.getAsString();
+            }
+        }
+        if (value instanceof JsonArray array) {
+            List<Object> items = new ArrayList<>(array.size());
+            for (JsonElement element : array) {
+                items.add(unwrapJsonValue(element));
+            }
+            return items;
+        }
+        if (value instanceof JsonObject object) {
+            Map<String, Object> map = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                map.put(entry.getKey(), unwrapJsonValue(entry.getValue()));
+            }
+            return map;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                normalized.put(entry.getKey().toString(), unwrapJsonValue(entry.getValue()));
+            }
+            return normalized;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            List<Object> normalized = new ArrayList<>();
+            for (Object item : iterable) {
+                normalized.add(unwrapJsonValue(item));
+            }
+            return normalized;
+        }
+        return value;
     }
 
     private Map<String, Object> normalizeMetadata(Map<String, Object> metadata) {
