@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.liuliu.citywalk.mapper.AgentUserMemoryMapper">
+
+    <resultMap id="AgentUserMemoryEntityMap" type="com.liuliu.citywalk.mapper.entity.AgentUserMemoryEntity">
+        <id property="userId" column="user_id"/>
+        <result property="preferredCities" column="preferred_cities"/>
+        <result property="preferredAreas" column="preferred_areas"/>
+        <result property="walkStyles" column="walk_styles"/>
+        <result property="preferredDuration" column="preferred_duration"/>
+        <result property="mobilityLevel" column="mobility_level"/>
+        <result property="avoidTags" column="avoid_tags"/>
+        <result property="recentSuggestedAreas" column="recent_suggested_areas"/>
+        <result property="summary" column="summary"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="findByUserId" resultMap="AgentUserMemoryEntityMap">
+        select user_id, preferred_cities, preferred_areas, walk_styles, preferred_duration,
+               mobility_level, avoid_tags, recent_suggested_areas, summary, created_at, updated_at
+        from agent_user_memory
+        where user_id = #{userId}
+        limit 1
+    </select>
+
+    <insert id="upsertMemory">
+        insert into agent_user_memory (
+            user_id, preferred_cities, preferred_areas, walk_styles, preferred_duration,
+            mobility_level, avoid_tags, recent_suggested_areas, summary, created_at, updated_at
+        ) values (
+            #{userId}, #{preferredCities}, #{preferredAreas}, #{walkStyles}, #{preferredDuration},
+            #{mobilityLevel}, #{avoidTags}, #{recentSuggestedAreas}, #{summary}, now(), now()
+        )
+        on duplicate key update
+            preferred_cities = values(preferred_cities),
+            preferred_areas = values(preferred_areas),
+            walk_styles = values(walk_styles),
+            preferred_duration = values(preferred_duration),
+            mobility_level = values(mobility_level),
+            avoid_tags = values(avoid_tags),
+            recent_suggested_areas = values(recent_suggested_areas),
+            summary = values(summary),
+            updated_at = now()
+    </insert>
+
+</mapper>

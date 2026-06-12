@@ -37,6 +37,7 @@ public class AgentOrchestratorService {
 
     private final LlmClient llmClient;
     private final AgentMemoryService agentMemoryService;
+    private final AgentLongTermMemoryService agentLongTermMemoryService;
     private final ObjectMapper objectMapper;
     private final Map<String, AgentTool> toolsByName;
     private final List<LlmToolDefinition> toolDefinitions;
@@ -44,11 +45,13 @@ public class AgentOrchestratorService {
     public AgentOrchestratorService(
             LlmClient llmClient,
             AgentMemoryService agentMemoryService,
+            AgentLongTermMemoryService agentLongTermMemoryService,
             ObjectMapper objectMapper,
             List<AgentTool> agentTools
     ) {
         this.llmClient = llmClient;
         this.agentMemoryService = agentMemoryService;
+        this.agentLongTermMemoryService = agentLongTermMemoryService;
         this.objectMapper = objectMapper;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
@@ -88,6 +91,7 @@ public class AgentOrchestratorService {
         messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
         emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model(), null));
+        String instructions = buildInstructions(userId);
 
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
@@ -96,7 +100,7 @@ public class AgentOrchestratorService {
 
             LlmResponse response = llmClient.createStreamingResponse(
                     new LlmRequest(
-                            DEFAULT_INSTRUCTIONS,
+                            instructions,
                             messages,
                             toolDefinitions,
                             0.2
@@ -180,6 +184,15 @@ public class AgentOrchestratorService {
 
     private void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
         agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
+        agentLongTermMemoryService.rememberTurn(userId, userPrompt, assistantAnswer);
+    }
+
+    private String buildInstructions(Long userId) {
+        String memoryContext = agentLongTermMemoryService.buildPromptContext(userId);
+        if (memoryContext.isBlank()) {
+            return DEFAULT_INSTRUCTIONS;
+        }
+        return DEFAULT_INSTRUCTIONS + memoryContext;
     }
 
     private String executeTool(
