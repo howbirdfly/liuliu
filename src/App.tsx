@@ -3759,7 +3759,16 @@ export default function App() {
     setAgentPrompt('');
     agentExecutionIdRef.current = executionId;
     agentStopRequestedRef.current = false;
-    const stream = openAgentStream(prompt, executionId);
+    let stream: EventSource;
+    try {
+      stream = await openAgentStream(prompt, executionId);
+    } catch (error) {
+      setIsAgentStreaming(false);
+      agentExecutionIdRef.current = null;
+      finishActiveAgentAssistantMessage('stopped');
+      setAgentStatus(error instanceof Error ? error.message : 'Agent 流式连接初始化失败，请稍后再试。');
+      return;
+    }
     agentStreamRef.current = stream;
     let streamFinished = false;
 
@@ -3815,6 +3824,19 @@ export default function App() {
           return;
         }
 
+        if (payload.type === 'agent_error') {
+          streamFinished = true;
+          setIsAgentStreaming(false);
+          agentExecutionIdRef.current = null;
+          finishActiveAgentAssistantMessage('stopped');
+          setAgentStatus(payload.output ? `Agent 执行异常：${payload.output}` : 'Agent 执行异常，请稍后再试。');
+          stream.close();
+          if (agentStreamRef.current === stream) {
+            agentStreamRef.current = null;
+          }
+          return;
+        }
+
         if (payload.type === 'complete') {
           streamFinished = true;
           setIsAgentStreaming(false);
@@ -3837,6 +3859,7 @@ export default function App() {
     stream.addEventListener('tool_result', handleAgentEvent);
     stream.addEventListener('answer_delta', handleAgentEvent);
     stream.addEventListener('final_answer', handleAgentEvent);
+    stream.addEventListener('agent_error', handleAgentEvent);
     stream.addEventListener('complete', handleAgentEvent);
 
     stream.onerror = () => {

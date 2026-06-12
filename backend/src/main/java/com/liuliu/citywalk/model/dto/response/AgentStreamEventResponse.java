@@ -7,6 +7,7 @@ public record AgentStreamEventResponse(
         String output,
         Integer iteration,
         String provider,
-        String model
+        String model,
+        String code
 ) {
 }

@@ -87,7 +87,7 @@ public class AgentOrchestratorService {
         List<LlmMessage> messages = new ArrayList<>();
         messages.addAll(agentMemoryService.loadConversation(userId));
         messages.add(LlmMessage.user(normalizedPrompt));
-        emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model()));
+        emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model(), null));
 
         List<AgentStepResponse> steps = new ArrayList<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
@@ -110,7 +110,8 @@ public class AgentOrchestratorService {
                                 delta,
                                 currentRound,
                                 llmClient.provider(),
-                                llmClient.model()
+                                llmClient.model(),
+                                null
                         ));
                     }
             );
@@ -127,7 +128,8 @@ public class AgentOrchestratorService {
                             null,
                             round,
                             llmClient.provider(),
-                            llmClient.model()
+                            llmClient.model(),
+                            null
                     ));
                     String toolOutput = executeTool(toolCall, steps, round, executionHandle, listener);
                     messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
@@ -146,7 +148,8 @@ public class AgentOrchestratorService {
                         answer,
                         round,
                         llmClient.provider(),
-                        llmClient.model()
+                        llmClient.model(),
+                        null
                 ));
             }
 
@@ -158,14 +161,14 @@ public class AgentOrchestratorService {
                     llmClient.model()
             );
             rememberConversation(userId, normalizedPrompt, answer);
-            emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model()));
+            emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model(), null));
             return result;
         }
 
         String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
         steps.add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
         rememberConversation(userId, normalizedPrompt, fallback);
-        emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS, llmClient.provider(), llmClient.model()));
+        emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS, llmClient.provider(), llmClient.model(), null));
         return new AgentChatResponse(
                 fallback,
                 steps,
@@ -194,7 +197,7 @@ public class AgentOrchestratorService {
                     "name", toolCall.name()
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), "tool_not_found"));
             return output;
         }
 
@@ -203,7 +206,7 @@ public class AgentOrchestratorService {
             String output = tool.execute(arguments);
             checkCancelled(executionHandle);
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), null));
             return output;
         } catch (AgentExecutionCancelledException error) {
             throw error;
@@ -214,7 +217,7 @@ public class AgentOrchestratorService {
                     "message", safeText(error.getMessage(), "unknown_error")
             ));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model()));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), "tool_execution_failed"));
             return output;
         }
     }
@@ -280,7 +283,8 @@ public class AgentOrchestratorService {
             String output,
             int iteration,
             String provider,
-            String model
+            String model,
+            String code
     ) {
     }
 }
