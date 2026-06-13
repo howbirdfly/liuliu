@@ -102,6 +102,7 @@ import {
   joinCoCreateRoom,
   leaveCoCreateRoom,
   openCoCreateRoomSocket,
+  sendCoCreateRoomSocketPing,
   type CoCreateRoomSocketEvent,
   updateCoCreateRoomState,
   updateCoCreateRoomTheme,
@@ -255,6 +256,11 @@ const MAX_REASONABLE_WALKING_SPEED_MPS = 6;
 const SHORT_INTERVAL_JUMP_WINDOW_MS = 15000;
 const MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS = 120;
 const ACTIVE_ROOM_CODE_STORAGE_KEY = 'citywalk_active_room_code';
+const ROOM_SOCKET_HEARTBEAT_INTERVAL_MS = 15000;
+const ROOM_SOCKET_PONG_TIMEOUT_MS = 10000;
+const ROOM_SOCKET_RECONNECT_BASE_DELAY_MS = 1000;
+const ROOM_SOCKET_RECONNECT_MAX_DELAY_MS = 15000;
+const ROOM_SOCKET_RECONNECT_JITTER_RATIO = 0.35;
 
 declare global {
   interface Window {
@@ -290,6 +296,14 @@ function clearStoredActiveRoomCode() {
     return;
   }
   window.sessionStorage.removeItem(ACTIVE_ROOM_CODE_STORAGE_KEY);
+}
+
+function shouldRetryCoCreateRoomSocket(reason?: string) {
+  const normalizedReason = reason?.trim();
+  if (!normalizedReason) {
+    return true;
+  }
+  return !['login_required', 'room_membership_required', 'room_not_found'].includes(normalizedReason);
 }
 
 function loadAmapJsApi(): Promise<any> {
@@ -2175,6 +2189,11 @@ export default function App() {
   const personalRestoreAttemptedRef = useRef(false);
   const personalSessionSyncTimeoutRef = useRef<number | null>(null);
   const roomSocketRef = useRef<WebSocket | null>(null);
+  const roomSocketReconnectTimerRef = useRef<number | null>(null);
+  const roomSocketReconnectAttemptRef = useRef(0);
+  const roomSocketHeartbeatTimerRef = useRef<number | null>(null);
+  const roomSocketPongTimeoutRef = useRef<number | null>(null);
+  const roomSocketShouldReconnectRef = useRef(false);
   const notificationStreamRef = useRef<EventSource | null>(null);
   const agentStreamRef = useRef<EventSource | null>(null);
   const agentExecutionIdRef = useRef<string | null>(null);
@@ -2835,11 +2854,42 @@ export default function App() {
       }));
   }, [coCreateRoom, currentPosition, path, user]);
 
-  const closeCoCreateRoomSocket = () => {
-    roomSocketRef.current?.close();
+  const clearRoomSocketReconnectTimer = () => {
+    if (roomSocketReconnectTimerRef.current !== null) {
+      window.clearTimeout(roomSocketReconnectTimerRef.current);
+      roomSocketReconnectTimerRef.current = null;
+    }
+  };
+
+  const clearRoomSocketHeartbeat = () => {
+    if (roomSocketHeartbeatTimerRef.current !== null) {
+      window.clearInterval(roomSocketHeartbeatTimerRef.current);
+      roomSocketHeartbeatTimerRef.current = null;
+    }
+    if (roomSocketPongTimeoutRef.current !== null) {
+      window.clearTimeout(roomSocketPongTimeoutRef.current);
+      roomSocketPongTimeoutRef.current = null;
+    }
+  };
+
+  const resetRoomSocketReconnectState = () => {
+    roomSocketReconnectAttemptRef.current = 0;
+    clearRoomSocketReconnectTimer();
+  };
+
+  const closeCoCreateRoomSocket = (options?: { keepReconnectIntent?: boolean }) => {
+    if (!options?.keepReconnectIntent) {
+      roomSocketShouldReconnectRef.current = false;
+      resetRoomSocketReconnectState();
+    }
+    clearRoomSocketHeartbeat();
+    const socket = roomSocketRef.current;
     roomSocketRef.current = null;
     setIsRoomSocketConnected(false);
     setIsRoomSocketConnecting(false);
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      socket.close();
+    }
   };
 
   const applyCoCreateRoom = (room: CoCreateRoom, options?: { syncTheme?: boolean }) => {
@@ -2934,53 +2984,140 @@ export default function App() {
       return;
     }
 
-    setIsRoomSocketConnecting(true);
-    const socket = openCoCreateRoomSocket(coCreateRoom.roomCode);
-    roomSocketRef.current = socket;
+    const roomCode = coCreateRoom.roomCode;
+    let isDisposed = false;
+    roomSocketShouldReconnectRef.current = true;
 
-    socket.onopen = () => {
-      setIsRoomSocketConnecting(false);
-      setIsRoomSocketConnected(true);
+    const scheduleReconnect = () => {
+      if (isDisposed || !roomSocketShouldReconnectRef.current) {
+        return;
+      }
+      clearRoomSocketReconnectTimer();
+      const attempt = roomSocketReconnectAttemptRef.current;
+      const baseDelay = Math.min(
+        ROOM_SOCKET_RECONNECT_MAX_DELAY_MS,
+        ROOM_SOCKET_RECONNECT_BASE_DELAY_MS * 2 ** attempt,
+      );
+      const jitter = Math.round(baseDelay * ROOM_SOCKET_RECONNECT_JITTER_RATIO * Math.random());
+      const delay = Math.min(ROOM_SOCKET_RECONNECT_MAX_DELAY_MS, baseDelay + jitter);
+      roomSocketReconnectAttemptRef.current = attempt + 1;
+      setIsRoomSocketConnecting(true);
+      roomSocketReconnectTimerRef.current = window.setTimeout(() => {
+        roomSocketReconnectTimerRef.current = null;
+        connectSocket();
+      }, delay);
     };
 
-    socket.onmessage = (event) => {
-      try {
+    const armPongTimeout = (socket: WebSocket) => {
+      if (roomSocketPongTimeoutRef.current !== null) {
+        window.clearTimeout(roomSocketPongTimeoutRef.current);
+      }
+      roomSocketPongTimeoutRef.current = window.setTimeout(() => {
+        if (roomSocketRef.current === socket && socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+      }, ROOM_SOCKET_PONG_TIMEOUT_MS);
+    };
+
+    const startHeartbeat = (socket: WebSocket) => {
+      clearRoomSocketHeartbeat();
+      const sendPing = () => {
+        if (roomSocketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        try {
+          sendCoCreateRoomSocketPing(socket);
+          armPongTimeout(socket);
+        } catch (error) {
+          console.error('Send co-create room websocket ping error:', error);
+          socket.close();
+        }
+      };
+      sendPing();
+      roomSocketHeartbeatTimerRef.current = window.setInterval(sendPing, ROOM_SOCKET_HEARTBEAT_INTERVAL_MS);
+    };
+
+    const connectSocket = () => {
+      if (isDisposed || !roomSocketShouldReconnectRef.current) {
+        return;
+      }
+      if (
+        roomSocketRef.current &&
+        (roomSocketRef.current.readyState === WebSocket.OPEN || roomSocketRef.current.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
+
+      clearRoomSocketHeartbeat();
+      setIsRoomSocketConnecting(true);
+      const socket = openCoCreateRoomSocket(roomCode);
+      roomSocketRef.current = socket;
+
+      socket.onopen = () => {
+        if (isDisposed || roomSocketRef.current !== socket) {
+          socket.close();
+          return;
+        }
+        resetRoomSocketReconnectState();
+        setIsRoomSocketConnecting(false);
+        setIsRoomSocketConnected(true);
+        startHeartbeat(socket);
+      };
+
+      socket.onmessage = (event) => {
+        try {
         const payload = JSON.parse(event.data) as CoCreateRoomSocketEvent;
+        if (payload.type === 'pong') {
+          if (roomSocketPongTimeoutRef.current !== null) {
+            window.clearTimeout(roomSocketPongTimeoutRef.current);
+            roomSocketPongTimeoutRef.current = null;
+          }
+          return;
+        }
         if (payload.type === 'room_snapshot' && payload.room) {
           applyCoCreateRoom(payload.room);
           return;
         }
-        if (payload.type === 'room_closed' && payload.roomCode === coCreateRoom.roomCode) {
+        if (payload.type === 'room_closed' && payload.roomCode === roomCode) {
+          roomSocketShouldReconnectRef.current = false;
+          resetRoomSocketReconnectState();
           clearStoredActiveRoomCode();
           roomRestoreAttemptedRef.current = false;
           setCoCreateRoom(null);
           setRoomMessage('房间已解散。');
           setRoomError('');
+          closeCoCreateRoomSocket({ keepReconnectIntent: true });
         }
-      } catch (error) {
-        console.error('Parse co-create room websocket payload error:', error);
-      }
+        } catch (error) {
+          console.error('Parse co-create room websocket payload error:', error);
+        }
+      };
+
+      socket.onclose = (event) => {
+        clearRoomSocketHeartbeat();
+        if (roomSocketRef.current === socket) {
+          roomSocketRef.current = null;
+          setIsRoomSocketConnecting(false);
+          setIsRoomSocketConnected(false);
+          if (!isDisposed && roomSocketShouldReconnectRef.current && shouldRetryCoCreateRoomSocket(event.reason)) {
+            scheduleReconnect();
+          }
+        }
+      };
+
+      socket.onerror = () => {
+        if (roomSocketRef.current === socket) {
+          setIsRoomSocketConnecting(false);
+          setIsRoomSocketConnected(false);
+        }
+      };
     };
 
-    socket.onclose = () => {
-      if (roomSocketRef.current === socket) {
-        roomSocketRef.current = null;
-        setIsRoomSocketConnecting(false);
-        setIsRoomSocketConnected(false);
-      }
-    };
-
-    socket.onerror = () => {
-      setIsRoomSocketConnecting(false);
-      setIsRoomSocketConnected(false);
-    };
+    connectSocket();
 
     return () => {
-      if (roomSocketRef.current === socket) {
-        closeCoCreateRoomSocket();
-      } else if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-        socket.close();
-      }
+      isDisposed = true;
+      closeCoCreateRoomSocket();
     };
   }, [coCreateRoom?.roomCode, user, walkMode]);
 

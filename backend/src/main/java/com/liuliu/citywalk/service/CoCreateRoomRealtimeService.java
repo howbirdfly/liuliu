@@ -61,7 +61,14 @@ public class CoCreateRoomRealtimeService {
         if (session == null || room == null || !session.isOpen()) {
             return;
         }
-        send(session, new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room));
+        send(roomCode, session, new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room));
+    }
+
+    public void sendPong(String roomCode, WebSocketSession session) {
+        if (roomCode == null || roomCode.isBlank() || session == null || !session.isOpen()) {
+            return;
+        }
+        send(roomCode, session, new CoCreateRoomSocketEventResponse("pong", roomCode, null));
     }
 
     private void broadcast(String roomCode, CoCreateRoomSocketEventResponse payload) {
@@ -70,18 +77,30 @@ public class CoCreateRoomRealtimeService {
             return;
         }
         for (WebSocketSession session : sessions) {
-            send(session, payload);
+            send(roomCode, session, payload);
         }
     }
 
-    private void send(WebSocketSession session, CoCreateRoomSocketEventResponse payload) {
-        if (session == null || payload == null || !session.isOpen()) {
+    private void send(String roomCode, WebSocketSession session, CoCreateRoomSocketEventResponse payload) {
+        if (session == null || payload == null) {
+            return;
+        }
+        if (!session.isOpen()) {
+            unregister(roomCode, session);
             return;
         }
         try {
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(payload)));
         } catch (Exception error) {
             log.warn("Failed to push co-create room websocket event: {}", error.getMessage());
+            unregister(roomCode, session);
+            try {
+                if (session.isOpen()) {
+                    session.close();
+                }
+            } catch (Exception closeError) {
+                log.debug("Failed to close co-create room websocket session after send failure: {}", closeError.getMessage());
+            }
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.liuliu.citywalk.websocket;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomResponse;
 import com.liuliu.citywalk.service.CoCreateRoomRealtimeService;
 import com.liuliu.citywalk.service.CoCreateRoomService;
@@ -22,15 +24,18 @@ public class CoCreateRoomWebSocketHandler extends TextWebSocketHandler {
 
     private static final String ROOM_CODE_KEY = "roomCode";
 
+    private final ObjectMapper objectMapper;
     private final UserSessionService userSessionService;
     private final CoCreateRoomService coCreateRoomService;
     private final CoCreateRoomRealtimeService coCreateRoomRealtimeService;
 
     public CoCreateRoomWebSocketHandler(
+            ObjectMapper objectMapper,
             UserSessionService userSessionService,
             CoCreateRoomService coCreateRoomService,
             CoCreateRoomRealtimeService coCreateRoomRealtimeService
     ) {
+        this.objectMapper = objectMapper;
         this.userSessionService = userSessionService;
         this.coCreateRoomService = coCreateRoomService;
         this.coCreateRoomRealtimeService = coCreateRoomRealtimeService;
@@ -62,7 +67,18 @@ public class CoCreateRoomWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
-        // This first version uses WebSocket for server push only.
+        Object roomCode = session.getAttributes().get(ROOM_CODE_KEY);
+        if (!(roomCode instanceof String value)) {
+            return;
+        }
+        try {
+            JsonNode payload = objectMapper.readTree(message.getPayload());
+            if ("ping".equalsIgnoreCase(payload.path("type").asText())) {
+                coCreateRoomRealtimeService.sendPong(value, session);
+            }
+        } catch (Exception ignored) {
+            // Ignore malformed client messages and keep the server push channel alive.
+        }
     }
 
     @Override

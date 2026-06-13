@@ -33,12 +33,16 @@ export interface CoCreateRoom {
   createdAt?: number;
 }
 
-export type CoCreateRoomSocketEventType = 'room_snapshot' | 'room_closed';
+export type CoCreateRoomSocketEventType = 'room_snapshot' | 'room_closed' | 'pong';
 
 export interface CoCreateRoomSocketEvent {
   type: CoCreateRoomSocketEventType;
   roomCode: string;
   room?: CoCreateRoom | null;
+}
+
+export interface CoCreateRoomSocketClientEvent {
+  type: 'ping';
 }
 
 export interface CreateCoCreateRoomPayload {
@@ -107,4 +111,9 @@ export function openCoCreateRoomSocket(roomCode: string): WebSocket {
     ...(token ? { token } : {}),
   });
   return new WebSocket(`${wsBaseUrl}/ws/co-create?${params.toString()}`);
+}
+
+export function sendCoCreateRoomSocketPing(socket: WebSocket) {
+  const payload: CoCreateRoomSocketClientEvent = { type: 'ping' };
+  socket.send(JSON.stringify(payload));
 }
