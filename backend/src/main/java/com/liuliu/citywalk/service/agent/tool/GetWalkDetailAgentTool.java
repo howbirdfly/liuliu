@@ -49,11 +49,13 @@ public class GetWalkDetailAgentTool extends AbstractJsonAgentTool {
         WalkResponse walk = walkId <= 0 ? null : walkService.getDetail(walkId);
         if (walk == null || !Boolean.TRUE.equals(walk.isPublic())) {
             return json(Map.of(
+                    "success", true,
                     "walkId", walkId,
                     "found", false
             ));
         }
         return json(Map.of(
+                "success", true,
                 "walkId", walkId,
                 "found", true,
                 "result", walk

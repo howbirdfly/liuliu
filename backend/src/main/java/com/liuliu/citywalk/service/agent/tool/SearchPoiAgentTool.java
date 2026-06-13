@@ -53,6 +53,7 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
         payload.put("results", searchResult.results());
         if (searchResult.error() != null) {
             payload.put("error", searchResult.error());
+            payload.put("fallbackSuggestion", "地图结果不可用时，可以继续参考社区公开攻略和用户已给出的区域偏好，提供保守路线建议。");
         }
         if (searchResult.message() != null) {
             payload.put("message", searchResult.message());

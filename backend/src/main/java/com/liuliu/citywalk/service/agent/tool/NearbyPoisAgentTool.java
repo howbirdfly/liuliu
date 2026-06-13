@@ -56,6 +56,7 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
         payload.put("results", searchResult.results());
         if (searchResult.error() != null) {
             payload.put("error", searchResult.error());
+            payload.put("fallbackSuggestion", "附近兴趣点检索失败时，可以改用区域级推荐，不要假设具体 POI 已经确认。");
         }
         if (searchResult.message() != null) {
             payload.put("message", searchResult.message());

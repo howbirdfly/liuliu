@@ -189,10 +189,15 @@ public class AgentOrchestratorService {
 
     private String buildInstructions(Long userId) {
         String memoryContext = agentLongTermMemoryService.buildPromptContext(userId);
+        String fallbackGuide = """
+
+                如果工具返回 success=false，或者包含 error / fallbackSuggestion 字段，说明这一步没有拿到可靠工具结果。
+                这种情况下不要假装拿到了真实数据，要结合已有上下文、其他工具结果和常识继续给出保守建议，并明确说明哪些信息缺少工具支撑。
+                """;
         if (memoryContext.isBlank()) {
-            return DEFAULT_INSTRUCTIONS;
+            return DEFAULT_INSTRUCTIONS + fallbackGuide;
         }
-        return DEFAULT_INSTRUCTIONS + memoryContext;
+        return DEFAULT_INSTRUCTIONS + memoryContext + fallbackGuide;
     }
 
     private String executeTool(
@@ -205,10 +210,7 @@ public class AgentOrchestratorService {
         checkCancelled(executionHandle);
         AgentTool tool = toolsByName.get(toolCall.name());
         if (tool == null) {
-            String output = json(Map.of(
-                    "error", "tool_not_found",
-                    "name", toolCall.name()
-            ));
+            String output = buildToolFailureOutput(toolCall.name(), "tool_not_found", "tool_not_found");
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), "tool_not_found"));
             return output;
@@ -224,13 +226,10 @@ public class AgentOrchestratorService {
         } catch (AgentExecutionCancelledException error) {
             throw error;
         } catch (Exception error) {
-            String output = json(Map.of(
-                    "error", "tool_execution_failed",
-                    "name", toolCall.name(),
-                    "message", safeText(error.getMessage(), "unknown_error")
-            ));
+            String errorCode = error instanceof IllegalArgumentException ? "tool_arguments_invalid" : "tool_execution_failed";
+            String output = buildToolFailureOutput(toolCall.name(), errorCode, safeText(error.getMessage(), "unknown_error"));
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), "tool_execution_failed"));
+            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), errorCode));
             return output;
         }
     }
@@ -243,8 +242,46 @@ public class AgentOrchestratorService {
             return objectMapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {
             });
         } catch (Exception error) {
-            return Map.of();
+            throw new IllegalArgumentException("tool_arguments_invalid");
         }
+    }
+
+    private String buildToolFailureOutput(String toolName, String errorCode, String message) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("success", false);
+        payload.put("error", errorCode);
+        payload.put("name", toolName);
+        payload.put("message", message);
+        payload.put("canContinue", true);
+        payload.put("fallbackSuggestion", fallbackSuggestion(toolName, errorCode));
+
+        switch (toolName) {
+            case "search_poi", "nearby_pois", "search_community_guides", "search_knowledge_base" -> payload.put("results", List.of());
+            case "get_walk_detail" -> payload.put("found", false);
+            default -> {
+            }
+        }
+
+        return json(payload);
+    }
+
+    private String fallbackSuggestion(String toolName, String errorCode) {
+        String suggestion = switch (toolName) {
+            case "search_knowledge_base" ->
+                    "知识库结果不可用时，继续结合地图工具、社区公开内容和已有上下文给出建议，并明确说明知识库未成功返回。";
+            case "search_community_guides" ->
+                    "社区攻略检索失败时，优先回退到地图搜索和通用路线建议，不要编造具体帖子内容。";
+            case "search_poi", "nearby_pois" ->
+                    "地图工具失败时，可以基于用户已提供的区域、历史偏好和其他工具结果给出保守建议，并说明地点准确性有限。";
+            case "get_walk_detail" ->
+                    "单条 Walk 详情获取失败时，不要假设帖子细节存在，继续基于已有公开信息给出概括性建议。";
+            default ->
+                    "工具未成功返回可靠结果时，基于已有上下文继续回答，并明确告知用户这一步缺少工具支撑。";
+        };
+        if ("tool_arguments_invalid".equals(errorCode)) {
+            return suggestion + " 这次失败也可能是工具参数不完整或格式不正确。";
+        }
+        return suggestion;
     }
 
     private String normalizeAssistantAnswer(String content) {

@@ -50,6 +50,7 @@ public class SearchCommunityWalksAgentTool extends AbstractJsonAgentTool {
         int page = Math.max(1, intArg(arguments, "page", 1));
         int pageSize = Math.min(Math.max(1, intArg(arguments, "pageSize", 5)), 10);
         return json(Map.of(
+                "success", true,
                 "keyword", keyword,
                 "page", page,
                 "pageSize", pageSize,

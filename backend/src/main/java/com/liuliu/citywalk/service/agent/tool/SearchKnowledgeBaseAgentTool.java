@@ -67,6 +67,7 @@ public class SearchKnowledgeBaseAgentTool extends AbstractJsonAgentTool {
 
         List<KnowledgeHit> hits = knowledgeSearchService.search(query, topK, filters);
         return json(Map.of(
+                "success", true,
                 "query", query,
                 "topK", topK,
                 "sourceType", sourceType,
