@@ -33,12 +33,23 @@ export interface CoCreateRoom {
   createdAt?: number;
 }
 
-export type CoCreateRoomSocketEventType = 'room_snapshot' | 'room_closed' | 'pong';
+export type CoCreateRoomSocketEventType =
+  | 'room_snapshot'
+  | 'room_closed'
+  | 'pong'
+  | 'member_joined'
+  | 'member_left'
+  | 'member_state_updated'
+  | 'theme_updated';
 
 export interface CoCreateRoomSocketEvent {
   type: CoCreateRoomSocketEventType;
   roomCode: string;
   room?: CoCreateRoom | null;
+  member?: CoCreateRoomMember | null;
+  memberUserId?: number | null;
+  theme?: CoCreateRoomTheme | null;
+  ownerUserId?: number | null;
 }
 
 export interface CoCreateRoomSocketClientEvent {

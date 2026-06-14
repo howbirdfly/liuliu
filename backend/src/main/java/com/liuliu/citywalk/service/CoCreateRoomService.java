@@ -86,6 +86,7 @@ public class CoCreateRoomService {
                 .orElseThrow(() -> new IllegalStateException("room_not_found"));
 
         Optional<MemberRecord> existingMember = findMember(room.id(), user.id());
+        boolean newMemberJoined = existingMember.isEmpty();
         if (existingMember.isEmpty()) {
             int memberCount = countMembers(room.id());
             if (memberCount >= MEMBER_LIMIT) {
@@ -98,7 +99,16 @@ public class CoCreateRoomService {
         }
 
         CoCreateRoomResponse response = getRoom(authorizationHeader, room.roomCode());
-        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        if (newMemberJoined) {
+            findMemberResponse(response, user.id())
+                    .ifPresent(member -> coCreateRoomRealtimeService.broadcastMemberJoined(
+                            response.roomCode(),
+                            member,
+                            response.ownerUserId()
+                    ));
+        } else {
+            coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        }
         return response;
     }
 
@@ -140,7 +150,12 @@ public class CoCreateRoomService {
         );
 
         CoCreateRoomResponse response = toResponse(findRoomById(room.id()).orElseThrow(() -> new IllegalStateException("room_not_found")));
-        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        findMemberResponse(response, user.id())
+                .ifPresent(member -> coCreateRoomRealtimeService.broadcastMemberStateUpdated(
+                        response.roomCode(),
+                        member,
+                        response.ownerUserId()
+                ));
         return response;
     }
 
@@ -154,7 +169,13 @@ public class CoCreateRoomService {
         }
         roomMapper.updateRoomTheme(room.id(), writeJson(normalizeTheme(request.theme())));
         CoCreateRoomResponse response = getRoom(authorizationHeader, room.roomCode());
-        coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response);
+        if (response.theme() != null) {
+            coCreateRoomRealtimeService.broadcastThemeUpdated(
+                    response.roomCode(),
+                    response.theme(),
+                    response.ownerUserId()
+            );
+        }
         return response;
     }
 
@@ -179,7 +200,11 @@ public class CoCreateRoomService {
 
         findRoomById(room.id())
                 .map(this::toResponse)
-                .ifPresent(response -> coCreateRoomRealtimeService.broadcastRoomSnapshot(response.roomCode(), response));
+                .ifPresent(response -> coCreateRoomRealtimeService.broadcastMemberLeft(
+                        response.roomCode(),
+                        user.id(),
+                        response.ownerUserId()
+                ));
     }
 
     private CoCreateRoomResponse toResponse(RoomRecord room) {
@@ -203,6 +228,15 @@ public class CoCreateRoomService {
                 )).toList(),
                 room.createdAt()
         );
+    }
+
+    private Optional<CoCreateRoomMemberResponse> findMemberResponse(CoCreateRoomResponse room, Long userId) {
+        if (room == null || userId == null || room.members() == null) {
+            return Optional.empty();
+        }
+        return room.members().stream()
+                .filter(member -> userId.equals(member.userId()))
+                .findFirst();
     }
 
     private RoomRecord createRoomRecord(String roomCode, Long ownerUserId, String themeSnapshotJson) {

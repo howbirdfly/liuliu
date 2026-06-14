@@ -2919,6 +2919,76 @@ export default function App() {
     }
   };
 
+  const applyRoomOwnerToMembers = (members: CoCreateRoomMember[], ownerUserId: number): CoCreateRoomMember[] =>
+    members.map((member) => ({
+      ...member,
+      isOwner: member.userId === ownerUserId,
+    }));
+
+  const applyCoCreateRoomSocketEvent = (payload: CoCreateRoomSocketEvent) => {
+    if (payload.type === 'theme_updated' && payload.theme) {
+      setCurrentTheme({
+        title: payload.theme.title,
+        description: payload.theme.description,
+        category: payload.theme.category,
+        missions: payload.theme.missions || [],
+        vibeColor: payload.theme.vibeColor || '#334155',
+        provider: payload.theme.provider,
+        coverImageUrl: payload.theme.coverImageUrl,
+      });
+    }
+
+    setCoCreateRoom((previousRoom) => {
+      if (!previousRoom || previousRoom.roomCode !== payload.roomCode) {
+        return previousRoom;
+      }
+
+      const nextOwnerUserId = payload.ownerUserId ?? previousRoom.ownerUserId;
+
+      if (payload.type === 'member_joined' && payload.member) {
+        const members = previousRoom.members.some((member) => member.userId === payload.member.userId)
+          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member : member))
+          : [...previousRoom.members, payload.member];
+        return {
+          ...previousRoom,
+          ownerUserId: nextOwnerUserId,
+          members: applyRoomOwnerToMembers(members, nextOwnerUserId),
+        };
+      }
+
+      if (payload.type === 'member_state_updated' && payload.member) {
+        const nextMembers = previousRoom.members.some((member) => member.userId === payload.member.userId)
+          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member : member))
+          : [...previousRoom.members, payload.member];
+        return {
+          ...previousRoom,
+          ownerUserId: nextOwnerUserId,
+          members: applyRoomOwnerToMembers(nextMembers, nextOwnerUserId),
+        };
+      }
+
+      if (payload.type === 'member_left' && payload.memberUserId) {
+        const members = previousRoom.members.filter((member) => member.userId !== payload.memberUserId);
+        return {
+          ...previousRoom,
+          ownerUserId: nextOwnerUserId,
+          members: applyRoomOwnerToMembers(members, nextOwnerUserId),
+        };
+      }
+
+      if (payload.type === 'theme_updated' && payload.theme) {
+        return {
+          ...previousRoom,
+          ownerUserId: nextOwnerUserId,
+          theme: payload.theme,
+          members: applyRoomOwnerToMembers(previousRoom.members, nextOwnerUserId),
+        };
+      }
+
+      return previousRoom;
+    });
+  };
+
   const handleSelectWalkMode = (nextMode: 'pure' | 'advanced') => {
     if (nextMode === 'pure' && coCreateRoom) {
       setRoomMessage('当前已在共创房间中，请先退出房间再切回纯净模式。');
@@ -3076,6 +3146,15 @@ export default function App() {
         }
         if (payload.type === 'room_snapshot' && payload.room) {
           applyCoCreateRoom(payload.room);
+          return;
+        }
+        if (
+          payload.type === 'member_joined' ||
+          payload.type === 'member_left' ||
+          payload.type === 'member_state_updated' ||
+          payload.type === 'theme_updated'
+        ) {
+          applyCoCreateRoomSocketEvent(payload);
           return;
         }
         if (payload.type === 'room_closed' && payload.roomCode === roomCode) {

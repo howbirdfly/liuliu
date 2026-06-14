@@ -2,8 +2,10 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.CoCreateRoomProperties;
+import com.liuliu.citywalk.model.dto.response.CoCreateRoomMemberResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomSocketEventResponse;
+import com.liuliu.citywalk.model.dto.response.CoCreateRoomThemeResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -59,7 +61,15 @@ public class CoCreateRoomRealtimeService {
         if (roomCode == null || roomCode.isBlank() || room == null) {
             return;
         }
-        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room);
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "room_snapshot",
+                roomCode,
+                room,
+                null,
+                null,
+                null,
+                room.ownerUserId()
+        );
         broadcast(roomCode, payload);
         publishClusterEvent(payload);
     }
@@ -68,7 +78,83 @@ public class CoCreateRoomRealtimeService {
         if (roomCode == null || roomCode.isBlank()) {
             return;
         }
-        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse("room_closed", roomCode, null);
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "room_closed",
+                roomCode,
+                null,
+                null,
+                null,
+                null,
+                null
+        );
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
+    }
+
+    public void broadcastMemberJoined(String roomCode, CoCreateRoomMemberResponse member, Long ownerUserId) {
+        if (roomCode == null || roomCode.isBlank() || member == null) {
+            return;
+        }
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "member_joined",
+                roomCode,
+                null,
+                member,
+                member.userId(),
+                null,
+                ownerUserId
+        );
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
+    }
+
+    public void broadcastMemberLeft(String roomCode, Long memberUserId, Long ownerUserId) {
+        if (roomCode == null || roomCode.isBlank() || memberUserId == null || memberUserId <= 0) {
+            return;
+        }
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "member_left",
+                roomCode,
+                null,
+                null,
+                memberUserId,
+                null,
+                ownerUserId
+        );
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
+    }
+
+    public void broadcastMemberStateUpdated(String roomCode, CoCreateRoomMemberResponse member, Long ownerUserId) {
+        if (roomCode == null || roomCode.isBlank() || member == null) {
+            return;
+        }
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "member_state_updated",
+                roomCode,
+                null,
+                member,
+                member.userId(),
+                null,
+                ownerUserId
+        );
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
+    }
+
+    public void broadcastThemeUpdated(String roomCode, CoCreateRoomThemeResponse theme, Long ownerUserId) {
+        if (roomCode == null || roomCode.isBlank() || theme == null) {
+            return;
+        }
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "theme_updated",
+                roomCode,
+                null,
+                null,
+                null,
+                theme,
+                ownerUserId
+        );
         broadcast(roomCode, payload);
         publishClusterEvent(payload);
     }
@@ -77,14 +163,30 @@ public class CoCreateRoomRealtimeService {
         if (session == null || room == null || !session.isOpen()) {
             return;
         }
-        send(roomCode, session, new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room));
+        send(roomCode, session, new CoCreateRoomSocketEventResponse(
+                "room_snapshot",
+                roomCode,
+                room,
+                null,
+                null,
+                null,
+                room.ownerUserId()
+        ));
     }
 
     public void sendPong(String roomCode, WebSocketSession session) {
         if (roomCode == null || roomCode.isBlank() || session == null || !session.isOpen()) {
             return;
         }
-        send(roomCode, session, new CoCreateRoomSocketEventResponse("pong", roomCode, null));
+        send(roomCode, session, new CoCreateRoomSocketEventResponse(
+                "pong",
+                roomCode,
+                null,
+                null,
+                null,
+                null,
+                null
+        ));
     }
 
     public void handleClusterBroadcast(String message) {
