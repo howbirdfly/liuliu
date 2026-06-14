@@ -1,16 +1,19 @@
 package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.config.CoCreateRoomProperties;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomSocketEventResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -19,10 +22,19 @@ public class CoCreateRoomRealtimeService {
     private static final Logger log = LoggerFactory.getLogger(CoCreateRoomRealtimeService.class);
 
     private final ObjectMapper objectMapper;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final CoCreateRoomProperties coCreateRoomProperties;
     private final Map<String, Set<WebSocketSession>> sessionsByRoomCode = new ConcurrentHashMap<>();
+    private final String instanceId = UUID.randomUUID().toString();
 
-    public CoCreateRoomRealtimeService(ObjectMapper objectMapper) {
+    public CoCreateRoomRealtimeService(
+            ObjectMapper objectMapper,
+            StringRedisTemplate stringRedisTemplate,
+            CoCreateRoomProperties coCreateRoomProperties
+    ) {
         this.objectMapper = objectMapper;
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.coCreateRoomProperties = coCreateRoomProperties;
     }
 
     public void register(String roomCode, WebSocketSession session) {
@@ -47,14 +59,18 @@ public class CoCreateRoomRealtimeService {
         if (roomCode == null || roomCode.isBlank() || room == null) {
             return;
         }
-        broadcast(roomCode, new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room));
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse("room_snapshot", roomCode, room);
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
     }
 
     public void broadcastRoomClosed(String roomCode) {
         if (roomCode == null || roomCode.isBlank()) {
             return;
         }
-        broadcast(roomCode, new CoCreateRoomSocketEventResponse("room_closed", roomCode, null));
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse("room_closed", roomCode, null);
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
     }
 
     public void sendRoomSnapshot(String roomCode, WebSocketSession session, CoCreateRoomResponse room) {
@@ -69,6 +85,29 @@ public class CoCreateRoomRealtimeService {
             return;
         }
         send(roomCode, session, new CoCreateRoomSocketEventResponse("pong", roomCode, null));
+    }
+
+    public void handleClusterBroadcast(String message) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+        try {
+            ClusterBroadcastEvent event = objectMapper.readValue(message, ClusterBroadcastEvent.class);
+            if (event == null || event.payload() == null) {
+                return;
+            }
+            if (instanceId.equals(event.originInstanceId())) {
+                return;
+            }
+            CoCreateRoomSocketEventResponse payload = event.payload();
+            String roomCode = payload.roomCode();
+            if (roomCode == null || roomCode.isBlank()) {
+                return;
+            }
+            broadcast(roomCode, payload);
+        } catch (Exception error) {
+            log.warn("Failed to consume co-create room cluster broadcast: {}", error.getMessage());
+        }
     }
 
     private void broadcast(String roomCode, CoCreateRoomSocketEventResponse payload) {
@@ -102,5 +141,27 @@ public class CoCreateRoomRealtimeService {
                 log.debug("Failed to close co-create room websocket session after send failure: {}", closeError.getMessage());
             }
         }
+    }
+
+    private void publishClusterEvent(CoCreateRoomSocketEventResponse payload) {
+        if (payload == null || !coCreateRoomProperties.isClusterBroadcastEnabled()) {
+            return;
+        }
+        String channel = coCreateRoomProperties.getClusterBroadcastChannel();
+        if (channel == null || channel.isBlank()) {
+            return;
+        }
+        try {
+            String message = objectMapper.writeValueAsString(new ClusterBroadcastEvent(instanceId, payload));
+            stringRedisTemplate.convertAndSend(channel, message);
+        } catch (Exception error) {
+            log.warn("Failed to publish co-create room cluster broadcast: {}", error.getMessage());
+        }
+    }
+
+    private record ClusterBroadcastEvent(
+            String originInstanceId,
+            CoCreateRoomSocketEventResponse payload
+    ) {
     }
 }

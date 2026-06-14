@@ -70,6 +70,8 @@ liuliu:
     enabled: ${LIULIU_RAG_ENABLED:false}
   co-create-room:
     member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
+    cluster-broadcast-enabled: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:true}
+    cluster-broadcast-channel: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_CHANNEL:liuliu:co-create:realtime}
   redis:
     notification-cache:
       enabled: ${NOTIFICATION_CACHE_ENABLED:true}
