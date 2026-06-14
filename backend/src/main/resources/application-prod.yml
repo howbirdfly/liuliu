@@ -68,6 +68,9 @@ jwt:
 liuliu:
   rag:
     enabled: ${LIULIU_RAG_ENABLED:false}
+    rerank-enabled: ${LIULIU_RAG_RERANK_ENABLED:true}
+    rerank-candidate-multiplier: ${LIULIU_RAG_RERANK_CANDIDATE_MULTIPLIER:4}
+    rerank-candidate-max-top-k: ${LIULIU_RAG_RERANK_CANDIDATE_MAX_TOP_K:20}
   co-create-room:
     member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
     cluster-broadcast-enabled: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:true}
