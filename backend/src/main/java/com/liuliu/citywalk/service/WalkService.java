@@ -16,6 +16,9 @@ import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
 import com.liuliu.citywalk.model.dto.response.RoomMemberTrackResponse;
 import com.liuliu.citywalk.model.dto.response.WalkResponse;
 import com.liuliu.citywalk.model.dto.response.WalkThemeSnapshotResponse;
+import com.liuliu.citywalk.service.rag.CommunityKnowledgeIngestionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,14 +32,23 @@ import java.util.stream.Collectors;
 @Service
 public class WalkService {
 
+    private static final Logger log = LoggerFactory.getLogger(WalkService.class);
+
     private final WalkRecordMapper walkRecordMapper;
     private final UserMapper userMapper;
     private final ObjectMapper objectMapper;
+    private final CommunityKnowledgeIngestionService communityKnowledgeIngestionService;
 
-    public WalkService(WalkRecordMapper walkRecordMapper, UserMapper userMapper, ObjectMapper objectMapper) {
+    public WalkService(
+            WalkRecordMapper walkRecordMapper,
+            UserMapper userMapper,
+            ObjectMapper objectMapper,
+            CommunityKnowledgeIngestionService communityKnowledgeIngestionService
+    ) {
         this.walkRecordMapper = walkRecordMapper;
         this.userMapper = userMapper;
         this.objectMapper = objectMapper;
+        this.communityKnowledgeIngestionService = communityKnowledgeIngestionService;
     }
 
     public WalkResponse create(Long userId, CreateWalkRequest request) {
@@ -71,7 +83,11 @@ public class WalkService {
         if (!tags.isEmpty()) {
             walkRecordMapper.insertTags(entity.getId(), tags);
         }
-        return getDetail(entity.getId());
+        WalkResponse response = getDetail(entity.getId());
+        if (Boolean.TRUE.equals(entity.getIsPublic())) {
+            syncWalkKnowledgeSafely(entity.getId());
+        }
+        return response;
     }
 
     public List<WalkResponse> listMyWalks(Long userId, int limit) {
@@ -107,6 +123,9 @@ public class WalkService {
         }
 
         walkRecordMapper.softDeleteById(walkId);
+        if (Boolean.TRUE.equals(walk.getIsPublic())) {
+            removeWalkKnowledgeSafely(walkId);
+        }
         return new OperationResultResponse(Boolean.TRUE);
     }
 
@@ -145,7 +164,29 @@ public class WalkService {
             walkRecordMapper.insertTags(walkId, nextTags);
         }
 
-        return getDetail(walkId);
+        WalkResponse response = getDetail(walkId);
+        if (nextPublic) {
+            syncWalkKnowledgeSafely(walkId);
+        } else if (Boolean.TRUE.equals(walk.getIsPublic())) {
+            removeWalkKnowledgeSafely(walkId);
+        }
+        return response;
+    }
+
+    private void syncWalkKnowledgeSafely(Long walkId) {
+        try {
+            communityKnowledgeIngestionService.syncPublicWalkById(walkId);
+        } catch (Exception error) {
+            log.warn("Sync public walk knowledge failed, walkId={}", walkId, error);
+        }
+    }
+
+    private void removeWalkKnowledgeSafely(Long walkId) {
+        try {
+            communityKnowledgeIngestionService.removeWalkById(walkId);
+        } catch (Exception error) {
+            log.warn("Remove public walk knowledge failed, walkId={}", walkId, error);
+        }
     }
 
     private WalkResponse toWalkResponse(WalkRecordEntity entity) {

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.mapper.CommunityMapper;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,27 +16,34 @@ import java.util.Map;
 @Service
 public class CommunityKnowledgeIngestionService {
 
+    private static final Logger log = LoggerFactory.getLogger(CommunityKnowledgeIngestionService.class);
     private static final int DEFAULT_CHUNK_SIZE = 520;
     private static final int DEFAULT_CHUNK_OVERLAP = 80;
 
     private final CommunityMapper communityMapper;
     private final EmbeddingService embeddingService;
     private final KnowledgeIngestionService knowledgeIngestionService;
+    private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
     public CommunityKnowledgeIngestionService(
             CommunityMapper communityMapper,
             EmbeddingService embeddingService,
             KnowledgeIngestionService knowledgeIngestionService,
+            VectorStore vectorStore,
             ObjectMapper objectMapper
     ) {
         this.communityMapper = communityMapper;
         this.embeddingService = embeddingService;
         this.knowledgeIngestionService = knowledgeIngestionService;
+        this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
     }
 
     public CommunityKnowledgeIngestionResult ingestLatestPublicWalks(int limit, int offset) {
+        if (!isReady()) {
+            return new CommunityKnowledgeIngestionResult(0, 0, List.of());
+        }
         int normalizedLimit = Math.max(1, Math.min(limit, 200));
         int normalizedOffset = Math.max(0, offset);
         List<CommunityWalkQueryRow> walks = communityMapper.listLatestPublicWalks(null, normalizedLimit, normalizedOffset);
@@ -97,6 +106,87 @@ public class CommunityKnowledgeIngestionService {
         }
         knowledgeIngestionService.upsert(documents);
         return new CommunityKnowledgeIngestionResult(walkIds.size(), documents.size(), walkIds);
+    }
+
+    public boolean syncPublicWalkById(Long walkId) {
+        if (walkId == null || walkId <= 0L || !isReady()) {
+            return false;
+        }
+        CommunityWalkQueryRow walk = communityMapper.findPublicWalkById(walkId, null);
+        if (walk == null) {
+            removeWalkById(walkId);
+            return false;
+        }
+
+        List<ChunkDraft> drafts = buildChunkDrafts(walk);
+        if (drafts.isEmpty()) {
+            removeWalkById(walkId);
+            return false;
+        }
+
+        List<List<Float>> embeddings = embeddingService.embedAll(drafts.stream().map(ChunkDraft::content).toList());
+        if (embeddings.size() != drafts.size()) {
+            throw new IllegalStateException("embedding_count_mismatch");
+        }
+
+        List<KnowledgeDocument> documents = new ArrayList<>(drafts.size());
+        for (int index = 0; index < drafts.size(); index++) {
+            ChunkDraft draft = drafts.get(index);
+            documents.add(new KnowledgeDocument(
+                    draft.chunkId(),
+                    draft.sourceId(),
+                    draft.sourceType(),
+                    draft.title(),
+                    draft.content(),
+                    embeddings.get(index),
+                    draft.metadata()
+            ));
+        }
+        knowledgeIngestionService.upsert(documents);
+        log.info("Synced public walk into Milvus, walkId={}, chunkCount={}", walkId, documents.size());
+        return true;
+    }
+
+    public void removeWalkById(Long walkId) {
+        if (walkId == null || walkId <= 0L || !vectorStore.isEnabled()) {
+            return;
+        }
+        knowledgeIngestionService.removeBySource("community_walk", String.valueOf(walkId));
+        log.info("Removed public walk knowledge from Milvus, walkId={}", walkId);
+    }
+
+    public boolean isReady() {
+        return embeddingService.isConfigured() && vectorStore.isEnabled();
+    }
+
+    private List<ChunkDraft> buildChunkDrafts(CommunityWalkQueryRow walk) {
+        if (walk == null || walk.getId() == null) {
+            return List.of();
+        }
+        String knowledgeText = buildWalkKnowledgeText(walk);
+        if (knowledgeText.isBlank()) {
+            return List.of();
+        }
+        List<String> chunks = splitIntoChunks(knowledgeText, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
+        List<ChunkDraft> drafts = new ArrayList<>(chunks.size());
+        for (int index = 0; index < chunks.size(); index++) {
+            String chunk = chunks.get(index);
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("chunk_index", index);
+            metadata.put("location_name", walk.getLocationName());
+            metadata.put("author_nickname", walk.getAuthorNickname());
+            metadata.put("tags", walk.getTags());
+            metadata.put("created_at", walk.getCreatedAt() == null ? null : walk.getCreatedAt().toInstant().toString());
+            drafts.add(new ChunkDraft(
+                    "community:" + walk.getId() + ":" + index,
+                    String.valueOf(walk.getId()),
+                    "community_walk",
+                    defaultText(walk.getThemeTitle(), "City Walk 鍏紑璺嚎"),
+                    chunk,
+                    metadata
+            ));
+        }
+        return drafts;
     }
 
     private String buildWalkKnowledgeText(CommunityWalkQueryRow walk) {
