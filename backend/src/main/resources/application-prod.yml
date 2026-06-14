@@ -90,6 +90,10 @@ liuliu:
       key-prefix: ${AGENT_MEMORY_KEY_PREFIX:liuliu:agent:memory:}
       ttl-seconds: ${AGENT_MEMORY_TTL_SECONDS:21600}
       max-turns: ${AGENT_MEMORY_MAX_TURNS:6}
+    agent-tool-cache:
+      enabled: ${AGENT_TOOL_CACHE_ENABLED:false}
+      key-prefix: ${AGENT_TOOL_CACHE_KEY_PREFIX:liuliu:agent:tool-cache:}
+      ttl-seconds: ${AGENT_TOOL_CACHE_TTL_SECONDS:300}
     single-walk-session:
       enabled: ${SINGLE_WALK_SESSION_ENABLED:true}
       key-prefix: ${SINGLE_WALK_SESSION_KEY_PREFIX:liuliu:walk:session:}

@@ -16,6 +16,10 @@ public interface AgentTool {
         return false;
     }
 
+    default boolean supportsSharedResultCache() {
+        return false;
+    }
+
     default LlmToolDefinition toDefinition() {
         return new LlmToolDefinition(name(), description(), parametersSchema());
     }

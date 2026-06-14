@@ -2,6 +2,7 @@ package com.liuliu.citywalk;
 
 import com.liuliu.citywalk.config.AmapProperties;
 import com.liuliu.citywalk.config.AgentMemoryProperties;
+import com.liuliu.citywalk.config.AgentToolCacheProperties;
 import com.liuliu.citywalk.config.CoCreateRoomProperties;
 import com.liuliu.citywalk.config.CommunityCacheProperties;
 import com.liuliu.citywalk.config.DeepSeekProperties;
@@ -29,6 +30,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         NotificationCacheProperties.class,
         CommunityCacheProperties.class,
         AgentMemoryProperties.class,
+        AgentToolCacheProperties.class,
         CoCreateRoomProperties.class,
         SingleWalkSessionProperties.class,
         RagProperties.class

@@ -39,6 +39,7 @@ public class AgentOrchestratorService {
     private final LlmClient llmClient;
     private final AgentMemoryService agentMemoryService;
     private final AgentLongTermMemoryService agentLongTermMemoryService;
+    private final AgentToolResultCacheService agentToolResultCacheService;
     private final ObjectMapper objectMapper;
     private final Map<String, AgentTool> toolsByName;
     private final List<LlmToolDefinition> toolDefinitions;
@@ -47,12 +48,14 @@ public class AgentOrchestratorService {
             LlmClient llmClient,
             AgentMemoryService agentMemoryService,
             AgentLongTermMemoryService agentLongTermMemoryService,
+            AgentToolResultCacheService agentToolResultCacheService,
             ObjectMapper objectMapper,
             List<AgentTool> agentTools
     ) {
         this.llmClient = llmClient;
         this.agentMemoryService = agentMemoryService;
         this.agentLongTermMemoryService = agentLongTermMemoryService;
+        this.agentToolResultCacheService = agentToolResultCacheService;
         this.objectMapper = objectMapper;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
@@ -229,11 +232,19 @@ public class AgentOrchestratorService {
                     emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), memo.output(), round, llmClient.provider(), llmClient.model(), "tool_result_reused"));
                     return memo.output();
                 }
+                String sharedCachedOutput = getSharedCachedToolOutput(tool, invocationKey);
+                if (sharedCachedOutput != null) {
+                    cacheToolExecution(toolExecutionMemoByKey, invocationKey, sharedCachedOutput);
+                    steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), sharedCachedOutput));
+                    emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), sharedCachedOutput, round, llmClient.provider(), llmClient.model(), "tool_result_shared_cache_hit"));
+                    return sharedCachedOutput;
+                }
             }
 
             String output = tool.execute(arguments);
             checkCancelled(executionHandle);
             cacheToolExecution(toolExecutionMemoByKey, invocationKey, output);
+            cacheSharedToolExecution(tool, invocationKey, output);
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), null));
             return output;
@@ -331,6 +342,29 @@ public class AgentOrchestratorService {
         toolExecutionMemoByKey.put(invocationKey, new ToolExecutionMemo(output));
     }
 
+    private void cacheSharedToolExecution(AgentTool tool, String invocationKey, String output) {
+        if (invocationKey == null || invocationKey.isBlank()) {
+            return;
+        }
+        if (tool == null || !tool.supportsSharedResultCache() || !agentToolResultCacheService.isEnabled()) {
+            return;
+        }
+        if (!isSharedCacheableOutput(output)) {
+            return;
+        }
+        agentToolResultCacheService.put(invocationKey, output);
+    }
+
+    private String getSharedCachedToolOutput(AgentTool tool, String invocationKey) {
+        if (invocationKey == null || invocationKey.isBlank()) {
+            return null;
+        }
+        if (tool == null || !tool.supportsSharedResultCache() || !agentToolResultCacheService.isEnabled()) {
+            return null;
+        }
+        return agentToolResultCacheService.get(invocationKey);
+    }
+
     private String buildToolInvocationKey(AgentTool tool, Map<String, Object> arguments) {
         if (tool == null || !tool.supportsIdempotentReplay()) {
             return null;
@@ -372,6 +406,41 @@ public class AgentOrchestratorService {
             return normalized;
         }
         return value;
+    }
+
+    private boolean isSharedCacheableOutput(String output) {
+        if (output == null || output.isBlank()) {
+            return false;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(output, new TypeReference<Map<String, Object>>() {
+            });
+            Object success = payload.get("success");
+            if (success instanceof Boolean value && !value) {
+                return false;
+            }
+
+            if (payload.containsKey("found")) {
+                Object found = payload.get("found");
+                if (found instanceof Boolean value && !value) {
+                    return false;
+                }
+            }
+
+            if (payload.containsKey("results")) {
+                Object results = payload.get("results");
+                if (results instanceof Iterable<?> iterable) {
+                    return iterable.iterator().hasNext();
+                }
+                if (results != null && results.getClass().isArray()) {
+                    return java.lang.reflect.Array.getLength(results) > 0;
+                }
+            }
+
+            return true;
+        } catch (Exception error) {
+            return false;
+        }
     }
 
     private void emit(AgentExecutionListener listener, AgentExecutionEvent event) {

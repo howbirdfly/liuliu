@@ -66,4 +66,9 @@ public class GetWalkDetailAgentTool extends AbstractJsonAgentTool {
     public boolean supportsIdempotentReplay() {
         return true;
     }
+
+    @Override
+    public boolean supportsSharedResultCache() {
+        return true;
+    }
 }
