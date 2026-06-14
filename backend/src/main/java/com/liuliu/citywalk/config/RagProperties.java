@@ -9,6 +9,9 @@ public class RagProperties {
     private boolean rerankEnabled = true;
     private int rerankCandidateMultiplier = 4;
     private int rerankCandidateMaxTopK = 20;
+    private boolean hybridKeywordRecallEnabled = true;
+    private int hybridKeywordPerVariantLimit = 3;
+    private int hybridKeywordMaxVariants = 8;
 
     public boolean isEnabled() {
         return enabled;
@@ -40,5 +43,29 @@ public class RagProperties {
 
     public void setRerankCandidateMaxTopK(int rerankCandidateMaxTopK) {
         this.rerankCandidateMaxTopK = rerankCandidateMaxTopK;
+    }
+
+    public boolean isHybridKeywordRecallEnabled() {
+        return hybridKeywordRecallEnabled;
+    }
+
+    public void setHybridKeywordRecallEnabled(boolean hybridKeywordRecallEnabled) {
+        this.hybridKeywordRecallEnabled = hybridKeywordRecallEnabled;
+    }
+
+    public int getHybridKeywordPerVariantLimit() {
+        return hybridKeywordPerVariantLimit;
+    }
+
+    public void setHybridKeywordPerVariantLimit(int hybridKeywordPerVariantLimit) {
+        this.hybridKeywordPerVariantLimit = hybridKeywordPerVariantLimit;
+    }
+
+    public int getHybridKeywordMaxVariants() {
+        return hybridKeywordMaxVariants;
+    }
+
+    public void setHybridKeywordMaxVariants(int hybridKeywordMaxVariants) {
+        this.hybridKeywordMaxVariants = hybridKeywordMaxVariants;
     }
 }

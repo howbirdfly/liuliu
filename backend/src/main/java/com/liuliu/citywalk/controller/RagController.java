@@ -3,6 +3,7 @@ package com.liuliu.citywalk.controller;
 import com.liuliu.citywalk.common.ApiResponse;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.liuliu.citywalk.context.BaseContext;
+import com.liuliu.citywalk.model.dto.response.RagCompareResponse;
 import com.liuliu.citywalk.model.dto.response.RagHealthResponse;
 import com.liuliu.citywalk.model.dto.response.RagIngestionResponse;
 import com.liuliu.citywalk.model.dto.response.RagSearchResponse;
@@ -100,6 +101,41 @@ public class RagController {
                         ))
                         .toList()
         ));
+    }
+
+    @GetMapping("/compare")
+    public ApiResponse<RagCompareResponse> compare(
+            @RequestParam("query") String query,
+            @RequestParam(defaultValue = "5") int topK,
+            @RequestParam(required = false) String sourceType
+    ) {
+        BaseContext.requireCurrentUserId();
+        java.util.Map<String, Object> filters = new java.util.LinkedHashMap<>();
+        if (sourceType != null && !sourceType.isBlank()) {
+            filters.put("source_type", sourceType.trim());
+        }
+
+        KnowledgeSearchService.KnowledgeSearchDebugResult result = knowledgeSearchService.debugSearch(query, topK, filters);
+        return ApiResponse.success(new RagCompareResponse(
+                query,
+                result.topK(),
+                result.candidateTopK(),
+                result.rerankEnabled(),
+                result.rawHits().stream().map(this::toCompareHit).toList(),
+                result.rerankedHits().stream().map(this::toCompareHit).toList()
+        ));
+    }
+
+    private RagCompareResponse.RagCompareHitResponse toCompareHit(KnowledgeHit item) {
+        return new RagCompareResponse.RagCompareHitResponse(
+                item.chunkId(),
+                item.sourceId(),
+                item.sourceType(),
+                item.title(),
+                item.content(),
+                item.score(),
+                item.metadata()
+        );
     }
 
     private String extractErrorMessage(Throwable error) {

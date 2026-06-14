@@ -71,6 +71,9 @@ liuliu:
     rerank-enabled: ${LIULIU_RAG_RERANK_ENABLED:true}
     rerank-candidate-multiplier: ${LIULIU_RAG_RERANK_CANDIDATE_MULTIPLIER:4}
     rerank-candidate-max-top-k: ${LIULIU_RAG_RERANK_CANDIDATE_MAX_TOP_K:20}
+    hybrid-keyword-recall-enabled: ${LIULIU_RAG_HYBRID_KEYWORD_RECALL_ENABLED:true}
+    hybrid-keyword-per-variant-limit: ${LIULIU_RAG_HYBRID_KEYWORD_PER_VARIANT_LIMIT:3}
+    hybrid-keyword-max-variants: ${LIULIU_RAG_HYBRID_KEYWORD_MAX_VARIANTS:8}
   co-create-room:
     member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
     cluster-broadcast-enabled: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:true}

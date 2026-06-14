@@ -39,6 +39,7 @@ public class KnowledgeSearchService {
         int normalizedTopK = Math.max(1, topK);
         int retrievalTopK = resolveRetrievalTopK(normalizedTopK);
         List<KnowledgeHit> hits = knowledgeRetrievalService.retrieve(new VectorSearchQuery(
+                normalizedQuery,
                 embedding,
                 retrievalTopK,
                 filters == null ? Map.of() : filters
@@ -47,6 +48,36 @@ public class KnowledgeSearchService {
             return hits.stream().limit(normalizedTopK).toList();
         }
         return ruleBasedKnowledgeReranker.rerank(normalizedQuery, normalizedTopK, hits);
+    }
+
+    public KnowledgeSearchDebugResult debugSearch(String queryText, int topK, Map<String, Object> filters) {
+        String normalizedQuery = queryText == null ? "" : queryText.trim();
+        if (normalizedQuery.isBlank()) {
+            return new KnowledgeSearchDebugResult(List.of(), List.of(), Math.max(1, topK), Math.max(1, topK), ragProperties.isRerankEnabled());
+        }
+        List<Float> embedding = embeddingService.embed(normalizedQuery);
+        if (embedding.isEmpty()) {
+            return new KnowledgeSearchDebugResult(List.of(), List.of(), Math.max(1, topK), Math.max(1, topK), ragProperties.isRerankEnabled());
+        }
+
+        int normalizedTopK = Math.max(1, topK);
+        int retrievalTopK = resolveRetrievalTopK(normalizedTopK);
+        List<KnowledgeHit> rawHits = knowledgeRetrievalService.retrieve(new VectorSearchQuery(
+                normalizedQuery,
+                embedding,
+                retrievalTopK,
+                filters == null ? Map.of() : filters
+        ));
+        List<KnowledgeHit> rerankedHits = ragProperties.isRerankEnabled()
+                ? ruleBasedKnowledgeReranker.rerank(normalizedQuery, normalizedTopK, rawHits)
+                : rawHits.stream().limit(normalizedTopK).toList();
+        return new KnowledgeSearchDebugResult(
+                rawHits,
+                rerankedHits,
+                normalizedTopK,
+                retrievalTopK,
+                ragProperties.isRerankEnabled()
+        );
     }
 
     public boolean isReady() {
@@ -61,5 +92,14 @@ public class KnowledgeSearchService {
         int maxTopK = Math.max(topK, ragProperties.getRerankCandidateMaxTopK());
         long candidateTopK = (long) topK * (long) multiplier;
         return (int) Math.min(candidateTopK, maxTopK);
+    }
+
+    public record KnowledgeSearchDebugResult(
+            List<KnowledgeHit> rawHits,
+            List<KnowledgeHit> rerankedHits,
+            int topK,
+            int candidateTopK,
+            boolean rerankEnabled
+    ) {
     }
 }
