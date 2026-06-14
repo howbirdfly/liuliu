@@ -60,4 +60,9 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
         }
         return json(payload);
     }
+
+    @Override
+    public boolean supportsIdempotentReplay() {
+        return true;
+    }
 }

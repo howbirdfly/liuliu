@@ -74,4 +74,9 @@ public class SearchKnowledgeBaseAgentTool extends AbstractJsonAgentTool {
                 "results", hits
         ));
     }
+
+    @Override
+    public boolean supportsIdempotentReplay() {
+        return true;
+    }
 }

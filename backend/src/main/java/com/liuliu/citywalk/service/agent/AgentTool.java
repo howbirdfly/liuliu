@@ -12,6 +12,10 @@ public interface AgentTool {
 
     String execute(Map<String, Object> arguments);
 
+    default boolean supportsIdempotentReplay() {
+        return false;
+    }
+
     default LlmToolDefinition toDefinition() {
         return new LlmToolDefinition(name(), description(), parametersSchema());
     }

@@ -63,4 +63,9 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
         }
         return json(payload);
     }
+
+    @Override
+    public boolean supportsIdempotentReplay() {
+        return true;
+    }
 }

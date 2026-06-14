@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 @Service
 public class AgentOrchestratorService {
@@ -94,6 +95,7 @@ public class AgentOrchestratorService {
         String instructions = buildInstructions(userId);
 
         List<AgentStepResponse> steps = new ArrayList<>();
+        Map<String, ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             final int currentRound = round;
             checkCancelled(executionHandle);
@@ -135,7 +137,7 @@ public class AgentOrchestratorService {
                             llmClient.model(),
                             null
                     ));
-                    String toolOutput = executeTool(toolCall, steps, round, executionHandle, listener);
+                    String toolOutput = executeTool(toolCall, steps, round, executionHandle, listener, toolExecutionMemoByKey);
                     messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
                 }
                 continue;
@@ -205,7 +207,8 @@ public class AgentOrchestratorService {
             List<AgentStepResponse> steps,
             int round,
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
-            AgentExecutionListener listener
+            AgentExecutionListener listener,
+            Map<String, ToolExecutionMemo> toolExecutionMemoByKey
     ) {
         checkCancelled(executionHandle);
         AgentTool tool = toolsByName.get(toolCall.name());
@@ -218,8 +221,19 @@ public class AgentOrchestratorService {
 
         try {
             Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
+            String invocationKey = buildToolInvocationKey(tool, arguments);
+            if (invocationKey != null) {
+                ToolExecutionMemo memo = toolExecutionMemoByKey.get(invocationKey);
+                if (memo != null) {
+                    steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), memo.output()));
+                    emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), memo.output(), round, llmClient.provider(), llmClient.model(), "tool_result_reused"));
+                    return memo.output();
+                }
+            }
+
             String output = tool.execute(arguments);
             checkCancelled(executionHandle);
+            cacheToolExecution(toolExecutionMemoByKey, invocationKey, output);
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), null));
             return output;
@@ -228,6 +242,12 @@ public class AgentOrchestratorService {
         } catch (Exception error) {
             String errorCode = error instanceof IllegalArgumentException ? "tool_arguments_invalid" : "tool_execution_failed";
             String output = buildToolFailureOutput(toolCall.name(), errorCode, safeText(error.getMessage(), "unknown_error"));
+            try {
+                Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
+                cacheToolExecution(toolExecutionMemoByKey, buildToolInvocationKey(tool, arguments), output);
+            } catch (Exception ignored) {
+                // Ignore cache failures for invalid or malformed arguments.
+            }
             steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
             emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), errorCode));
             return output;
@@ -304,6 +324,56 @@ public class AgentOrchestratorService {
         }
     }
 
+    private void cacheToolExecution(Map<String, ToolExecutionMemo> toolExecutionMemoByKey, String invocationKey, String output) {
+        if (invocationKey == null || invocationKey.isBlank()) {
+            return;
+        }
+        toolExecutionMemoByKey.put(invocationKey, new ToolExecutionMemo(output));
+    }
+
+    private String buildToolInvocationKey(AgentTool tool, Map<String, Object> arguments) {
+        if (tool == null || !tool.supportsIdempotentReplay()) {
+            return null;
+        }
+        try {
+            return tool.name() + ":" + objectMapper.writeValueAsString(normalizeForSignature(arguments));
+        } catch (Exception error) {
+            return tool.name() + ":" + String.valueOf(normalizeForSignature(arguments));
+        }
+    }
+
+    private Object normalizeForSignature(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> normalized = new TreeMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                normalized.put(entry.getKey().toString(), normalizeForSignature(entry.getValue()));
+            }
+            return normalized;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            List<Object> normalized = new ArrayList<>();
+            for (Object item : iterable) {
+                normalized.add(normalizeForSignature(item));
+            }
+            return normalized;
+        }
+        if (value.getClass().isArray()) {
+            int length = java.lang.reflect.Array.getLength(value);
+            List<Object> normalized = new ArrayList<>(length);
+            for (int index = 0; index < length; index++) {
+                normalized.add(normalizeForSignature(java.lang.reflect.Array.get(value, index)));
+            }
+            return normalized;
+        }
+        return value;
+    }
+
     private void emit(AgentExecutionListener listener, AgentExecutionEvent event) {
         if (listener == null || event == null) {
             return;
@@ -335,6 +405,11 @@ public class AgentOrchestratorService {
             String provider,
             String model,
             String code
+    ) {
+    }
+
+    private record ToolExecutionMemo(
+            String output
     ) {
     }
 }

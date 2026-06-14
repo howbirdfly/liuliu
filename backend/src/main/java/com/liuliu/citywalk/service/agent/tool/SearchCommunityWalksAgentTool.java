@@ -57,4 +57,9 @@ public class SearchCommunityWalksAgentTool extends AbstractJsonAgentTool {
                 "results", communityService.searchWalks(keyword, null, page, pageSize)
         ));
     }
+
+    @Override
+    public boolean supportsIdempotentReplay() {
+        return true;
+    }
 }
