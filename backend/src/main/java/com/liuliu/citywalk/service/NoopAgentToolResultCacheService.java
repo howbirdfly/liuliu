@@ -1,10 +1,15 @@
 package com.liuliu.citywalk.service;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnMissingBean(AgentToolResultCacheService.class)
+@ConditionalOnProperty(
+        prefix = "liuliu.redis.agent-tool-cache",
+        name = "enabled",
+        havingValue = "false",
+        matchIfMissing = true
+)
 public class NoopAgentToolResultCacheService implements AgentToolResultCacheService {
 
     @Override

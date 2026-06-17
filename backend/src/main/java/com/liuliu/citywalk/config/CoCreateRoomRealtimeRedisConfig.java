@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.config;
 
 import com.liuliu.citywalk.service.CoCreateRoomRealtimeService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.Message;
@@ -15,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 public class CoCreateRoomRealtimeRedisConfig {
 
     @Bean
+    @ConditionalOnProperty(prefix = "liuliu.co-create-room", name = "cluster-broadcast-enabled", havingValue = "true")
     public RedisMessageListenerContainer coCreateRoomRedisMessageListenerContainer(
             RedisConnectionFactory redisConnectionFactory,
             CoCreateRoomProperties coCreateRoomProperties,
@@ -22,10 +24,6 @@ public class CoCreateRoomRealtimeRedisConfig {
     ) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(redisConnectionFactory);
-
-        if (!coCreateRoomProperties.isClusterBroadcastEnabled()) {
-            return container;
-        }
 
         MessageListener listener = (Message message, byte[] pattern) -> {
             if (message == null || message.getBody() == null || message.getBody().length == 0) {

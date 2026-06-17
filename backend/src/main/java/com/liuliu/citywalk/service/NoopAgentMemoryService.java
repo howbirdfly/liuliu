@@ -1,13 +1,18 @@
 package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.service.agent.LlmMessage;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
-@ConditionalOnMissingBean(AgentMemoryService.class)
+@ConditionalOnProperty(
+        prefix = "liuliu.redis.agent-memory",
+        name = "enabled",
+        havingValue = "false",
+        matchIfMissing = true
+)
 public class NoopAgentMemoryService implements AgentMemoryService {
 
     @Override
