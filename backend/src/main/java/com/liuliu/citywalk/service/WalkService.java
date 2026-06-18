@@ -61,9 +61,9 @@ public class WalkService {
 
         WalkRecordEntity entity = new WalkRecordEntity();
         entity.setUserId(userId);
-        entity.setThemeTitle(safeText(request.themeTitle(), "鍩庡競婕"));
+        entity.setThemeTitle(safeText(request.themeTitle(), "城市漫步"));
         entity.setThemeSnapshot(writeJson(buildThemeSnapshot(request, completedMissions)));
-        entity.setLocationName(safeText(request.locationName(), "褰撳墠浣嶇疆"));
+        entity.setLocationName(safeText(request.locationName(), "当前位置"));
         entity.setLocationContext("");
         entity.setRoutePoints(writeJson(routePoints));
         entity.setMissionsCompleted(writeJson(completedMissions));
@@ -268,7 +268,7 @@ public class WalkService {
 
     private Map<String, Object> buildThemeSnapshot(CreateWalkRequest request, List<String> missions) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("title", safeText(request.themeTitle(), "鍩庡競婕"));
+        snapshot.put("title", safeText(request.themeTitle(), "城市漫步"));
         snapshot.put("description", safeText(request.noteText(), ""));
         snapshot.put("category", safeText(request.themeCategory(), ""));
         snapshot.put("missions", missions);

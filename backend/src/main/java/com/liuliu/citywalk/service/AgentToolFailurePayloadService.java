@@ -38,18 +38,18 @@ public class AgentToolFailurePayloadService {
     private String fallbackSuggestion(String toolName, String errorCode) {
         String suggestion = switch (toolName) {
             case "search_knowledge_base" ->
-                    "鐭ヨ瘑搴撶粨鏋滀笉鍙敤鏃讹紝缁х画缁撳悎鍦板浘宸ュ叿銆佺ぞ鍖哄叕寮€鍐呭鍜屽凡鏈変笂涓嬫枃缁欏嚭寤鸿锛屽苟鏄庣‘璇存槑鐭ヨ瘑搴撴湭鎴愬姛杩斿洖銆?";
+                    "知识库结果不可用时，继续结合地图工具、社区公开内容和已有上下文给出建议，并明确说明知识库未成功返回。";
             case "search_community_guides" ->
-                    "绀惧尯鏀荤暐妫€绱㈠け璐ユ椂锛屼紭鍏堝洖閫€鍒板湴鍥炬悳绱㈠拰閫氱敤璺嚎寤鸿锛屼笉瑕佺紪閫犲叿浣撳笘瀛愬唴瀹广€?";
+                    "社区攻略检索失败时，优先回退到地图搜索和通用路线建议，不要编造具体帖子内容。";
             case "search_poi", "nearby_pois" ->
-                    "鍦板浘宸ュ叿澶辫触鏃讹紝鍙互鍩轰簬鐢ㄦ埛宸叉彁渚涚殑鍖哄煙銆佸巻鍙插亸濂藉拰鍏朵粬宸ュ叿缁撴灉缁欏嚭淇濆畧寤鸿锛屽苟璇存槑鍦扮偣鍑嗙‘鎬ф湁闄愩€?";
+                    "地图工具失败时，可以基于用户已提供的区域、历史偏好和其他工具结果给出保守建议，并说明地点准确性有限。";
             case "get_walk_detail" ->
-                    "鍗曟潯 Walk 璇︽儏鑾峰彇澶辫触鏃讹紝涓嶈鍋囪甯栧瓙缁嗚妭瀛樺湪锛岀户缁熀浜庡凡鏈夊叕寮€淇℃伅缁欏嚭姒傛嫭鎬у缓璁€?";
+                    "单条 Walk 详情获取失败时，不要假设帖子细节存在，继续基于已有公开信息给出概括性建议。";
             default ->
-                    "宸ュ叿鏈垚鍔熻繑鍥炲彲闈犵粨鏋滄椂锛屽熀浜庡凡鏈変笂涓嬫枃缁х画鍥炵瓟锛屽苟鏄庣‘鍛婄煡鐢ㄦ埛杩欎竴姝ョ己灏戝伐鍏锋敮鎾戙€?";
+                    "工具未成功返回可靠结果时，基于已有上下文继续回答，并明确告知用户这一步缺少工具支撑。";
         };
         if ("tool_arguments_invalid".equals(errorCode)) {
-            return suggestion + " 杩欐澶辫触涔熷彲鑳芥槸宸ュ叿鍙傛暟涓嶅畬鏁存垨鏍煎紡涓嶆纭€?";
+            return suggestion + " 这次失败也可能是工具参数不完整或格式不正确。";
         }
         return suggestion;
     }

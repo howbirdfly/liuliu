@@ -47,10 +47,10 @@ public class MiniappWalkService {
 
         WalkRecordEntity entity = new WalkRecordEntity();
         entity.setUserId(userId);
-        entity.setThemeTitle(request.themeSnapshot() != null ? safeText(request.themeSnapshot().title(), "鍩庡競婕") : "鍩庡競婕");
+        entity.setThemeTitle(request.themeSnapshot() != null ? safeText(request.themeSnapshot().title(), "城市漫步") : "城市漫步");
         entity.setThemeSnapshot(writeJson(toThemeSnapshot(request.themeSnapshot())));
-        entity.setLocationName(safeText(request.locationName(), "褰撳墠浣嶇疆"));
-        entity.setLocationContext(safeText(request.locationContext(), "鍩庡競琛楅亾"));
+        entity.setLocationName(safeText(request.locationName(), "当前位置"));
+        entity.setLocationContext(safeText(request.locationContext(), "城市街道"));
         entity.setRoutePoints(writeJson(toRoutePoints(request.routePoints())));
         entity.setMissionsCompleted(writeJson(safeStringList(request.missionsCompleted())));
         entity.setMissionReviews(writeJson(toMissionReviews(request.missionReviews())));
@@ -116,7 +116,7 @@ public class MiniappWalkService {
         try {
             return objectMapper.readValue(json, MiniappThemeSnapshotResponse.class);
         } catch (Exception error) {
-            return new MiniappThemeSnapshotResponse("鍩庡競婕", "", "鎺㈢储", List.of(), "#5a5a40", "backend");
+            return new MiniappThemeSnapshotResponse("城市漫步", "", "探索", List.of(), "#5a5a40", "backend");
         }
     }
 
@@ -136,12 +136,12 @@ public class MiniappWalkService {
 
     private MiniappThemeSnapshotResponse toThemeSnapshot(MiniappThemeSnapshotRequest snapshot) {
         if (snapshot == null) {
-            return new MiniappThemeSnapshotResponse("鍩庡競婕", "", "鎺㈢储", List.of(), "#5a5a40", "backend");
+            return new MiniappThemeSnapshotResponse("城市漫步", "", "探索", List.of(), "#5a5a40", "backend");
         }
         return new MiniappThemeSnapshotResponse(
-                safeText(snapshot.title(), "鍩庡競婕"),
+                safeText(snapshot.title(), "城市漫步"),
                 safeText(snapshot.description(), ""),
-                safeText(snapshot.category(), "鎺㈢储"),
+                safeText(snapshot.category(), "探索"),
                 safeStringList(snapshot.missions()),
                 safeText(snapshot.vibeColor(), "#5a5a40"),
                 safeText(snapshot.provider(), "backend")
