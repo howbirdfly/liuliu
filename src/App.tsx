@@ -78,7 +78,14 @@ import {
   type NotificationStreamEvent,
   type UserNotificationItem,
 } from './services/notificationApi';
-import { cancelAgentExecution, clearAgentMemory, openAgentStream, type AgentStreamEvent } from './services/agentApi';
+import {
+  cancelAgentExecution,
+  clearAgentMemory,
+  openAgentStream,
+  requestAgentChat,
+  type AgentChatResponse,
+  type AgentStreamEvent,
+} from './services/agentApi';
 import {
   clearCurrentWalkSession,
   createWalk,
@@ -3932,6 +3939,50 @@ export default function App() {
     activeAgentAssistantMessageIdRef.current = null;
   };
 
+  const applyAgentChatFallbackResponse = (assistantMessageId: string, response: AgentChatResponse) => {
+    const answer = response.answer || '';
+    const fallbackEvents: AgentStreamEvent[] = (response.steps || [])
+      .filter((step) => step.type === 'tool_call')
+      .map((step) => ({
+        type: 'tool_result',
+        name: step.name,
+        input: step.input,
+        output: step.output,
+        iteration: response.iterations ?? null,
+        provider: response.provider ?? null,
+        model: response.model ?? null,
+        code: 'sync_fallback',
+      }));
+
+    setAgentAnswer(answer);
+    setAgentEvents(fallbackEvents);
+    setHasAgentFinalAnswer(Boolean(normalizeAgentMarkdown(answer).trim()));
+    updateAgentChatMessage(assistantMessageId, (message) => ({
+      ...message,
+      content: answer,
+      state: 'done',
+    }));
+    activeAgentAssistantMessageIdRef.current = null;
+  };
+
+  const runAgentChatFallback = async (
+    prompt: string,
+    assistantMessageId: string,
+    reason: string,
+  ): Promise<boolean> => {
+    try {
+      setAgentStatus(`${reason}，正在切换为普通回复模式...`);
+      const response = await requestAgentChat(prompt);
+      applyAgentChatFallbackResponse(assistantMessageId, response);
+      setAgentStatus('已切换为普通回复模式，路线建议已生成。');
+      return true;
+    } catch (error) {
+      finishActiveAgentAssistantMessage('stopped');
+      setAgentStatus(error instanceof Error ? error.message : `${reason}，且普通回复模式也失败了。`);
+      return false;
+    }
+  };
+
   useEffect(() => {
     if (!showAgentPlannerModal) {
       return;
@@ -3979,8 +4030,11 @@ export default function App() {
     } catch (error) {
       setIsAgentStreaming(false);
       agentExecutionIdRef.current = null;
-      finishActiveAgentAssistantMessage('stopped');
-      setAgentStatus(error instanceof Error ? error.message : 'Agent 流式连接初始化失败，请稍后再试。');
+      await runAgentChatFallback(
+        prompt,
+        assistantMessageId,
+        error instanceof Error ? error.message : 'Agent 流式连接初始化失败',
+      );
       return;
     }
     agentStreamRef.current = stream;
@@ -4042,12 +4096,11 @@ export default function App() {
           streamFinished = true;
           setIsAgentStreaming(false);
           agentExecutionIdRef.current = null;
-          finishActiveAgentAssistantMessage('stopped');
-          setAgentStatus(payload.output ? `Agent 执行异常：${payload.output}` : 'Agent 执行异常，请稍后再试。');
           stream.close();
           if (agentStreamRef.current === stream) {
             agentStreamRef.current = null;
           }
+          void runAgentChatFallback(prompt, assistantMessageId, payload.output ? `Agent 执行异常：${payload.output}` : 'Agent 执行异常');
           return;
         }
 
@@ -4083,12 +4136,11 @@ export default function App() {
       console.error('Agent stream connection error');
       setIsAgentStreaming(false);
       agentExecutionIdRef.current = null;
-      finishActiveAgentAssistantMessage('stopped');
-      setAgentStatus('Agent 流式连接中断了，请稍后再试一次。');
       stream.close();
       if (agentStreamRef.current === stream) {
         agentStreamRef.current = null;
       }
+      void runAgentChatFallback(prompt, assistantMessageId, 'Agent 流式连接中断了');
     };
   };
 

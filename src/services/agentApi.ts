@@ -13,6 +13,21 @@ export interface AgentStreamEvent {
   code?: string | null;
 }
 
+export interface AgentChatStep {
+  type: string;
+  name: string;
+  input?: string | null;
+  output?: string | null;
+}
+
+export interface AgentChatResponse {
+  answer: string;
+  steps: AgentChatStep[];
+  iterations?: number | null;
+  provider?: string | null;
+  model?: string | null;
+}
+
 interface AgentStreamInitResponse {
   executionId: string;
   streamToken: string;
@@ -31,6 +46,13 @@ export async function openAgentStream(prompt: string, executionId: string): Prom
   });
   const streamUrl = `${getApiBaseUrlForDebug()}/api/v1/agent/stream?${params.toString()}`;
   return new EventSource(streamUrl);
+}
+
+export async function requestAgentChat(prompt: string): Promise<AgentChatResponse> {
+  return apiRequest<AgentChatResponse>('/api/v1/agent/chat', {
+    method: 'POST',
+    body: JSON.stringify({ prompt }),
+  });
 }
 
 export async function cancelAgentExecution(executionId: string): Promise<boolean> {

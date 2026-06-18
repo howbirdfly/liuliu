@@ -62,13 +62,19 @@ public class DeepSeekLlmClient implements LlmClient {
         }
 
         try {
-            return toLlmResponse(chatModel.call(toPrompt(request)));
+            return callSingleResponse(chatModel, request, null);
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
-            log.warn("DeepSeek agent call failed: {}", error.getMessage());
+            log.warn(
+                    "DeepSeek agent call failed. requestSummary={}. causeType={}: {}",
+                    summarizeRequest(request),
+                    error.getClass().getName(),
+                    error.getMessage(),
+                    error
+            );
             return fallbackResponse("AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。", null);
         }
     }
@@ -97,9 +103,38 @@ public class DeepSeekLlmClient implements LlmClient {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
-            log.warn("DeepSeek agent streaming call failed: {}", error.getMessage());
-            return fallbackResponse("AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。", listener);
+            log.warn(
+                    "DeepSeek agent streaming call failed. requestSummary={}. causeType={}: {}. Falling back to single response mode.",
+                    summarizeRequest(request),
+                    error.getClass().getName(),
+                    error.getMessage(),
+                    error
+            );
+            try {
+                return callSingleResponse(chatModel, request, listener);
+            } catch (Exception fallbackError) {
+                if (Thread.currentThread().isInterrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw cancelled(fallbackError);
+                }
+                log.warn(
+                        "DeepSeek agent single-response fallback also failed. requestSummary={}. causeType={}: {}",
+                        summarizeRequest(request),
+                        fallbackError.getClass().getName(),
+                        fallbackError.getMessage(),
+                        fallbackError
+                );
+                return fallbackResponse("AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。", listener);
+            }
         }
+    }
+
+    private LlmResponse callSingleResponse(DeepSeekChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
+        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)));
+        if (listener != null && response.content() != null && !response.content().isBlank()) {
+            listener.onContentDelta(response.content());
+        }
+        return response;
     }
 
     private boolean isConfigured() {
@@ -116,6 +151,7 @@ public class DeepSeekLlmClient implements LlmClient {
     private ToolCallingChatOptions buildOptions(LlmRequest request) {
         ToolCallingChatOptions.Builder builder = ToolCallingChatOptions.builder()
                 .model(model())
+                .internalToolExecutionEnabled(false)
                 .temperature(request.temperature() == null ? 0.2 : request.temperature());
         List<ToolCallback> toolCallbacks = buildToolCallbacks(request.tools());
         if (!toolCallbacks.isEmpty()) {
@@ -261,6 +297,39 @@ public class DeepSeekLlmClient implements LlmClient {
         return cause == null
                 ? new AgentExecutionCancelledException("agent_execution_cancelled")
                 : new AgentExecutionCancelledException("agent_execution_cancelled", cause);
+    }
+
+    private String summarizeRequest(LlmRequest request) {
+        if (request == null) {
+            return "null_request";
+        }
+        int messageCount = request.messages() == null ? 0 : request.messages().size();
+        int toolCount = request.tools() == null ? 0 : request.tools().size();
+        String lastUserMessage = "";
+        if (request.messages() != null) {
+            for (int index = request.messages().size() - 1; index >= 0; index--) {
+                LlmMessage message = request.messages().get(index);
+                if (message != null && "user".equals(message.role())) {
+                    lastUserMessage = previewText(message.content(), 80);
+                    break;
+                }
+            }
+        }
+        return "model=" + model()
+                + ", messages=" + messageCount
+                + ", tools=" + toolCount
+                + ", lastUser=\"" + lastUserMessage + "\"";
+    }
+
+    private String previewText(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
     }
 
     private static final class DefinitionOnlyToolCallback implements ToolCallback {
