@@ -11,7 +11,6 @@ import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmResponse;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
-import com.liuliu.citywalk.service.agent.LlmToolDefinition;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -24,6 +23,9 @@ import java.util.TreeMap;
 public class AgentOrchestratorService {
 
     private static final int MAX_TOOL_ROUNDS = 6;
+    private static final String FALLBACK_GUIDE = """
+
+            濡傛灉宸ュ叿杩斿洖 success=false锛屾垨鑰呭寘鍚?error / fallbackSuggestion 瀛楁锛岃鏄庤繖涓€姝ユ病鏈夋嬁鍒板彲闈犲伐鍏风粨鏋溿€?                杩欑鎯呭喌涓嬩笉瑕佸亣瑁呮嬁鍒颁簡鐪熷疄鏁版嵁锛岃缁撳悎宸叉湁涓婁笅鏂囥€佸叾浠栧伐鍏风粨鏋滃拰甯歌瘑缁х画缁欏嚭淇濆畧寤鸿锛屽苟鏄庣‘璇存槑鍝簺淇℃伅缂哄皯宸ュ叿鏀拺銆?                """;
 
     private static final String DEFAULT_INSTRUCTIONS = """
             你是 Liuliu City Walk 的智能规划 Agent。
@@ -40,15 +42,19 @@ public class AgentOrchestratorService {
     private final AgentMemoryService agentMemoryService;
     private final AgentLongTermMemoryService agentLongTermMemoryService;
     private final AgentToolResultCacheService agentToolResultCacheService;
+    private final AgentPromptAssemblyService agentPromptAssemblyService;
+    private final AgentToolExecutionService agentToolExecutionService;
     private final ObjectMapper objectMapper;
     private final Map<String, AgentTool> toolsByName;
-    private final List<LlmToolDefinition> toolDefinitions;
+    private final List<com.liuliu.citywalk.service.agent.LlmToolDefinition> toolDefinitions;
 
     public AgentOrchestratorService(
             LlmClient llmClient,
             AgentMemoryService agentMemoryService,
             AgentLongTermMemoryService agentLongTermMemoryService,
             AgentToolResultCacheService agentToolResultCacheService,
+            AgentPromptAssemblyService agentPromptAssemblyService,
+            AgentToolExecutionService agentToolExecutionService,
             ObjectMapper objectMapper,
             List<AgentTool> agentTools
     ) {
@@ -56,6 +62,8 @@ public class AgentOrchestratorService {
         this.agentMemoryService = agentMemoryService;
         this.agentLongTermMemoryService = agentLongTermMemoryService;
         this.agentToolResultCacheService = agentToolResultCacheService;
+        this.agentPromptAssemblyService = agentPromptAssemblyService;
+        this.agentToolExecutionService = agentToolExecutionService;
         this.objectMapper = objectMapper;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
@@ -79,7 +87,7 @@ public class AgentOrchestratorService {
     }
 
     public void clearConversation(Long userId) {
-        agentMemoryService.clearConversation(userId);
+        agentPromptAssemblyService.clearConversation(userId);
     }
 
     private AgentChatResponse execute(
@@ -91,14 +99,12 @@ public class AgentOrchestratorService {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         checkCancelled(executionHandle);
 
-        List<LlmMessage> messages = new ArrayList<>();
-        messages.addAll(agentMemoryService.loadConversation(userId));
-        messages.add(LlmMessage.user(normalizedPrompt));
+        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(userId, normalizedPrompt);
         emit(listener, new AgentExecutionEvent("start", "agent", normalizedPrompt, null, 0, llmClient.provider(), llmClient.model(), null));
-        String instructions = buildInstructions(userId);
+        String instructions = agentPromptAssemblyService.buildInstructions(userId, DEFAULT_INSTRUCTIONS, FALLBACK_GUIDE);
 
         List<AgentStepResponse> steps = new ArrayList<>();
-        Map<String, ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
+        Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             final int currentRound = round;
             checkCancelled(executionHandle);
@@ -107,7 +113,7 @@ public class AgentOrchestratorService {
                     new LlmRequest(
                             instructions,
                             messages,
-                            toolDefinitions,
+                            agentToolExecutionService.toolDefinitions(),
                             0.2
                     ),
                     delta -> {
@@ -169,14 +175,14 @@ public class AgentOrchestratorService {
                     llmClient.provider(),
                     llmClient.model()
             );
-            rememberConversation(userId, normalizedPrompt, answer);
+            agentPromptAssemblyService.rememberConversation(userId, normalizedPrompt, answer);
             emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model(), null));
             return result;
         }
 
         String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
         steps.add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
-        rememberConversation(userId, normalizedPrompt, fallback);
+        agentPromptAssemblyService.rememberConversation(userId, normalizedPrompt, fallback);
         emit(listener, new AgentExecutionEvent("complete", "agent", null, fallback, MAX_TOOL_ROUNDS, llmClient.provider(), llmClient.model(), null));
         return new AgentChatResponse(
                 fallback,
@@ -188,8 +194,7 @@ public class AgentOrchestratorService {
     }
 
     private void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
-        agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
-        agentLongTermMemoryService.rememberTurn(userId, userPrompt, assistantAnswer);
+        agentPromptAssemblyService.rememberConversation(userId, userPrompt, assistantAnswer);
     }
 
     private String buildInstructions(Long userId) {
@@ -211,70 +216,26 @@ public class AgentOrchestratorService {
             int round,
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener,
-            Map<String, ToolExecutionMemo> toolExecutionMemoByKey
+            Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
     ) {
-        checkCancelled(executionHandle);
-        AgentTool tool = toolsByName.get(toolCall.name());
-        if (tool == null) {
-            String output = buildToolFailureOutput(toolCall.name(), "tool_not_found", "tool_not_found");
-            steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), "tool_not_found"));
-            return output;
-        }
-
-        try {
-            Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
-            String invocationKey = buildToolInvocationKey(tool, arguments);
-            if (invocationKey != null) {
-                ToolExecutionMemo memo = toolExecutionMemoByKey.get(invocationKey);
-                if (memo != null) {
-                    steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), memo.output()));
-                    emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), memo.output(), round, llmClient.provider(), llmClient.model(), "tool_result_reused"));
-                    return memo.output();
-                }
-                String sharedCachedOutput = getSharedCachedToolOutput(tool, invocationKey);
-                if (sharedCachedOutput != null) {
-                    cacheToolExecution(toolExecutionMemoByKey, invocationKey, sharedCachedOutput);
-                    steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), sharedCachedOutput));
-                    emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), sharedCachedOutput, round, llmClient.provider(), llmClient.model(), "tool_result_shared_cache_hit"));
-                    return sharedCachedOutput;
-                }
-            }
-
-            String output = tool.execute(arguments);
-            checkCancelled(executionHandle);
-            cacheToolExecution(toolExecutionMemoByKey, invocationKey, output);
-            cacheSharedToolExecution(tool, invocationKey, output);
-            steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), null));
-            return output;
-        } catch (AgentExecutionCancelledException error) {
-            throw error;
-        } catch (Exception error) {
-            String errorCode = error instanceof IllegalArgumentException ? "tool_arguments_invalid" : "tool_execution_failed";
-            String output = buildToolFailureOutput(toolCall.name(), errorCode, safeText(error.getMessage(), "unknown_error"));
-            try {
-                Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
-                cacheToolExecution(toolExecutionMemoByKey, buildToolInvocationKey(tool, arguments), output);
-            } catch (Exception ignored) {
-                // Ignore cache failures for invalid or malformed arguments.
-            }
-            steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), output));
-            emit(listener, new AgentExecutionEvent("tool_result", toolCall.name(), toolCall.argumentsJson(), output, round, llmClient.provider(), llmClient.model(), errorCode));
-            return output;
-        }
-    }
-
-    private Map<String, Object> parseArguments(String argumentsJson) {
-        if (argumentsJson == null || argumentsJson.isBlank()) {
-            return Map.of();
-        }
-        try {
-            return objectMapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {
-            });
-        } catch (Exception error) {
-            throw new IllegalArgumentException("tool_arguments_invalid");
-        }
+        AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.execute(
+                toolCall,
+                () -> checkCancelled(executionHandle),
+                toolExecutionMemoByKey,
+                this::buildToolFailureOutput
+        );
+        steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), outcome.output()));
+        emit(listener, new AgentExecutionEvent(
+                "tool_result",
+                toolCall.name(),
+                toolCall.argumentsJson(),
+                outcome.output(),
+                round,
+                llmClient.provider(),
+                llmClient.model(),
+                outcome.code()
+        ));
+        return outcome.output();
     }
 
     private String buildToolFailureOutput(String toolName, String errorCode, String message) {
