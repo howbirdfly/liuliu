@@ -19,16 +19,19 @@ public class AgentToolExecutionService {
 
     private final ObjectMapper objectMapper;
     private final AgentToolResultCacheService agentToolResultCacheService;
+    private final AgentToolFailurePayloadService agentToolFailurePayloadService;
     private final Map<String, AgentTool> toolsByName;
     private final List<LlmToolDefinition> toolDefinitions;
 
     public AgentToolExecutionService(
             ObjectMapper objectMapper,
             AgentToolResultCacheService agentToolResultCacheService,
+            AgentToolFailurePayloadService agentToolFailurePayloadService,
             List<AgentTool> agentTools
     ) {
         this.objectMapper = objectMapper;
         this.agentToolResultCacheService = agentToolResultCacheService;
+        this.agentToolFailurePayloadService = agentToolFailurePayloadService;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
         for (AgentTool tool : agentTools) {
@@ -44,14 +47,13 @@ public class AgentToolExecutionService {
     public AgentToolExecutionOutcome execute(
             LlmToolCall toolCall,
             Runnable cancellationCheck,
-            Map<String, ToolExecutionMemo> toolExecutionMemoByKey,
-            ToolFailureOutputFactory failureOutputFactory
+            Map<String, ToolExecutionMemo> toolExecutionMemoByKey
     ) {
         cancellationCheck.run();
 
         AgentTool tool = toolsByName.get(toolCall.name());
         if (tool == null) {
-            return failure(toolCall.name(), "tool_not_found", "tool_not_found", toolExecutionMemoByKey, null, failureOutputFactory);
+            return failure(toolCall.name(), "tool_not_found", "tool_not_found", toolExecutionMemoByKey, null);
         }
 
         try {
@@ -84,10 +86,10 @@ public class AgentToolExecutionService {
             try {
                 Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
                 String invocationKey = buildToolInvocationKey(tool, arguments);
-                failureOutput = failureOutputFactory.build(toolCall.name(), errorCode, message);
+                failureOutput = agentToolFailurePayloadService.build(toolCall.name(), errorCode, message);
                 cacheToolExecution(toolExecutionMemoByKey, invocationKey, failureOutput);
             } catch (Exception ignored) {
-                failureOutput = failureOutputFactory.build(toolCall.name(), errorCode, message);
+                failureOutput = agentToolFailurePayloadService.build(toolCall.name(), errorCode, message);
             }
             return new AgentToolExecutionOutcome(failureOutput, errorCode);
         }
@@ -98,10 +100,9 @@ public class AgentToolExecutionService {
             String errorCode,
             String message,
             Map<String, ToolExecutionMemo> toolExecutionMemoByKey,
-            String invocationKey,
-            ToolFailureOutputFactory failureOutputFactory
+            String invocationKey
     ) {
-        String output = failureOutputFactory.build(toolName, errorCode, message);
+        String output = agentToolFailurePayloadService.build(toolName, errorCode, message);
         cacheToolExecution(toolExecutionMemoByKey, invocationKey, output);
         return new AgentToolExecutionOutcome(output, errorCode);
     }
@@ -228,10 +229,6 @@ public class AgentToolExecutionService {
 
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
-    }
-
-    public interface ToolFailureOutputFactory {
-        String build(String toolName, String errorCode, String message);
     }
 
     public record AgentToolExecutionOutcome(

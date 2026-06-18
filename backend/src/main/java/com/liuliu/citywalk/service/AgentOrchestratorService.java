@@ -44,6 +44,7 @@ public class AgentOrchestratorService {
     private final AgentToolResultCacheService agentToolResultCacheService;
     private final AgentPromptAssemblyService agentPromptAssemblyService;
     private final AgentToolExecutionService agentToolExecutionService;
+    private final AgentRoundService agentRoundService;
     private final ObjectMapper objectMapper;
     private final Map<String, AgentTool> toolsByName;
     private final List<com.liuliu.citywalk.service.agent.LlmToolDefinition> toolDefinitions;
@@ -55,6 +56,7 @@ public class AgentOrchestratorService {
             AgentToolResultCacheService agentToolResultCacheService,
             AgentPromptAssemblyService agentPromptAssemblyService,
             AgentToolExecutionService agentToolExecutionService,
+            AgentRoundService agentRoundService,
             ObjectMapper objectMapper,
             List<AgentTool> agentTools
     ) {
@@ -64,6 +66,7 @@ public class AgentOrchestratorService {
         this.agentToolResultCacheService = agentToolResultCacheService;
         this.agentPromptAssemblyService = agentPromptAssemblyService;
         this.agentToolExecutionService = agentToolExecutionService;
+        this.agentRoundService = agentRoundService;
         this.objectMapper = objectMapper;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
@@ -109,50 +112,59 @@ public class AgentOrchestratorService {
             final int currentRound = round;
             checkCancelled(executionHandle);
 
-            LlmResponse response = llmClient.createStreamingResponse(
-                    new LlmRequest(
-                            instructions,
-                            messages,
-                            agentToolExecutionService.toolDefinitions(),
-                            0.2
-                    ),
-                    delta -> {
-                        checkCancelled(executionHandle);
-                        emit(listener, new AgentExecutionEvent(
-                                "answer_delta",
-                                "assistant",
-                                null,
-                                delta,
-                                currentRound,
-                                llmClient.provider(),
-                                llmClient.model(),
-                                null
-                        ));
-                    }
-            );
-            checkCancelled(executionHandle);
-
-            if (response.hasToolCalls()) {
-                messages.add(LlmMessage.assistant(response.content(), response.toolCalls()));
-                for (LlmToolCall toolCall : response.toolCalls()) {
-                    checkCancelled(executionHandle);
-                    emit(listener, new AgentExecutionEvent(
-                            "tool_call",
-                            toolCall.name(),
-                            toolCall.argumentsJson(),
+            AgentRoundService.AgentRoundOutcome roundOutcome = agentRoundService.executeRound(
+                    instructions,
+                    messages,
+                    steps,
+                    round,
+                    () -> checkCancelled(executionHandle),
+                    delta -> emit(listener, new AgentExecutionEvent(
+                            "answer_delta",
+                            "assistant",
                             null,
-                            round,
+                            delta,
+                            currentRound,
                             llmClient.provider(),
                             llmClient.model(),
                             null
-                    ));
-                    String toolOutput = executeTool(toolCall, steps, round, executionHandle, listener, toolExecutionMemoByKey);
-                    messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), toolOutput));
-                }
+                    )),
+                    new AgentRoundService.ToolEventListener() {
+                        @Override
+                        public void onToolCall(LlmToolCall toolCall, int currentRoundValue) {
+                            emit(listener, new AgentExecutionEvent(
+                                    "tool_call",
+                                    toolCall.name(),
+                                    toolCall.argumentsJson(),
+                                    null,
+                                    currentRoundValue,
+                                    llmClient.provider(),
+                                    llmClient.model(),
+                                    null
+                            ));
+                        }
+
+                        @Override
+                        public void onToolResult(LlmToolCall toolCall, AgentToolExecutionService.AgentToolExecutionOutcome outcome, int currentRoundValue) {
+                            emit(listener, new AgentExecutionEvent(
+                                    "tool_result",
+                                    toolCall.name(),
+                                    toolCall.argumentsJson(),
+                                    outcome.output(),
+                                    currentRoundValue,
+                                    llmClient.provider(),
+                                    llmClient.model(),
+                                    outcome.code()
+                            ));
+                        }
+                    },
+                    toolExecutionMemoByKey
+            );
+
+            if (roundOutcome.continueToNextRound()) {
                 continue;
             }
 
-            String answer = normalizeAssistantAnswer(response.content());
+            String answer = normalizeAssistantAnswer(roundOutcome.finalContent());
             checkCancelled(executionHandle);
             if (!answer.isBlank()) {
                 steps.add(new AgentStepResponse("assistant", "final_answer", null, answer));
@@ -221,8 +233,7 @@ public class AgentOrchestratorService {
         AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.execute(
                 toolCall,
                 () -> checkCancelled(executionHandle),
-                toolExecutionMemoByKey,
-                this::buildToolFailureOutput
+                toolExecutionMemoByKey
         );
         steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), outcome.output()));
         emit(listener, new AgentExecutionEvent(
