@@ -3456,26 +3456,8 @@ export default function App() {
   const currentThemeMissionCount = currentTheme?.missions.length ?? 0;
 
 
-  const buildCustomThemeMissions = (raw: string, title: string): string[] => {
-  const parsed = raw
-    .split(/\r?\n|[；;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 4);
 
-  if (parsed.length > 0) {
-    return parsed;
-  }
-
-  const label = title.trim() || '这次漫步';
-  return [
-    `先用 5 分钟进入“${label}”的观察状态`,
-    `记录 1 个最符合“${label}”的瞬间`,
-    '结束前回看今天最想保留的一幕',
-  ];
-};
-
-  const handleApplyCustomTheme = () => {
+  const handleApplyCustomTheme = async () => {
     if (!canModifySharedTheme) {
       setRoomError('当前只有房主可以修改共创主题。');
       setRoomMessage('');
@@ -3488,22 +3470,33 @@ export default function App() {
       return;
     }
 
-    const description =
-      customThemeDescriptionInput.trim() ||
-      `围绕“${themeName}”慢慢走，按自己的节奏去观察、停留和记录。`;
+    setIsGenerating(true);
+    setRoomError('');
+    setRoomMessage('');
 
-    setThemeBuilderMode('custom');
+    try {
+      const { locationName, locationContextText } = await resolveCurrentContext();
+      const generatedTheme = await generateAITheme(
+        mood,
+        weather,
+        season,
+        themeName + '，请围绕这个漫步主题生成适合当前地点的描述和观察任务',
+        locationName,
+        locationContextText,
+        walkMode,
+      );
 
-    pushThemeHistory({
-      title: themeName,
-      description,
-      category: themeName,
-      missions: buildCustomThemeMissions(customThemeMissionInput, themeName),
-      vibeColor: currentTheme?.vibeColor || '#0f766e',
-      provider: 'custom-manual',
-      coverImageUrl: currentTheme?.coverImageUrl,
-    });
-    setSelectedThemesForCombine([]);
+      setThemeBuilderMode('custom');
+      pushThemeHistory({
+        ...generatedTheme,
+        title: themeName,
+        category: themeName,
+        provider: 'custom-ai',
+      });
+      setSelectedThemesForCombine([]);
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleToggleTracking = () => {
@@ -6459,9 +6452,6 @@ export default function App() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">主题创建方式</p>
-                      <p className="mt-1 text-xs leading-6 text-slate-500">
-                        需要灵感时用生成，已经有想法时再切到自定义，不会把主界面一直挤满。
-                      </p>
                     </div>
                     <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
                       <button
@@ -6488,14 +6478,7 @@ export default function App() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-900">自定义漫步主题</p>
-                          <p className="mt-1 text-xs leading-6 text-slate-500">
-                            先定义这次漫步属于什么主题，比如动物漫步、声音漫步，再补充描述和任务。
-                          </p>
                         </div>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
-                          <Pencil className="h-3.5 w-3.5" />
-                          手动创建
-                        </span>
                       </div>
                       <div className="mt-4 grid gap-3">
                         <input
@@ -6504,29 +6487,16 @@ export default function App() {
                           placeholder="比如：动物漫步 / 声音漫步 / 夜色漫步"
                           className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
                         />
-                        <textarea
-                          value={customThemeDescriptionInput}
-                          onChange={(event) => setCustomThemeDescriptionInput(event.target.value)}
-                          placeholder="补一句这个主题下你想怎么走、重点看什么。"
-                          className="min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
-                        />
-                        <textarea
-                          value={customThemeMissionInput}
-                          onChange={(event) => setCustomThemeMissionInput(event.target.value)}
-                          placeholder="每行一个小任务，例如：&#10;拍一张橙色招牌&#10;记录一个转角的风&#10;找到最想停下来的门头"
-                          className="min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
-                        />
                       </div>
                       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-xs text-slate-500">应用后会把这个漫步主题直接设为当前主题，并更新任务清单。</p>
                         <button
                           type="button"
-                          onClick={handleApplyCustomTheme}
-                          disabled={!canModifySharedTheme}
+                          onClick={() => void handleApplyCustomTheme()}
+                          disabled={!canModifySharedTheme || isGenerating}
                           className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Pencil className="h-4 w-4" />
-                          应用漫步主题
+                          <Sparkles className="h-4 w-4" />
+                          {isGenerating ? 'AI 生成中...' : '生成这个漫步主题'}
                         </button>
                       </div>
                     </div>
