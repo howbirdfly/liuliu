@@ -2,6 +2,7 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.CoCreateRoomProperties;
+import com.liuliu.citywalk.model.dto.response.CoCreateRoomChatMessageResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomMemberResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomResponse;
 import com.liuliu.citywalk.model.dto.response.CoCreateRoomSocketEventResponse;
@@ -68,6 +69,7 @@ public class CoCreateRoomRealtimeService {
                 null,
                 null,
                 null,
+                null,
                 room.ownerUserId()
         );
         broadcast(roomCode, payload);
@@ -81,6 +83,7 @@ public class CoCreateRoomRealtimeService {
         CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
                 "room_closed",
                 roomCode,
+                null,
                 null,
                 null,
                 null,
@@ -102,6 +105,7 @@ public class CoCreateRoomRealtimeService {
                 member,
                 member.userId(),
                 null,
+                null,
                 ownerUserId
         );
         broadcast(roomCode, payload);
@@ -118,6 +122,7 @@ public class CoCreateRoomRealtimeService {
                 null,
                 null,
                 memberUserId,
+                null,
                 null,
                 ownerUserId
         );
@@ -136,6 +141,7 @@ public class CoCreateRoomRealtimeService {
                 member,
                 member.userId(),
                 null,
+                null,
                 ownerUserId
         );
         broadcast(roomCode, payload);
@@ -153,6 +159,25 @@ public class CoCreateRoomRealtimeService {
                 null,
                 null,
                 theme,
+                null,
+                ownerUserId
+        );
+        broadcast(roomCode, payload);
+        publishClusterEvent(payload);
+    }
+
+    public void broadcastChatMessage(String roomCode, CoCreateRoomChatMessageResponse chatMessage, Long ownerUserId) {
+        if (roomCode == null || roomCode.isBlank() || chatMessage == null) {
+            return;
+        }
+        CoCreateRoomSocketEventResponse payload = new CoCreateRoomSocketEventResponse(
+                "chat_message",
+                roomCode,
+                null,
+                null,
+                chatMessage.userId(),
+                null,
+                chatMessage,
                 ownerUserId
         );
         broadcast(roomCode, payload);
@@ -170,6 +195,7 @@ public class CoCreateRoomRealtimeService {
                 null,
                 null,
                 null,
+                null,
                 room.ownerUserId()
         ));
     }
@@ -181,6 +207,7 @@ public class CoCreateRoomRealtimeService {
         send(roomCode, session, new CoCreateRoomSocketEventResponse(
                 "pong",
                 roomCode,
+                null,
                 null,
                 null,
                 null,

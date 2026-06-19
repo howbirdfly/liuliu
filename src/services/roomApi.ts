@@ -24,6 +24,15 @@ export interface CoCreateRoomMember {
   lastActiveAt?: number;
 }
 
+export interface CoCreateRoomChatMessage {
+  messageId: string;
+  userId: number;
+  nickname: string;
+  avatarUrl?: string;
+  content: string;
+  sentAt: number;
+}
+
 export interface CoCreateRoom {
   roomCode: string;
   ownerUserId: number;
@@ -40,7 +49,8 @@ export type CoCreateRoomSocketEventType =
   | 'member_joined'
   | 'member_left'
   | 'member_state_updated'
-  | 'theme_updated';
+  | 'theme_updated'
+  | 'chat_message';
 
 export interface CoCreateRoomSocketEvent {
   type: CoCreateRoomSocketEventType;
@@ -49,12 +59,13 @@ export interface CoCreateRoomSocketEvent {
   member?: CoCreateRoomMember | null;
   memberUserId?: number | null;
   theme?: CoCreateRoomTheme | null;
+  chatMessage?: CoCreateRoomChatMessage | null;
   ownerUserId?: number | null;
 }
 
-export interface CoCreateRoomSocketClientEvent {
-  type: 'ping';
-}
+export type CoCreateRoomSocketClientEvent =
+  | { type: 'ping' }
+  | { type: 'chat_message'; content: string };
 
 export interface CreateCoCreateRoomPayload {
   roomCode?: string;
@@ -126,5 +137,10 @@ export function openCoCreateRoomSocket(roomCode: string): WebSocket {
 
 export function sendCoCreateRoomSocketPing(socket: WebSocket) {
   const payload: CoCreateRoomSocketClientEvent = { type: 'ping' };
+  socket.send(JSON.stringify(payload));
+}
+
+export function sendCoCreateRoomSocketChatMessage(socket: WebSocket, content: string) {
+  const payload: CoCreateRoomSocketClientEvent = { type: 'chat_message', content };
   socket.send(JSON.stringify(payload));
 }

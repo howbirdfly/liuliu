@@ -7,6 +7,7 @@ public record CoCreateRoomSocketEventResponse(
         CoCreateRoomMemberResponse member,
         Long memberUserId,
         CoCreateRoomThemeResponse theme,
+        CoCreateRoomChatMessageResponse chatMessage,
         Long ownerUserId
 ) {
 }

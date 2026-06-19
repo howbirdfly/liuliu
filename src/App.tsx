@@ -109,7 +109,9 @@ import {
   joinCoCreateRoom,
   leaveCoCreateRoom,
   openCoCreateRoomSocket,
+  sendCoCreateRoomSocketChatMessage,
   sendCoCreateRoomSocketPing,
+  type CoCreateRoomChatMessage,
   type CoCreateRoomSocketEvent,
   updateCoCreateRoomState,
   updateCoCreateRoomTheme,
@@ -2188,6 +2190,8 @@ export default function App() {
   const [isRestoringCoCreateRoom, setIsRestoringCoCreateRoom] = useState(false);
   const [roomError, setRoomError] = useState('');
   const [roomMessage, setRoomMessage] = useState('');
+  const [roomChatInput, setRoomChatInput] = useState('');
+  const [roomChatMessages, setRoomChatMessages] = useState<CoCreateRoomChatMessage[]>([]);
   const searchTimeoutRef = useRef<number | null>(null);
   const hasAutoLocatedRef = useRef(false);
   const roomSyncTimeoutRef = useRef<number | null>(null);
@@ -2932,7 +2936,20 @@ export default function App() {
       isOwner: member.userId === ownerUserId,
     }));
 
+  const appendRoomChatMessage = (message: CoCreateRoomChatMessage) => {
+    setRoomChatMessages((previous) => {
+      if (previous.some((item) => item.messageId === message.messageId)) {
+        return previous;
+      }
+      return [...previous, message].slice(-50);
+    });
+  };
+
   const applyCoCreateRoomSocketEvent = (payload: CoCreateRoomSocketEvent) => {
+    if (payload.type === 'chat_message' && payload.chatMessage) {
+      appendRoomChatMessage(payload.chatMessage);
+    }
+
     if (payload.type === 'theme_updated' && payload.theme) {
       setCurrentTheme({
         title: payload.theme.title,
@@ -2954,7 +2971,7 @@ export default function App() {
 
       if (payload.type === 'member_joined' && payload.member) {
         const members = previousRoom.members.some((member) => member.userId === payload.member.userId)
-          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member : member))
+          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member! : member))
           : [...previousRoom.members, payload.member];
         return {
           ...previousRoom,
@@ -2965,7 +2982,7 @@ export default function App() {
 
       if (payload.type === 'member_state_updated' && payload.member) {
         const nextMembers = previousRoom.members.some((member) => member.userId === payload.member.userId)
-          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member : member))
+          ? previousRoom.members.map((member) => (member.userId === payload.member.userId ? payload.member! : member))
           : [...previousRoom.members, payload.member];
         return {
           ...previousRoom,
@@ -2995,6 +3012,11 @@ export default function App() {
       return previousRoom;
     });
   };
+
+  useEffect(() => {
+    setRoomChatMessages([]);
+    setRoomChatInput('');
+  }, [coCreateRoom?.roomCode]);
 
   const handleSelectWalkMode = (nextMode: 'pure' | 'advanced') => {
     if (nextMode === 'pure' && coCreateRoom) {
@@ -3720,12 +3742,33 @@ export default function App() {
       personalRestoreAttemptedRef.current = false;
       setCoCreateRoom(null);
       setRoomCodeInput('');
+      setRoomChatMessages([]);
+      setRoomChatInput('');
       setRoomMessage('已退出共创房间，纯净模式和个人记录不受影响。');
     } catch (error) {
       console.error('Leave co-create room error:', error);
       setRoomError(error instanceof Error ? error.message : '退出房间失败，请稍后重试。');
     } finally {
       setIsRoomSubmitting(false);
+    }
+  };
+
+  const handleSendRoomChatMessage = () => {
+    if (!coCreateRoom?.roomCode || !roomSocketRef.current || roomSocketRef.current.readyState !== WebSocket.OPEN) {
+      setRoomError('实时连接未建立，暂时无法发送房间消息。');
+      return;
+    }
+    const normalized = roomChatInput.replace(/\\s+/g, ' ').trim();
+    if (!normalized) {
+      return;
+    }
+    try {
+      sendCoCreateRoomSocketChatMessage(roomSocketRef.current, normalized);
+      setRoomChatInput('');
+      setRoomError('');
+    } catch (error) {
+      console.error('Send co-create room chat message error:', error);
+      setRoomError('发送房间消息失败，请稍后重试。');
     }
   };
 
@@ -5951,6 +5994,62 @@ export default function App() {
                                 {member.isTracking && <span className="text-xs text-emerald-600">记录中</span>}
                               </div>
                             ))}
+                          </div>
+                          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium text-slate-800">房间对话</div>
+                                <p className="mt-1 text-xs text-slate-500">仅同步当前在线期间的实时消息，刷新后不会保留历史。</p>
+                              </div>
+                              <div className="text-xs text-slate-400">{roomChatMessages.length} 条</div>
+                            </div>
+                            <div className="mt-3 h-48 overflow-y-auto rounded-2xl bg-slate-50 p-3">
+                              {roomChatMessages.length === 0 ? (
+                                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                                  还没有人发消息，来发第一句吧。
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  {roomChatMessages.map((message) => {
+                                    const isSelf = message.userId === user?.id;
+                                    return (
+                                      <div key={message.messageId} className={'flex ' + (isSelf ? 'justify-end' : 'justify-start')}>
+                                        <div className={'max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm ' + (isSelf ? 'bg-slate-900 text-white' : 'bg-white text-slate-700')}>
+                                          <div className={'flex items-center gap-2 text-[11px] ' + (isSelf ? 'text-slate-300' : 'text-slate-400')}>
+                                            <span>{message.nickname}</span>
+                                            <span>{new Date(message.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                          </div>
+                                          <div className="mt-1 whitespace-pre-wrap break-words">{message.content}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            <div className="mt-3 flex items-end gap-3">
+                              <input
+                                value={roomChatInput}
+                                onChange={(event) => setRoomChatInput(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' && !event.shiftKey) {
+                                    event.preventDefault();
+                                    handleSendRoomChatMessage();
+                                  }
+                                }}
+                                placeholder="发条消息和房间成员同步想法"
+                                maxLength={500}
+                                className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
+                              />
+                              <button
+                                onClick={handleSendRoomChatMessage}
+                                disabled={!roomChatInput.trim() || !isRoomSocketConnected}
+                                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white disabled:opacity-50"
+                                aria-label="发送房间消息"
+                              >
+                                <ArrowUp className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )}
