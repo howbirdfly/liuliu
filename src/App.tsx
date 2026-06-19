@@ -265,6 +265,7 @@ const MAX_REASONABLE_WALKING_SPEED_MPS = 6;
 const SHORT_INTERVAL_JUMP_WINDOW_MS = 15000;
 const MIN_SHORT_INTERVAL_JUMP_DISTANCE_METERS = 120;
 const ACTIVE_ROOM_CODE_STORAGE_KEY = 'citywalk_active_room_code';
+const ROOM_CHAT_STORAGE_KEY_PREFIX = 'citywalk_room_chat:';
 const ROOM_SOCKET_HEARTBEAT_INTERVAL_MS = 15000;
 const ROOM_SOCKET_PONG_TIMEOUT_MS = 10000;
 const ROOM_SOCKET_RECONNECT_BASE_DELAY_MS = 1000;
@@ -305,6 +306,70 @@ function clearStoredActiveRoomCode() {
     return;
   }
   window.sessionStorage.removeItem(ACTIVE_ROOM_CODE_STORAGE_KEY);
+}
+
+function buildRoomChatStorageKey(roomCode: string) {
+  return ROOM_CHAT_STORAGE_KEY_PREFIX + roomCode.trim().toUpperCase();
+}
+
+function readStoredRoomChatMessages(roomCode: string): CoCreateRoomChatMessage[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+  const normalized = roomCode.trim().toUpperCase();
+  if (!normalized) {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(buildRoomChatStorageKey(normalized));
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        messageId: typeof item.messageId === 'string' ? item.messageId : '',
+        userId: typeof item.userId === 'number' ? item.userId : 0,
+        nickname: typeof item.nickname === 'string' ? item.nickname : '房间成员',
+        avatarUrl: typeof item.avatarUrl === 'string' ? item.avatarUrl : '',
+        content: typeof item.content === 'string' ? item.content : '',
+        sentAt: typeof item.sentAt === 'number' ? item.sentAt : Date.now(),
+      }))
+      .filter((item) => item.messageId && item.userId > 0 && item.content.trim())
+      .slice(-50);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredRoomChatMessages(roomCode: string, messages: CoCreateRoomChatMessage[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  const normalized = roomCode.trim().toUpperCase();
+  if (!normalized) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(buildRoomChatStorageKey(normalized), JSON.stringify(messages.slice(-50)));
+  } catch {
+    // Ignore local cache write failures.
+  }
+}
+
+function clearStoredRoomChatMessages(roomCode?: string) {
+  if (typeof window === 'undefined' || !roomCode) {
+    return;
+  }
+  const normalized = roomCode.trim().toUpperCase();
+  if (!normalized) {
+    return;
+  }
+  window.localStorage.removeItem(buildRoomChatStorageKey(normalized));
 }
 
 function shouldRetryCoCreateRoomSocket(reason?: string) {
@@ -2941,7 +3006,11 @@ export default function App() {
       if (previous.some((item) => item.messageId === message.messageId)) {
         return previous;
       }
-      return [...previous, message].slice(-50);
+      const nextMessages = [...previous, message].slice(-50);
+      if (coCreateRoom?.roomCode) {
+        writeStoredRoomChatMessages(coCreateRoom.roomCode, nextMessages);
+      }
+      return nextMessages;
     });
   };
 
@@ -3014,7 +3083,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    setRoomChatMessages([]);
+    if (!coCreateRoom?.roomCode) {
+      setRoomChatMessages([]);
+      setRoomChatInput('');
+      return;
+    }
+    setRoomChatMessages(readStoredRoomChatMessages(coCreateRoom.roomCode));
     setRoomChatInput('');
   }, [coCreateRoom?.roomCode]);
 
@@ -3190,6 +3264,7 @@ export default function App() {
         if (payload.type === 'room_closed' && payload.roomCode === roomCode) {
           roomSocketShouldReconnectRef.current = false;
           resetRoomSocketReconnectState();
+          clearStoredRoomChatMessages(roomCode);
           clearStoredActiveRoomCode();
           roomRestoreAttemptedRef.current = false;
           setCoCreateRoom(null);
@@ -3738,6 +3813,7 @@ export default function App() {
     setRoomError('');
     try {
       await leaveCoCreateRoom(coCreateRoom.roomCode);
+      clearStoredRoomChatMessages(coCreateRoom.roomCode);
       clearStoredActiveRoomCode();
       roomRestoreAttemptedRef.current = false;
       personalRestoreAttemptedRef.current = false;
