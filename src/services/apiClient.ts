@@ -15,7 +15,7 @@ function getAuthStorage(): Storage | null {
   if (typeof window === 'undefined') {
     return null;
   }
-  return window.sessionStorage;
+  return window.localStorage;
 }
 
 export function readAuthToken(): string | null {
@@ -24,18 +24,18 @@ export function readAuthToken(): string | null {
     return null;
   }
 
-  const sessionToken = storage.getItem(AUTH_TOKEN_KEY);
-  if (sessionToken) {
-    return sessionToken;
+  const persistedToken = storage.getItem(AUTH_TOKEN_KEY);
+  if (persistedToken) {
+    return persistedToken;
   }
 
-  const legacyToken = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  const legacyToken = window.sessionStorage.getItem(AUTH_TOKEN_KEY);
   if (!legacyToken) {
     return null;
   }
 
   storage.setItem(AUTH_TOKEN_KEY, legacyToken);
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
   return legacyToken;
 }
 
@@ -45,14 +45,14 @@ export function writeAuthToken(token: string): void {
     return;
   }
   storage.setItem(AUTH_TOKEN_KEY, token);
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 export function clearAuthToken(): void {
   const storage = getAuthStorage();
   storage?.removeItem(AUTH_TOKEN_KEY);
   if (typeof window !== 'undefined') {
-    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
   }
 }
 
