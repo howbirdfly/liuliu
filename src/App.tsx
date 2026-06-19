@@ -2237,6 +2237,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<SearchLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<SearchLocation | null>(null);
   const [selectedThemesForCombine, setSelectedThemesForCombine] = useState<string[]>([]);
+  const [customThemeTitleInput, setCustomThemeTitleInput] = useState('');
+  const [customThemeDescriptionInput, setCustomThemeDescriptionInput] = useState('');
+  const [customThemeMissionInput, setCustomThemeMissionInput] = useState('');
+  const [themeBuilderMode, setThemeBuilderMode] = useState<'preset' | 'custom'>('preset');
   const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
   const [agentSuggestedPois, setAgentSuggestedPois] = useState<MapPOI[]>([]);
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
@@ -3432,10 +3436,86 @@ export default function App() {
     };
   };
 
-  const pushThemeHistory = (theme: WalkTheme) => {
+    const pushThemeHistory = (theme: WalkTheme) => {
     setCurrentTheme(theme);
   };
 
+
+  const currentThemeProviderLabel =
+  currentTheme?.provider === 'custom-manual'
+    ? '自定义主题'
+    : currentTheme?.provider?.includes('combine')
+      ? '组合主题'
+      : currentTheme?.provider?.includes('deepseek') || currentTheme?.provider?.includes('stream')
+        ? 'AI 主题'
+        : currentTheme?.provider?.includes('preset')
+          ? '灵感主题'
+          : '当前主题';
+
+
+  const currentThemeMissionCount = currentTheme?.missions.length ?? 0;
+
+
+  const buildCustomThemeMissions = (raw: string, title: string): string[] => {
+  const parsed = raw
+    .split(/\r?\n|[；;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  if (parsed.length > 0) {
+    return parsed;
+  }
+
+  const label = title.trim() || '这次漫步';
+  return [
+    `先用 5 分钟进入“${label}”的观察状态`,
+    `记录 1 个最符合“${label}”的瞬间`,
+    '结束前回看今天最想保留的一幕',
+  ];
+};
+
+  const handleApplyCustomTheme = () => {
+    if (!canModifySharedTheme) {
+      setRoomError('当前只有房主可以修改共创主题。');
+      setRoomMessage('');
+      return;
+    }
+
+    const themeName = customThemeTitleInput.trim();
+    if (!themeName) {
+      window.alert('先写一个自定义漫步主题，比如“动物漫步”。');
+      return;
+    }
+
+    const description =
+      customThemeDescriptionInput.trim() ||
+      `围绕“${themeName}”慢慢走，按自己的节奏去观察、停留和记录。`;
+
+    setThemeBuilderMode('custom');
+
+    pushThemeHistory({
+      title: themeName,
+      description,
+      category: themeName,
+      missions: buildCustomThemeMissions(customThemeMissionInput, themeName),
+      vibeColor: currentTheme?.vibeColor || '#0f766e',
+      provider: 'custom-manual',
+      coverImageUrl: currentTheme?.coverImageUrl,
+    });
+    setSelectedThemesForCombine([]);
+  };
+
+  const handleToggleTracking = () => {
+    if (isTracking) {
+    setIsTracking(false);
+    setLivePosition(null);
+    return;
+  }
+    setPath([]);
+    setLivePosition(null);
+    setIsTracking(true);
+  };
   const refreshRecentWalks = async (overrideUser?: AppUser | null) => {
     const currentUser = overrideUser ?? user;
     if (!currentUser) {
@@ -3873,6 +3953,7 @@ export default function App() {
       const { locationName, locationContextText } = await resolveCurrentContext();
       const category = RANDOM_CATEGORIES[Math.floor(Math.random() * RANDOM_CATEGORIES.length)];
       const theme = await generateDynamicPreset(category, locationName, locationContextText, walkMode);
+      setThemeBuilderMode('preset');
       pushThemeHistory(theme);
     } finally {
       setIsGenerating(false);
@@ -3890,6 +3971,7 @@ export default function App() {
       const { locationName, locationContextText } = await resolveCurrentContext();
       if (selectedThemesForCombine.length === 1) {
         const theme = await generateDynamicPreset(selectedThemesForCombine[0], locationName, locationContextText, walkMode);
+        setThemeBuilderMode('preset');
         pushThemeHistory(theme);
         return;
       }
@@ -3957,6 +4039,7 @@ export default function App() {
                   coverImageUrl: payload.theme.coverImageUrl || streamingFallbackTheme.coverImageUrl,
                 }
               : buildStreamedThemePreview(streamedRaw, streamingFallbackTheme);
+            setThemeBuilderMode('preset');
             pushThemeHistory(finalTheme);
             setIsGenerating(false);
             finalizeThemeStream();
@@ -3986,6 +4069,7 @@ export default function App() {
               locationContextText,
               walkMode,
             );
+            setThemeBuilderMode('preset');
             pushThemeHistory(theme);
           } catch (error) {
             console.error('Theme stream fallback generation error:', error);
@@ -4649,6 +4733,7 @@ export default function App() {
     try {
       const { locationName, locationContextText } = await resolveCurrentContext();
       const theme = await generateCombinedTheme(selectedThemesForCombine, locationName, locationContextText, walkMode);
+      setThemeBuilderMode('preset');
       pushThemeHistory(theme);
       setSelectedThemesForCombine([]);
     } finally {
@@ -5488,9 +5573,9 @@ export default function App() {
         personalRestoreAttemptedRef.current = false;
       }
       setNoteText('');
-      setPath([]);
+    setPath([]);
       setIsTracking(false);
-      setLivePosition(null);
+    setLivePosition(null);
       setCheckedMissions([]);
       setWalkTags('');
       setWalkUploadPreview(null);
@@ -6224,9 +6309,9 @@ export default function App() {
                     </button>
                     <button
                       onClick={() => {
-                        setPath([]);
+    setPath([]);
                         setIsTracking(false);
-                        setLivePosition(null);
+    setLivePosition(null);
                       }}
                       className="rounded-full border border-slate-200 px-4 py-2 text-sm"
                     >
@@ -6283,20 +6368,41 @@ export default function App() {
               </div>
 
               <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Current Theme</p>
-                    <h2 className="mt-1 text-2xl font-semibold">{currentTheme?.title || '等待生成主题'}</h2>
+                <div className="mb-4 flex flex-wrap items-center gap-2 text-xs font-medium">
+                  <span className="rounded-full bg-slate-900 px-3 py-1 text-white">1. 先确认主题</span>
+                  <span className={`rounded-full px-3 py-1 ${isTracking ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>
+                    2. {isTracking ? '轨迹记录中' : '开启轨迹记录'}
+                  </span>
+                  <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">3. 再让 Agent 补路线</span>
+                </div>
+
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                  <div className="max-w-2xl">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{currentThemeProviderLabel}</span>
+                      <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600">{currentTheme?.category || '探索'}</span>
+                    </div>
+                    <h2 className="mt-3 text-2xl font-semibold text-slate-900">{currentTheme?.title || '先选一个今天想走的主题'}</h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      主题先定下来，下面的任务清单、轨迹记录和 Agent 路线都会围绕它展开。
+                    </p>
                   </div>
-                  {isGenerating && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
+                  <div className="flex items-center gap-3">
+                    {isGenerating && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Checklist</div>
+                      <div className="mt-1 text-2xl font-semibold text-slate-900">{checkedMissions.length}/{currentThemeMissionCount}</div>
+                      <div className="text-xs text-slate-500">已勾选任务</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div
-                  className="rounded-[28px] p-5 text-white"
+                  className="rounded-[28px] p-5 text-white shadow-[0_18px_48px_rgba(15,23,42,0.18)]"
                   style={{ background: `linear-gradient(135deg, ${currentTheme?.vibeColor || '#334155'}, #0f172a)` }}
                 >
                   <p className="text-sm opacity-85">{currentTheme?.category || '探索'}</p>
-                  <p className="mt-3 text-lg leading-8">{currentTheme?.description || '点击按钮生成新的漫步主题。'}</p>
+                  <p className="mt-3 text-lg leading-8">{currentTheme?.description || '先生成一个主题，再围绕它开始今天的 Walk。'}</p>
                 </div>
 
                 <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -6349,82 +6455,193 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="mt-6">
-                  <p className="mb-2 text-sm font-medium text-slate-600">组合主题方向</p>
-                  <div className="flex flex-wrap gap-2">
-                    {COMBINE_CATEGORIES.map((category) => {
-                      const selected = selectedThemesForCombine.includes(category);
-                      return (
-                        <button
-                          key={category}
-                          disabled={!canModifySharedTheme}
-                          onClick={() => {
-                            setSelectedThemesForCombine((prev) => {
-                              if (prev.includes(category)) {
-                                return prev.filter((item) => item !== category);
-                              }
-                              if (prev.length >= 2) {
-                                return prev;
-                              }
-                              return [...prev, category];
-                            });
-                          }}
-                          className={`rounded-full px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white'}`}
-                        >
-                          {category}
-                        </button>
-                      );
-                    })}
+                <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">主题创建方式</p>
+                      <p className="mt-1 text-xs leading-6 text-slate-500">
+                        需要灵感时用生成，已经有想法时再切到自定义，不会把主界面一直挤满。
+                      </p>
+                    </div>
+                    <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setThemeBuilderMode('preset')}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm transition ${themeBuilderMode === 'preset' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        灵感主题
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setThemeBuilderMode('custom')}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm transition ${themeBuilderMode === 'custom' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                        自定义主题
+                      </button>
+                    </div>
                   </div>
+
+                  {themeBuilderMode === 'custom' ? (
+                    <div className="mt-4 rounded-[24px] border border-slate-200 bg-white p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">自定义漫步主题</p>
+                          <p className="mt-1 text-xs leading-6 text-slate-500">
+                            先定义这次漫步属于什么主题，比如动物漫步、声音漫步，再补充描述和任务。
+                          </p>
+                        </div>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
+                          <Pencil className="h-3.5 w-3.5" />
+                          手动创建
+                        </span>
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        <input
+                          value={customThemeTitleInput}
+                          onChange={(event) => setCustomThemeTitleInput(event.target.value)}
+                          placeholder="比如：动物漫步 / 声音漫步 / 夜色漫步"
+                          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+                        />
+                        <textarea
+                          value={customThemeDescriptionInput}
+                          onChange={(event) => setCustomThemeDescriptionInput(event.target.value)}
+                          placeholder="补一句这个主题下你想怎么走、重点看什么。"
+                          className="min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+                        />
+                        <textarea
+                          value={customThemeMissionInput}
+                          onChange={(event) => setCustomThemeMissionInput(event.target.value)}
+                          placeholder="每行一个小任务，例如：&#10;拍一张橙色招牌&#10;记录一个转角的风&#10;找到最想停下来的门头"
+                          className="min-h-24 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+                        />
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <p className="text-xs text-slate-500">应用后会把这个漫步主题直接设为当前主题，并更新任务清单。</p>
+                        <button
+                          type="button"
+                          onClick={handleApplyCustomTheme}
+                          disabled={!canModifySharedTheme}
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          应用漫步主题
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-4 rounded-[24px] border border-slate-200 bg-white p-4">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-slate-600">组合主题方向</p>
+                          <p className="text-xs text-slate-400">适合快速混合 2 个观察视角</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {COMBINE_CATEGORIES.map((category) => {
+                            const selected = selectedThemesForCombine.includes(category);
+                            return (
+                              <button
+                                key={category}
+                                disabled={!canModifySharedTheme}
+                                onClick={() => {
+                                  setSelectedThemesForCombine((prev) => {
+                                    if (prev.includes(category)) {
+                                      return prev.filter((item) => item !== category);
+                                    }
+                                    if (prev.length >= 2) {
+                                      return prev;
+                                    }
+                                    return [...prev, category];
+                                  });
+                                }}
+                                className={`rounded-full px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${selected ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white'}`}
+                              >
+                                {category}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button
+                          onClick={handleCombineThemes}
+                          disabled={!canModifySharedTheme}
+                          className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          组合生成主题
+                        </button>
+                        <button
+                          onClick={handleGenerateAiTheme}
+                          disabled={!canModifySharedTheme}
+                          className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          AI 生成
+                        </button>
+                        <button
+                          onClick={handleGenerateRandomTheme}
+                          disabled={!canModifySharedTheme}
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Shuffle className="h-4 w-4" />
+                          随机生成
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {!canModifySharedTheme ? (
-                  <p className="mt-3 text-xs text-amber-700">当前在共创房间内只有房主可以修改主题，房员仍然可以继续打卡和记录轨迹。</p>
+                  <p className="mt-3 text-xs text-amber-700">当前在共创房间内只有房主可以修改主题，房间成员仍然可以继续打卡和记录轨迹。</p>
                 ) : null}
 
-                <div className="mt-6 flex flex-wrap gap-3">
-                  <button
-                    onClick={handleCombineThemes}
-                    disabled={!canModifySharedTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    组合生成主题
-                  </button>
-                  <button
-                    onClick={handleGenerateAiTheme}
-                    disabled={!canModifySharedTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    AI 生成
-                  </button>
-                  <button
-                    onClick={handleGenerateRandomTheme}
-                    disabled={!canModifySharedTheme}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Shuffle className="h-4 w-4" />
-                    随机生成
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (isTracking) {
-                        setIsTracking(false);
-                        setLivePosition(null);
-                        return;
-                      }
-                      setPath([]);
-                      setLivePosition(null);
-                      setIsTracking(true);
-                    }}
-                    className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                      isTracking
-                        ? 'bg-rose-500 text-white'
-                        : 'border border-slate-200 bg-sky-50 text-sky-700'
-                    }`}
-                  >
-                    {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
-                  </button>
+                <div
+                  className={`mt-6 rounded-[28px] border p-5 transition ${
+                    isTracking
+                      ? 'border-emerald-200 bg-emerald-50 shadow-[0_18px_40px_rgba(16,185,129,0.12)]'
+                      : 'border-sky-200 bg-sky-50 shadow-[0_18px_40px_rgba(56,189,248,0.12)]'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="max-w-2xl">
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Step 2</p>
+                      <h3 className="mt-2 text-xl font-semibold text-slate-900">
+                        {isTracking ? '正在记录你的轨迹' : '开始轨迹记录，让这次 Walk 真正跑起来'}
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {isTracking
+                          ? '现在移动路线、当前位置和后续保存内容都会围绕这次记录展开。'
+                          : '建议在真正开走前先点一次，后面保存漫步、看路径和回顾过程都会完整很多。'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleTracking}
+                      className={`rounded-full px-5 py-2.5 text-sm font-medium transition ${
+                        isTracking
+                          ? 'bg-rose-500 text-white shadow-[0_12px_24px_rgba(244,63,94,0.22)]'
+                          : 'bg-slate-900 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]'
+                      }`}
+                    >
+                      {isTracking ? '停止轨迹记录' : '开始轨迹记录'}
+                    </button>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
+                      <div className="text-xs text-slate-400">状态</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{isTracking ? '记录中' : '未开始'}</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
+                      <div className="text-xs text-slate-400">路径点</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{path.length} 个</div>
+                    </div>
+                    <div className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
+                      <div className="text-xs text-slate-400">定位参考</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">{livePosition?.name || currentLocationName}</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
@@ -6432,7 +6649,7 @@ export default function App() {
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
                       <p className="mt-1 text-xs leading-6 text-slate-500">
-                        用自然语言描述你想怎么逛，Agent 会在独立窗口里实时调用地图、社区和 Walk 工具来规划。
+                        当主题和轨迹都就绪后，再让 Agent 帮你补路线、补地点和补行走策略，会比一上来就问更聚焦。
                       </p>
                     </div>
                     <button
@@ -6450,7 +6667,7 @@ export default function App() {
                         <p className="text-sm font-medium text-slate-900">{isAgentStreaming ? 'Agent 正在规划中' : '适合放到单独窗口里专注查看'}</p>
                         <p className="mt-1 text-xs leading-5 text-slate-500">
                           {agentAnswer
-                            ? '上次规划结果还保留着，打开窗口可以继续追问、查看过程和最终路线。'
+                            ? '上一次规划结果还保留着，打开窗口就可以继续追问、查看过程和最终路线。'
                             : '打开后可以输入需求、看实时步骤、查看最终路线建议，不会再把当前页面撑长。'}
                         </p>
                       </div>
