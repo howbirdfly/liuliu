@@ -9,6 +9,9 @@ import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStreamEventResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStreamInitResponse;
 import com.liuliu.citywalk.model.dto.response.OperationResultResponse;
+import com.liuliu.citywalk.service.AgentExecutionEvent;
+import com.liuliu.citywalk.service.AgentExecutionListener;
+import com.liuliu.citywalk.service.AgentExecutionPipelineService;
 import com.liuliu.citywalk.service.AgentExecutionRegistryService;
 import com.liuliu.citywalk.service.AgentOrchestratorService;
 import com.liuliu.citywalk.service.AgentStreamAccessService;
@@ -22,7 +25,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -33,17 +35,20 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequestMapping("/api/v1/agent")
 public class AgentController {
 
+    private final AgentExecutionPipelineService agentExecutionPipelineService;
     private final AgentOrchestratorService agentOrchestratorService;
     private final AgentExecutionRegistryService agentExecutionRegistryService;
     private final AgentStreamAccessService agentStreamAccessService;
     private final UserSessionService userSessionService;
 
     public AgentController(
+            AgentExecutionPipelineService agentExecutionPipelineService,
             AgentOrchestratorService agentOrchestratorService,
             AgentExecutionRegistryService agentExecutionRegistryService,
             AgentStreamAccessService agentStreamAccessService,
             UserSessionService userSessionService
     ) {
+        this.agentExecutionPipelineService = agentExecutionPipelineService;
         this.agentOrchestratorService = agentOrchestratorService;
         this.agentExecutionRegistryService = agentExecutionRegistryService;
         this.agentStreamAccessService = agentStreamAccessService;
@@ -52,7 +57,12 @@ public class AgentController {
 
     @PostMapping("/chat")
     public ApiResponse<AgentChatResponse> chat(@Valid @RequestBody AgentChatRequest request) {
-        return ApiResponse.success(agentOrchestratorService.chat(BaseContext.requireCurrentUserId(), request.prompt()));
+        return ApiResponse.success(agentExecutionPipelineService.execute(
+                BaseContext.requireCurrentUserId(),
+                request.prompt(),
+                null,
+                null
+        ));
     }
 
     @PostMapping("/memory/clear")
@@ -109,11 +119,11 @@ public class AgentController {
 
         Thread workerThread = Thread.startVirtualThread(() -> {
             try {
-                agentOrchestratorService.stream(
+                agentExecutionPipelineService.execute(
                         currentUser.id(),
                         normalizedPrompt,
                         executionHandle,
-                        event -> sendEvent(emitter, event)
+                        sendEventToEmitter(emitter)
                 );
                 emitter.complete();
             } catch (AgentExecutionCancelledException ignored) {
@@ -144,7 +154,11 @@ public class AgentController {
         return userSessionService.loadUserById(userId);
     }
 
-    private void sendEvent(SseEmitter emitter, AgentOrchestratorService.AgentExecutionEvent event) {
+    private AgentExecutionListener sendEventToEmitter(SseEmitter emitter) {
+        return event -> sendEvent(emitter, event);
+    }
+
+    private void sendEvent(SseEmitter emitter, AgentExecutionEvent event) {
         try {
             AgentStreamEventResponse payload = new AgentStreamEventResponse(
                     event.type(),
@@ -169,7 +183,7 @@ public class AgentController {
     private void emitErrorAndComplete(SseEmitter emitter, Exception error) {
         String message = extractErrorMessage(error);
         try {
-            sendEvent(emitter, new AgentOrchestratorService.AgentExecutionEvent(
+            sendEvent(emitter, new AgentExecutionEvent(
                     "agent_error",
                     "agent",
                     null,
