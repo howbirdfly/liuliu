@@ -2,6 +2,7 @@ package com.liuliu.citywalk.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.DeepSeekProperties;
+import com.liuliu.citywalk.service.AgentContextWindowService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -29,19 +30,24 @@ public class DeepSeekLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(DeepSeekLlmClient.class);
     private static final String PROVIDER = "deepseek";
+    private static final String CONFIG_FALLBACK = "AI 服务暂未配置完成，我先根据现有数据给出基础建议。";
+    private static final String RUNTIME_FALLBACK = "AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。";
 
     private final DeepSeekProperties properties;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<DeepSeekChatModel> chatModelProvider;
+    private final AgentContextWindowService agentContextWindowService;
 
     public DeepSeekLlmClient(
             DeepSeekProperties properties,
             ObjectMapper objectMapper,
-            ObjectProvider<DeepSeekChatModel> chatModelProvider
+            ObjectProvider<DeepSeekChatModel> chatModelProvider,
+            AgentContextWindowService agentContextWindowService
     ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.chatModelProvider = chatModelProvider;
+        this.agentContextWindowService = agentContextWindowService;
     }
 
     @Override
@@ -58,7 +64,7 @@ public class DeepSeekLlmClient implements LlmClient {
     public LlmResponse createResponse(LlmRequest request) {
         DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
         if (!isConfigured() || chatModel == null) {
-            return fallbackResponse("AI 服务暂未配置完成，我先根据现有数据给出基础建议。", null);
+            return fallbackResponse(CONFIG_FALLBACK, null);
         }
 
         try {
@@ -68,6 +74,10 @@ public class DeepSeekLlmClient implements LlmClient {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
+            LlmResponse compactedRetry = tryContextOverflowRetry(chatModel, request, null, error);
+            if (compactedRetry != null) {
+                return compactedRetry;
+            }
             log.warn(
                     "DeepSeek agent call failed. requestSummary={}. causeType={}: {}",
                     summarizeRequest(request),
@@ -75,7 +85,7 @@ public class DeepSeekLlmClient implements LlmClient {
                     error.getMessage(),
                     error
             );
-            return fallbackResponse("AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。", null);
+            return fallbackResponse(RUNTIME_FALLBACK, null);
         }
     }
 
@@ -83,7 +93,7 @@ public class DeepSeekLlmClient implements LlmClient {
     public LlmResponse createStreamingResponse(LlmRequest request, LlmStreamListener listener) {
         DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
         if (!isConfigured() || chatModel == null) {
-            return fallbackResponse("AI 服务暂未配置完成，我先根据现有数据给出基础建议。", listener);
+            return fallbackResponse(CONFIG_FALLBACK, listener);
         }
 
         try {
@@ -102,6 +112,10 @@ public class DeepSeekLlmClient implements LlmClient {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
+            }
+            LlmResponse compactedRetry = tryContextOverflowRetry(chatModel, request, listener, error);
+            if (compactedRetry != null) {
+                return compactedRetry;
             }
             log.warn(
                     "DeepSeek agent streaming call failed. requestSummary={}. causeType={}: {}. Falling back to single response mode.",
@@ -124,9 +138,70 @@ public class DeepSeekLlmClient implements LlmClient {
                         fallbackError.getMessage(),
                         fallbackError
                 );
-                return fallbackResponse("AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。", listener);
+                return fallbackResponse(RUNTIME_FALLBACK, listener);
             }
         }
+    }
+
+    private LlmResponse tryContextOverflowRetry(
+            DeepSeekChatModel chatModel,
+            LlmRequest request,
+            LlmStreamListener listener,
+            Exception error
+    ) {
+        if (!isContextOverflowError(error)) {
+            return null;
+        }
+
+        LlmRequest compactedRequest = agentContextWindowService.compactForContextOverflow(request);
+        if (compactedRequest == null || compactedRequest.messages() == null || compactedRequest.messages().isEmpty()) {
+            return null;
+        }
+
+        log.info(
+                "DeepSeek request exceeded context window. Retrying with compacted context. originalSummary={}, compactedMessages={}",
+                summarizeRequest(request),
+                compactedRequest.messages().size()
+        );
+        try {
+            return callSingleResponse(chatModel, compactedRequest, listener);
+        } catch (Exception retryError) {
+            if (Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw cancelled(retryError);
+            }
+            log.warn(
+                    "DeepSeek compacted-context retry failed. requestSummary={}. causeType={}: {}",
+                    summarizeRequest(compactedRequest),
+                    retryError.getClass().getName(),
+                    retryError.getMessage(),
+                    retryError
+            );
+            return null;
+        }
+    }
+
+    private boolean isContextOverflowError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase();
+                if (normalized.contains("context length")
+                        || normalized.contains("context window")
+                        || normalized.contains("maximum context")
+                        || normalized.contains("maximum prompt")
+                        || normalized.contains("too many tokens")
+                        || normalized.contains("input is too long")
+                        || normalized.contains("prompt is too long")
+                        || normalized.contains("reduce the length")
+                        || normalized.contains("context limit")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private LlmResponse callSingleResponse(DeepSeekChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
@@ -184,6 +259,7 @@ public class DeepSeekLlmClient implements LlmClient {
         }
 
         return switch (item.role()) {
+            case "system" -> new SystemMessage(item.content() == null ? "" : item.content());
             case "user" -> new UserMessage(item.content() == null ? "" : item.content());
             case "assistant" -> AssistantMessage.builder()
                     .content(item.content())

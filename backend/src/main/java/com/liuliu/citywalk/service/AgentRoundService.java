@@ -16,13 +16,16 @@ public class AgentRoundService {
 
     private final LlmClient llmClient;
     private final AgentToolExecutionService agentToolExecutionService;
+    private final AgentContextWindowService agentContextWindowService;
 
     public AgentRoundService(
             LlmClient llmClient,
-            AgentToolExecutionService agentToolExecutionService
+            AgentToolExecutionService agentToolExecutionService,
+            AgentContextWindowService agentContextWindowService
     ) {
         this.llmClient = llmClient;
         this.agentToolExecutionService = agentToolExecutionService;
+        this.agentContextWindowService = agentContextWindowService;
     }
 
     public AgentRoundOutcome executeRound(
@@ -61,7 +64,11 @@ public class AgentRoundService {
                 );
                 steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), outcome.output()));
                 toolEventListener.onToolResult(toolCall, outcome, round);
-                messages.add(LlmMessage.tool(toolCall.id(), toolCall.name(), outcome.output()));
+                messages.add(LlmMessage.tool(
+                        toolCall.id(),
+                        toolCall.name(),
+                        agentContextWindowService.compactToolOutputForModel(outcome.output())
+                ));
             }
             return AgentRoundOutcome.requiresAnotherRound();
         }

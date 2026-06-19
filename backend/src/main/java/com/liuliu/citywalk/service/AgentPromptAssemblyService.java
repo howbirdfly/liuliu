@@ -3,7 +3,6 @@ package com.liuliu.citywalk.service;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -11,20 +10,23 @@ public class AgentPromptAssemblyService {
 
     private final AgentMemoryService agentMemoryService;
     private final AgentLongTermMemoryService agentLongTermMemoryService;
+    private final AgentContextWindowService agentContextWindowService;
 
     public AgentPromptAssemblyService(
             AgentMemoryService agentMemoryService,
-            AgentLongTermMemoryService agentLongTermMemoryService
+            AgentLongTermMemoryService agentLongTermMemoryService,
+            AgentContextWindowService agentContextWindowService
     ) {
         this.agentMemoryService = agentMemoryService;
         this.agentLongTermMemoryService = agentLongTermMemoryService;
+        this.agentContextWindowService = agentContextWindowService;
     }
 
     public List<LlmMessage> buildConversationMessages(Long userId, String userPrompt) {
-        List<LlmMessage> messages = new ArrayList<>();
-        messages.addAll(agentMemoryService.loadConversation(userId));
-        messages.add(LlmMessage.user(userPrompt));
-        return messages;
+        return agentContextWindowService.buildConversationMessages(
+                agentMemoryService.loadConversation(userId),
+                userPrompt
+        );
     }
 
     public String buildInstructions(Long userId, String defaultInstructions, String fallbackGuide) {

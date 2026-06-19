@@ -10,6 +10,10 @@ public record LlmMessage(
         List<LlmToolCall> toolCalls
 ) {
 
+    public static LlmMessage system(String content) {
+        return new LlmMessage("system", content, null, null, List.of());
+    }
+
     public static LlmMessage user(String content) {
         return new LlmMessage("user", content, null, null, List.of());
     }
