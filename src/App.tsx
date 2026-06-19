@@ -3181,7 +3181,8 @@ export default function App() {
           payload.type === 'member_joined' ||
           payload.type === 'member_left' ||
           payload.type === 'member_state_updated' ||
-          payload.type === 'theme_updated'
+          payload.type === 'theme_updated' ||
+          payload.type === 'chat_message'
         ) {
           applyCoCreateRoomSocketEvent(payload);
           return;
