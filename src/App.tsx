@@ -2240,7 +2240,7 @@ export default function App() {
   const [customThemeTitleInput, setCustomThemeTitleInput] = useState('');
   const [customThemeDescriptionInput, setCustomThemeDescriptionInput] = useState('');
   const [customThemeMissionInput, setCustomThemeMissionInput] = useState('');
-  const [themeBuilderMode, setThemeBuilderMode] = useState<'preset' | 'custom'>('preset');
+  const [themeBuilderMode, setThemeBuilderMode] = useState<'preset' | 'custom' | 'agent'>('preset');
   const [nearbyPois, setNearbyPois] = useState<MapPOI[]>([]);
   const [agentSuggestedPois, setAgentSuggestedPois] = useState<MapPOI[]>([]);
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
@@ -4534,6 +4534,7 @@ export default function App() {
         setAgentStatus('已更新当前任务，但这次没有识别出足够可信的本地点位，所以没有直接上图。');
       }
 
+      setThemeBuilderMode('agent');
       setShowAgentTimelineModal(false);
       setShowAgentPlannerModal(false);
       setActiveTab('explore');
@@ -5844,7 +5845,7 @@ export default function App() {
                       className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 disabled:opacity-50"
                     >
                       {isApplyingAgentResult && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-                      {isApplyingAgentResult ? '应用中...' : '应用到任务与地图'}
+                      {isApplyingAgentResult ? '生成中...' : '生成当前主题'}
                     </button>
                   ) : null}
                   <button
@@ -6362,11 +6363,10 @@ export default function App() {
 
               <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs font-medium">
-                  <span className="rounded-full bg-slate-900 px-3 py-1 text-white">1. 先确认主题</span>
+                  <span className="rounded-full bg-slate-900 px-3 py-1 text-white">1. 先定义主题</span>
                   <span className={`rounded-full px-3 py-1 ${isTracking ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-50 text-sky-700'}`}>
                     2. {isTracking ? '轨迹记录中' : '开启轨迹记录'}
                   </span>
-                  <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">3. 再让 Agent 补路线</span>
                 </div>
 
                 <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -6377,7 +6377,7 @@ export default function App() {
                     </div>
                     <h2 className="mt-3 text-2xl font-semibold text-slate-900">{currentTheme?.title || '先选一个今天想走的主题'}</h2>
                     <p className="mt-2 text-sm leading-6 text-slate-500">
-                      主题先定下来，下面的任务清单、轨迹记录和 Agent 路线都会围绕它展开。
+                      你可以用灵感生成、自定义主题，或者直接让 Agent 先定地点和玩法，再开始这次 Walk。
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -6470,6 +6470,14 @@ export default function App() {
                         <Pencil className="h-4 w-4" />
                         自定义主题
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setThemeBuilderMode('agent')}
+                        className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm transition ${themeBuilderMode === 'agent' ? 'bg-slate-900 text-white' : 'text-slate-600'}`}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        Agent 定主题
+                      </button>
                     </div>
                   </div>
 
@@ -6498,6 +6506,62 @@ export default function App() {
                           <Sparkles className="h-4 w-4" />
                           {isGenerating ? 'AI 生成中...' : '生成这个漫步主题'}
                         </button>
+                      </div>
+                    </div>
+                  ) : themeBuilderMode === 'agent' ? (
+                    <div className="mt-4 rounded-[24px] border border-slate-200 bg-white p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Agent 定主题</p>
+                          <p className="mt-1 text-xs leading-6 text-slate-500">
+                            先让 Agent 帮你定地点、玩法和重点，再把路线建议生成成当前主题。
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowAgentPlannerModal(true)}
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          打开 Agent 窗口
+                        </button>
+                      </div>
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">{isAgentStreaming ? 'Agent 正在规划中' : agentAnswer ? '已经有一版 Agent 建议' : '适合先用 Agent 探路定主题'}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-500">
+                              {agentAnswer
+                                ? '路线、地点和玩法建议已经保留，可以直接生成成当前主题。'
+                                : '先和 Agent 讨论想去哪里、怎么逛，再把建议转成主题和任务。'}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">
+                            {isAgentStreaming ? '流式规划中' : agentAnswer ? '可生成主题' : '先规划再生成'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setShowAgentPlannerModal(true)}
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                        >
+                          <History className="h-4 w-4" />
+                          查看 / 继续对话
+                        </button>
+                        {hasAgentFinalAnswer && agentAnswer ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleApplyAgentResult()}
+                            disabled={isApplyingAgentResult || !canModifySharedTheme}
+                            className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isApplyingAgentResult && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                            <Sparkles className="h-4 w-4" />
+                            {isApplyingAgentResult ? '生成中...' : '用 Agent 建议生成主题'}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                   ) : (
@@ -6576,7 +6640,7 @@ export default function App() {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="max-w-2xl">
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Step 2</p>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Step 3</p>
                       <h3 className="mt-2 text-xl font-semibold text-slate-900">
                         {isTracking ? '正在记录你的轨迹' : '开始轨迹记录，让这次 Walk 真正跑起来'}
                       </h3>
@@ -6614,39 +6678,6 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-6 rounded-[28px] border border-slate-200 bg-slate-50/80 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Agent 路线规划</p>
-                      <p className="mt-1 text-xs leading-6 text-slate-500">
-                        当主题和轨迹都就绪后，再让 Agent 帮你补路线、补地点和补行走策略，会比一上来就问更聚焦。
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowAgentPlannerModal(true)}
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      打开 Agent 窗口
-                    </button>
-                  </div>
-                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{isAgentStreaming ? 'Agent 正在规划中' : '适合放到单独窗口里专注查看'}</p>
-                        <p className="mt-1 text-xs leading-5 text-slate-500">
-                          {agentAnswer
-                            ? '上一次规划结果还保留着，打开窗口就可以继续追问、查看过程和最终路线。'
-                            : '打开后可以输入需求、看实时步骤、查看最终路线建议，不会再把当前页面撑长。'}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-slate-50 px-3 py-1 text-xs text-slate-500">
-                        {isAgentStreaming ? '流式规划中' : agentAnswer ? '已有规划结果' : '支持实时步骤输出'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
               </div>
             </section>
 
