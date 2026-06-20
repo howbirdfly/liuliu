@@ -6508,9 +6508,6 @@ export default function App() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-900">Agent 定主题</p>
-                          <p className="mt-1 text-xs leading-6 text-slate-500">
-                            先让 Agent 帮你定地点、玩法和重点，再把路线建议生成成当前主题。
-                          </p>
                         </div>
                         <button
                           type="button"
@@ -6745,12 +6742,11 @@ export default function App() {
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="font-medium text-slate-800">发布者设定</div>
+                        <div className="font-medium text-slate-800">发布身份</div>
                         <p className="mt-1 text-xs leading-6 text-slate-500">
                           社区模式会使用当前已保存的真实作者资料发布，包括昵称和头像。
                         </p>
-                      </div>
-                      <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-500">真实作者</span>
+                      </div>
                     </div>
 
                     <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/80 bg-white px-3 py-3">
@@ -6766,8 +6762,7 @@ export default function App() {
                         </div>
                       )}
                       <div>
-                        <div className="font-medium text-slate-900">{resolvedCommunityPublisherName}</div>
-                        <div className="mt-1 text-xs text-slate-500">头像将显示为真实作者头像</div>
+                        <div className="font-medium text-slate-900">{resolvedCommunityPublisherName}</div>
                       </div>
                     </div>
                   </div>
