@@ -2172,6 +2172,7 @@ export default function App() {
   const [recordCardFilename, setRecordCardFilename] = useState('walk-record-card.svg');
   const [activeTab, setActiveTab] = useState<'explore' | 'community' | 'profile'>('explore');
   const [currentTheme, setCurrentTheme] = useState<WalkTheme | null>(PRESET_THEMES[0]);
+  const [isThemeConfirmed, setIsThemeConfirmed] = useState(false);
   const [checkedMissions, setCheckedMissions] = useState<string[]>([]);
   const [history, setHistory] = useState<WalkTheme[]>([]);
   const [myWalks, setMyWalks] = useState<WalkItem[]>([]);
@@ -2328,7 +2329,7 @@ export default function App() {
               coverImageUrl: walk.photoUrl || '',
             };
 
-        setCurrentTheme(restoredTheme);
+        setConfirmedTheme(restoredTheme);
         setNoteText(walk.noteText || '');
         setCheckedMissions(((walk.completedMissions as string[] | undefined) || []).filter(Boolean));
 
@@ -2987,7 +2988,7 @@ export default function App() {
         nextRoomThemeKey === roomThemeSnapshotKey);
 
     if (shouldSyncTheme && room.theme) {
-      setCurrentTheme({
+      setConfirmedTheme({
         title: room.theme.title,
         description: room.theme.description,
         category: room.theme.category,
@@ -3024,7 +3025,7 @@ export default function App() {
     }
 
     if (payload.type === 'theme_updated' && payload.theme) {
-      setCurrentTheme({
+      setConfirmedTheme({
         title: payload.theme.title,
         description: payload.theme.description,
         category: payload.theme.category,
@@ -3435,9 +3436,13 @@ export default function App() {
       vibeColor: '#5a5a40',
     };
   };
-
-    const pushThemeHistory = (theme: WalkTheme) => {
+  const setConfirmedTheme = (theme: WalkTheme) => {
     setCurrentTheme(theme);
+    setIsThemeConfirmed(true);
+  };
+
+  const pushThemeHistory = (theme: WalkTheme) => {
+    setConfirmedTheme(theme);
   };
 
 
@@ -4521,7 +4526,7 @@ export default function App() {
               walkMode,
             );
 
-      setCurrentTheme(regeneratedTheme);
+      setConfirmedTheme(regeneratedTheme);
 
       if (suggestedPois.length > 0) {
         const unresolvedCount = Math.max(0, routeCandidates.length - resolvedRoutePois.length);
@@ -6631,6 +6636,7 @@ export default function App() {
                   <p className="mt-3 text-xs text-amber-700">当前在共创房间内只有房主可以修改主题，房间成员仍然可以继续打卡和记录轨迹。</p>
                 ) : null}
 
+                {isThemeConfirmed ? (
                 <div
                   className={`mt-6 rounded-[28px] border p-5 transition ${
                     isTracking
@@ -6677,6 +6683,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                ) : null}
 
               </div>
             </section>
