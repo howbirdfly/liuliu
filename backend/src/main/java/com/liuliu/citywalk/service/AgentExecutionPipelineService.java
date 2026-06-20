@@ -17,6 +17,26 @@ import java.util.Map;
 public class AgentExecutionPipelineService {
 
     private static final int MAX_TOOL_ROUNDS = 6;
+    private static final String PIPELINE_GUIDE = """
+
+            Follow this planning pipeline for every request:
+            1. Read the structured intent, user constraints, and any missing slots first.
+            2. Unless the user is only brainstorming a theme, prefer calling search_knowledge_base first to gather real City Walk references.
+            3. If the knowledge-base results are not enough for concrete stops, route order, or nearby options, then call map tools such as search_poi or nearby_pois.
+            4. Use get_walk_detail only when a referenced public walk needs more detail.
+            5. Avoid repeated overlapping tool calls when existing results already answer the question.
+            6. Never fabricate exact places when tools did not confirm them.
+            """;
+    private static final String FINAL_ANSWER_GUIDE = """
+
+            Final answer contract:
+            - Start with the recommended area, route theme, or route direction.
+            - Explain briefly why it fits the user's request.
+            - Provide a suggested route order or walking sequence when possible.
+            - Mention interesting stops, scenes, or observations worth noticing.
+            - End with one or two practical reminders.
+            - If some details are inferred instead of confirmed by tools, say that explicitly.
+            """;
     private static final String FALLBACK_GUIDE = """
 
             如果工具返回 success=false，或者包含 error / fallbackSuggestion 字段，说明这一步没有拿到可靠工具结果。
@@ -75,7 +95,7 @@ public class AgentExecutionPipelineService {
         String instructions = agentPromptAssemblyService.buildInstructions(
                 userId,
                 DEFAULT_INSTRUCTIONS,
-                agentIntentAnalysisService.buildPromptContext(intent),
+                buildRuntimeContext(intent),
                 FALLBACK_GUIDE
         );
         List<AgentStepResponse> steps = new ArrayList<>();
@@ -84,6 +104,12 @@ public class AgentExecutionPipelineService {
                 "intent",
                 normalizedPrompt,
                 agentIntentAnalysisService.toStepOutput(intent)
+        ));
+        steps.add(new AgentStepResponse(
+                "pipeline_strategy",
+                "knowledge_first_pipeline",
+                intent.summary(),
+                buildPipelineStepOutput(intent)
         ));
         Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
 
@@ -236,6 +262,61 @@ public class AgentExecutionPipelineService {
             return normalized;
         }
         return "我已经整理出一版基础漫步建议，但这轮没有拿到足够完整的模型文本输出。你可以继续追问我想去的城市、时间段或偏好。";
+    }
+
+    private String buildRuntimeContext(AgentIntentAnalysisService.AgentIntent intent) {
+        return agentIntentAnalysisService.buildPromptContext(intent)
+                + PIPELINE_GUIDE
+                + buildIntentSpecificPipelineGuide(intent)
+                + FINAL_ANSWER_GUIDE;
+    }
+
+    private String buildIntentSpecificPipelineGuide(AgentIntentAnalysisService.AgentIntent intent) {
+        if (intent == null) {
+            return "";
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("");
+        lines.add("Pipeline focus for this request:");
+        if (intent.needsKnowledgeReference()) {
+            lines.add("- Real references are important. Search the knowledge base before giving concrete recommendations.");
+        }
+        if (intent.useCurrentLocation()) {
+            lines.add("- The user cares about the current location. After the knowledge step, nearby_pois is preferred over a broad city-wide search.");
+        }
+        if (intent.needsPoiSearch() || intent.needsRoutePlanning()) {
+            lines.add("- Concrete route planning is needed. Use map tools only after you have enough context from existing references or user constraints.");
+        }
+        if (intent.needsThemeGeneration() && !intent.needsRoutePlanning()) {
+            lines.add("- This can stay at the theme or direction level. Do not force a heavy route search unless the user asks for exact stops.");
+        }
+        if (!intent.missingSlots().isEmpty()) {
+            lines.add("- Missing slots remain: " + String.join(", ", intent.missingSlots()) + ".");
+            lines.add("- If tools still cannot fill those gaps, provide conservative suggestions and briefly ask for the most important missing detail.");
+        }
+        if (lines.size() == 2) {
+            lines.add("- Use the default knowledge-first pipeline and keep tool usage economical.");
+        }
+        return "\n" + String.join("\n", lines);
+    }
+
+    private String buildPipelineStepOutput(AgentIntentAnalysisService.AgentIntent intent) {
+        List<String> steps = new ArrayList<>();
+        steps.add("intent -> prompt assembly");
+        if (intent != null && intent.needsThemeGeneration() && !intent.needsRoutePlanning()) {
+            steps.add("theme direction first");
+        } else {
+            steps.add("knowledge-first retrieval");
+        }
+        if (intent != null && intent.useCurrentLocation()) {
+            steps.add("nearby poi supplement if needed");
+        } else if (intent != null && (intent.needsPoiSearch() || intent.needsRoutePlanning())) {
+            steps.add("poi supplement if needed");
+        }
+        steps.add("route synthesis");
+        steps.add("final answer normalization");
+        return String.join(" -> ", steps);
     }
 
     private String safeText(String value, String fallback) {
