@@ -6915,28 +6915,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <WalkCommentSection
-                    comments={communityComments}
-                    isLoading={isLoadingCommunityComments}
-                    inputValue={communityCommentInput}
-                    replyTarget={communityReplyTarget}
-                    isSubmitting={isSubmittingCommunityComment}
-                    error={communityCommentError}
-                    walkAuthorId={selectedCommunityWalk.authorId}
-                    walkAuthorAvatar={selectedCommunityWalk.authorAvatar}
-                    currentUserId={user?.id}
-                    currentUserAvatar={user?.avatar}
-                    formatDate={formatProfilePostDate}
-                    onInputChange={(value) => {
-                      setCommunityCommentInput(value);
-                      if (communityCommentError) {
-                        setCommunityCommentError('');
-                      }
-                    }}
-                    onReplyChange={setCommunityReplyTarget}
-                    onSubmit={() => void handleSubmitCommunityComment()}
-                    onDelete={(commentId) => void handleDeleteCommunityComment(commentId)}
-                  />
+                  
 
                   {selectedCommunityWalk.noteText ? (
                     <div className="rounded-[28px] border border-slate-200 bg-slate-50 px-5 py-5">
@@ -6984,6 +6963,29 @@ export default function App() {
                       </div>
                     </div>
                   </div>
+<WalkCommentSection
+                    comments={communityComments}
+                    isLoading={isLoadingCommunityComments}
+                    inputValue={communityCommentInput}
+                    replyTarget={communityReplyTarget}
+                    isSubmitting={isSubmittingCommunityComment}
+                    error={communityCommentError}
+                    walkAuthorId={selectedCommunityWalk.authorId}
+                    walkAuthorAvatar={selectedCommunityWalk.authorAvatar}
+                    currentUserId={user?.id}
+                    currentUserAvatar={user?.avatar}
+                    formatDate={formatProfilePostDate}
+                    onInputChange={(value) => {
+                      setCommunityCommentInput(value);
+                      if (communityCommentError) {
+                        setCommunityCommentError('');
+                      }
+                    }}
+                    onReplyChange={setCommunityReplyTarget}
+                    onSubmit={() => void handleSubmitCommunityComment()}
+                    onDelete={(commentId) => void handleDeleteCommunityComment(commentId)}
+                  />
+
                 </article>
               </section>
             </main>
