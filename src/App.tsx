@@ -6381,18 +6381,8 @@ export default function App() {
                       <span className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600">{currentTheme?.category || '探索'}</span>
                     </div>
                     <h2 className="mt-3 text-2xl font-semibold text-slate-900">{currentTheme?.title || '先选一个今天想走的主题'}</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-500">
-                      你可以用灵感生成、自定义主题，或者直接让 Agent 先定地点和玩法，再开始这次 Walk。
-                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {isGenerating && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-right">
-                      <div className="text-xs uppercase tracking-[0.18em] text-slate-400">Checklist</div>
-                      <div className="mt-1 text-2xl font-semibold text-slate-900">{checkedMissions.length}/{currentThemeMissionCount}</div>
-                      <div className="text-xs text-slate-500">已勾选任务</div>
-                    </div>
-                  </div>
+                  {isGenerating && <LoaderCircle className="h-5 w-5 animate-spin text-amber-500" />}
                 </div>
 
                 <div
