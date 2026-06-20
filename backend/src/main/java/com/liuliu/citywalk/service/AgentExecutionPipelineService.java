@@ -35,15 +35,18 @@ public class AgentExecutionPipelineService {
             """;
 
     private final LlmClient llmClient;
+    private final AgentIntentAnalysisService agentIntentAnalysisService;
     private final AgentPromptAssemblyService agentPromptAssemblyService;
     private final AgentRoundService agentRoundService;
 
     public AgentExecutionPipelineService(
             LlmClient llmClient,
+            AgentIntentAnalysisService agentIntentAnalysisService,
             AgentPromptAssemblyService agentPromptAssemblyService,
             AgentRoundService agentRoundService
     ) {
         this.llmClient = llmClient;
+        this.agentIntentAnalysisService = agentIntentAnalysisService;
         this.agentPromptAssemblyService = agentPromptAssemblyService;
         this.agentRoundService = agentRoundService;
     }
@@ -67,9 +70,21 @@ public class AgentExecutionPipelineService {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         checkCancelled(executionHandle);
 
+        AgentIntentAnalysisService.AgentIntent intent = agentIntentAnalysisService.analyze(normalizedPrompt);
         List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(userId, normalizedPrompt);
-        String instructions = agentPromptAssemblyService.buildInstructions(userId, DEFAULT_INSTRUCTIONS, FALLBACK_GUIDE);
+        String instructions = agentPromptAssemblyService.buildInstructions(
+                userId,
+                DEFAULT_INSTRUCTIONS,
+                agentIntentAnalysisService.buildPromptContext(intent),
+                FALLBACK_GUIDE
+        );
         List<AgentStepResponse> steps = new ArrayList<>();
+        steps.add(new AgentStepResponse(
+                "intent_analysis",
+                "intent",
+                normalizedPrompt,
+                agentIntentAnalysisService.toStepOutput(intent)
+        ));
         Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
 
         emit(listener, new AgentExecutionEvent(

@@ -29,12 +29,18 @@ public class AgentPromptAssemblyService {
         );
     }
 
-    public String buildInstructions(Long userId, String defaultInstructions, String fallbackGuide) {
+    public String buildInstructions(
+            Long userId,
+            String defaultInstructions,
+            String runtimeContext,
+            String fallbackGuide
+    ) {
         String memoryContext = agentLongTermMemoryService.buildPromptContext(userId);
-        if (memoryContext.isBlank()) {
+        String normalizedRuntimeContext = runtimeContext == null ? "" : runtimeContext;
+        if (memoryContext.isBlank() && normalizedRuntimeContext.isBlank()) {
             return defaultInstructions + fallbackGuide;
         }
-        return defaultInstructions + memoryContext + fallbackGuide;
+        return defaultInstructions + normalizedRuntimeContext + memoryContext + fallbackGuide;
     }
 
     public void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
