@@ -815,6 +815,10 @@ function getAgentEventLabel(type: AgentStreamEvent['type']) {
   switch (type) {
     case 'start':
       return '开始规划';
+    case 'intent_analysis':
+      return '识别需求';
+    case 'pipeline_strategy':
+      return '确定流水线';
     case 'tool_call':
       return '调用工具';
     case 'tool_result':
@@ -905,6 +909,13 @@ function pickAgentItemLabel(item: unknown) {
 }
 
 function summarizeAgentInput(event: AgentStreamEvent) {
+  if (event.type === 'intent_analysis') {
+    return truncateAgentEventText(event.input, 180) || '根据用户原始需求抽取结构化意图';
+  }
+  if (event.type === 'pipeline_strategy') {
+    return truncateAgentEventText(event.input, 180) || '根据本轮意图确定执行策略';
+  }
+
   const payload = parseAgentEventJson(event.input);
   if (!payload) {
     return truncateAgentEventText(event.input, 180);
@@ -934,6 +945,33 @@ function summarizeAgentInput(event: AgentStreamEvent) {
 }
 
 function summarizeAgentOutput(event: AgentStreamEvent) {
+  if (event.type === 'intent_analysis') {
+    const payload = parseAgentEventJson(event.output);
+    if (!payload) {
+      return truncateAgentEventText(event.output, 280);
+    }
+    const segments: string[] = [];
+    const cities = Array.isArray(payload.cities) ? payload.cities.filter(Boolean).slice(0, 3) : [];
+    const areas = Array.isArray(payload.areas) ? payload.areas.filter(Boolean).slice(0, 3) : [];
+    const styles = Array.isArray(payload.styles) ? payload.styles.filter(Boolean).slice(0, 3) : [];
+    const objectives = Array.isArray(payload.objectives) ? payload.objectives.filter(Boolean).slice(0, 3) : [];
+    const missingSlots = Array.isArray(payload.missingSlots) ? payload.missingSlots.filter(Boolean).slice(0, 3) : [];
+    if (cities.length > 0) segments.push(`城市：${cities.join('、')}`);
+    if (areas.length > 0) segments.push(`区域：${areas.join('、')}`);
+    if (styles.length > 0) segments.push(`风格：${styles.join('、')}`);
+    if (objectives.length > 0) segments.push(`目标：${objectives.join('、')}`);
+    if (typeof payload.duration === 'string' && payload.duration.trim()) segments.push(`时长：${payload.duration.trim()}`);
+    if (typeof payload.timePreference === 'string' && payload.timePreference.trim()) segments.push(`时间：${payload.timePreference.trim()}`);
+    if (typeof payload.mobilityPreference === 'string' && payload.mobilityPreference.trim()) segments.push(`强度：${payload.mobilityPreference.trim()}`);
+    if (missingSlots.length > 0) segments.push(`缺失：${missingSlots.join('、')}`);
+    return segments.join('；') || '已提取本轮需求结构';
+  }
+
+  if (event.type === 'pipeline_strategy') {
+    const output = truncateAgentEventText(event.output, 280);
+    return output ? `执行顺序：${output}` : '默认走知识库优先的固定流水线';
+  }
+
   if (event.type !== 'tool_result') {
     return truncateAgentEventText(event.output, 280);
   }
@@ -981,7 +1019,7 @@ function summarizeAgentOutput(event: AgentStreamEvent) {
     const names = items.map(pickAgentItemLabel).filter(Boolean).slice(0, 3);
     return items.length > 0
       ? `从社区召回了 ${items.length} 条公开攻略，较相关的有 ${names.join('、')}。`
-      : '社区里暂时没有找到强相关的公开攻略。';
+      : '社区里暂时没找到强相关的公开攻略。';
   }
 
   if (event.name === 'search_knowledge_base') {
@@ -4144,17 +4182,33 @@ export default function App() {
   const applyAgentChatFallbackResponse = (assistantMessageId: string, response: AgentChatResponse) => {
     const answer = response.answer || '';
     const fallbackEvents: AgentStreamEvent[] = (response.steps || [])
-      .filter((step) => step.type === 'tool_call')
-      .map((step) => ({
-        type: 'tool_result',
-        name: step.name,
-        input: step.input,
-        output: step.output,
-        iteration: response.iterations ?? null,
-        provider: response.provider ?? null,
-        model: response.model ?? null,
-        code: 'sync_fallback',
-      }));
+      .flatMap<AgentStreamEvent>((step) => {
+        if (step.type === 'intent_analysis' || step.type === 'pipeline_strategy') {
+          return [{
+            type: step.type,
+            name: step.name,
+            input: step.input,
+            output: step.output,
+            iteration: response.iterations ?? null,
+            provider: response.provider ?? null,
+            model: response.model ?? null,
+            code: 'sync_fallback',
+          } satisfies AgentStreamEvent];
+        }
+        if (step.type === 'tool_call') {
+          return [{
+            type: 'tool_result',
+            name: step.name,
+            input: step.input,
+            output: step.output,
+            iteration: response.iterations ?? null,
+            provider: response.provider ?? null,
+            model: response.model ?? null,
+            code: 'sync_fallback',
+          } satisfies AgentStreamEvent];
+        }
+        return [];
+      });
 
     setAgentAnswer(answer);
     setAgentEvents(fallbackEvents);
@@ -4256,6 +4310,15 @@ export default function App() {
           return;
         }
 
+        if (payload.type === 'intent_analysis') {
+          setAgentStatus('Agent 正在识别这轮需求...');
+          return;
+        }
+
+        if (payload.type === 'pipeline_strategy') {
+          setAgentStatus('Agent 已确定本轮执行流水线...');
+          return;
+        }
         if (payload.type === 'tool_call') {
           setAgentStatus(`正在调用工具：${payload.name}`);
           return;
@@ -4324,6 +4387,8 @@ export default function App() {
     };
 
     stream.addEventListener('start', handleAgentEvent);
+    stream.addEventListener('intent_analysis', handleAgentEvent);
+    stream.addEventListener('pipeline_strategy', handleAgentEvent);
     stream.addEventListener('tool_call', handleAgentEvent);
     stream.addEventListener('tool_result', handleAgentEvent);
     stream.addEventListener('answer_delta', handleAgentEvent);

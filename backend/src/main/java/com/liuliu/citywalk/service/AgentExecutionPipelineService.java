@@ -123,6 +123,26 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
+        emit(listener, new AgentExecutionEvent(
+                "intent_analysis",
+                "intent",
+                normalizedPrompt,
+                agentIntentAnalysisService.toStepOutput(intent),
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                null
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "pipeline_strategy",
+                "knowledge_first_pipeline",
+                intent.summary(),
+                buildPipelineStepOutput(intent),
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                null
+        ));
         return new PreparedExecution(userId, normalizedPrompt, instructions, messages, steps, toolExecutionMemoByKey);
     }
 

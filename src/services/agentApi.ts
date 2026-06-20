@@ -1,6 +1,15 @@
 import { apiRequest, getApiBaseUrlForDebug } from './apiClient';
 
-export type AgentStreamEventType = 'start' | 'tool_call' | 'tool_result' | 'answer_delta' | 'final_answer' | 'complete' | 'agent_error';
+export type AgentStreamEventType =
+  | 'start'
+  | 'intent_analysis'
+  | 'pipeline_strategy'
+  | 'tool_call'
+  | 'tool_result'
+  | 'answer_delta'
+  | 'final_answer'
+  | 'complete'
+  | 'agent_error';
 
 export interface AgentStreamEvent {
   type: AgentStreamEventType;
