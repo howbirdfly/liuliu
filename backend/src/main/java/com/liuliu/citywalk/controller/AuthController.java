@@ -8,9 +8,7 @@ import com.liuliu.citywalk.model.dto.request.EmailRegisterRequest;
 import com.liuliu.citywalk.model.dto.request.EmailResetPasswordRequest;
 import com.liuliu.citywalk.model.dto.request.LoginRequest;
 import com.liuliu.citywalk.model.dto.request.UpdateUserProfileRequest;
-import com.liuliu.citywalk.model.dto.request.WebSyncUserRequest;
 import com.liuliu.citywalk.model.dto.response.LoginResponse;
-import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
 import com.liuliu.citywalk.service.AuthTokenService;
 import com.liuliu.citywalk.service.EmailAuthService;
@@ -108,23 +106,12 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/sync-user")
-    public ApiResponse<MiniappSyncUserResponse> syncUser(@RequestBody(required = false) WebSyncUserRequest request) {
-        WebSyncUserRequest finalRequest = request == null
-                ? new WebSyncUserRequest(null, null, null, null)
-                : request;
-        return ApiResponse.success(
-                userSessionService.syncWebUser(
-                        finalRequest.resolvedCode(),
-                        finalRequest.resolvedNickName(),
-                        finalRequest.resolvedAvatarUrl()
-                )
-        );
-    }
-
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> currentUser() {
         UserSessionService.StoredUser currentUser = userSessionService.loadUserById(BaseContext.requireCurrentUserId());
+        if (currentUser == null) {
+            return ApiResponse.fail(404, "user_not_found");
+        }
         return ApiResponse.success(new UserProfileResponse(
                 currentUser.id(),
                 currentUser.nickName(),

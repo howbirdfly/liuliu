@@ -5,9 +5,9 @@ import com.liuliu.citywalk.model.dto.request.CombineThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GeneratePresetThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GenerateThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GenerateWalkRecordCardRequest;
-import com.liuliu.citywalk.model.dto.request.MiniappMissionVerifyRequest;
+import com.liuliu.citywalk.model.dto.request.MissionVerifyRequest;
 import com.liuliu.citywalk.model.dto.response.LocationContextResponse;
-import com.liuliu.citywalk.model.dto.response.MiniappMissionVerifyResponse;
+import com.liuliu.citywalk.model.dto.response.MissionVerifyResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeStreamEventResponse;
 import com.liuliu.citywalk.model.dto.response.WalkRecordCardTextResponse;
@@ -129,7 +129,7 @@ public class AiThemeController {
     }
 
     @PostMapping("/missions/verify")
-    public ApiResponse<MiniappMissionVerifyResponse> verifyMission(@RequestBody MiniappMissionVerifyRequest request) {
+    public ApiResponse<MissionVerifyResponse> verifyMission(@RequestBody MissionVerifyRequest request) {
         return ApiResponse.success(missionVerifyAiService.verifyMission(request));
     }
 

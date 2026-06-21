@@ -11,11 +11,6 @@ public interface UserMapper {
 
     UserEntity findById(@Param("id") Long id);
 
-    int insertMiniappUser(@Param("openid") String openid,
-                          @Param("nickname") String nickname,
-                          @Param("avatarUrl") String avatarUrl,
-                          @Param("bio") String bio);
-
     int insertWebUser(@Param("openid") String openid,
                       @Param("nickname") String nickname,
                       @Param("avatarUrl") String avatarUrl,
@@ -27,11 +22,6 @@ public interface UserMapper {
                         @Param("avatarUrl") String avatarUrl,
                         @Param("bio") String bio,
                         @Param("source") String source);
-
-    int updateProfileAndLogin(@Param("id") Long id,
-                              @Param("nickname") String nickname,
-                              @Param("avatarUrl") String avatarUrl,
-                              @Param("source") String source);
 
     int updateProfile(@Param("id") Long id,
                       @Param("nickname") String nickname,

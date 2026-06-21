@@ -1,6 +1,5 @@
 package com.liuliu.citywalk.service;
 
-import com.liuliu.citywalk.context.MiniappUserContext;
 import com.liuliu.citywalk.mapper.EmailVerificationMapper;
 import com.liuliu.citywalk.mapper.UploadedFileMapper;
 import com.liuliu.citywalk.mapper.UserCredentialMapper;
@@ -8,8 +7,6 @@ import com.liuliu.citywalk.mapper.UserMapper;
 import com.liuliu.citywalk.mapper.WalkInteractionMapper;
 import com.liuliu.citywalk.mapper.entity.UserCredentialEntity;
 import com.liuliu.citywalk.mapper.entity.UserEntity;
-import com.liuliu.citywalk.model.dto.response.MiniappSyncUserResponse;
-import com.liuliu.citywalk.model.dto.response.MiniappUserResponse;
 import com.liuliu.citywalk.model.dto.response.UserProfileResponse;
 import com.liuliu.citywalk.util.AliOssUtil;
 import org.springframework.stereotype.Service;
@@ -30,7 +27,6 @@ public class UserSessionService {
     private final UploadedFileMapper uploadedFileMapper;
     private final WalkInteractionMapper walkInteractionMapper;
     private final AliOssUtil aliOssUtil;
-    private final StoredUser guestUser = new StoredUser(0L, "guest", "游客", "", "", "guest", 0L, 0L);
 
     public UserSessionService(
             AuthTokenService authTokenService,
@@ -51,47 +47,6 @@ public class UserSessionService {
     }
 
     @Transactional
-    public MiniappSyncUserResponse syncUser(String code, String nickName, String avatarUrl) {
-        return syncUser(code, nickName, avatarUrl, "miniapp");
-    }
-
-    @Transactional
-    public MiniappSyncUserResponse syncWebUser(String code, String nickName, String avatarUrl) {
-        return syncUser(code, nickName, avatarUrl, "web");
-    }
-
-    @Transactional
-    public MiniappSyncUserResponse syncUser(String code, String nickName, String avatarUrl, String clientType) {
-        String openId = buildOpenId(code, nickName);
-        UserRecord user = findByOpenid(openId)
-                .map(item -> updateProfileAndLogin(item.id(), normalizeNickName(nickName), normalizeAvatar(avatarUrl), clientType))
-                .orElseGet(() -> createUser(openId, normalizeNickName(nickName), normalizeAvatar(avatarUrl), clientType));
-
-        String token = authTokenService.createAccessToken(user.id());
-        String refreshToken = authTokenService.createRefreshToken(user.id());
-
-        return new MiniappSyncUserResponse(token, refreshToken, authTokenService.getAccessExpireSeconds(), toResponse(user), user.openid());
-    }
-
-    public MiniappUserResponse currentUser(String authorizationHeader) {
-        return toResponse(resolveUser(authorizationHeader));
-    }
-
-    public MiniappUserResponse currentUser() {
-        return toResponse(loadUserById(MiniappUserContext.getCurrentUserId()));
-    }
-
-    @Transactional
-    public UserProfileResponse updateProfile(String authorizationHeader, String nickName, String avatarUrl, String bio) {
-        StoredUser currentUser = resolveUser(authorizationHeader);
-        if (currentUser == null || currentUser.isGuest()) {
-            throw new IllegalStateException("login_required");
-        }
-
-        return updateProfileByUserId(currentUser.id(), nickName, avatarUrl, bio);
-    }
-
-    @Transactional
     public UserProfileResponse updateProfileByUserId(Long userId, String nickName, String avatarUrl, String bio) {
         if (userId == null || userId <= 0) {
             throw new IllegalStateException("login_required");
@@ -109,16 +64,6 @@ public class UserSessionService {
                 updatedUser.avatarUrl(),
                 updatedUser.bio()
         );
-    }
-
-    @Transactional
-    public void deleteCurrentUser(String authorizationHeader) {
-        StoredUser currentUser = resolveUser(authorizationHeader);
-        if (currentUser == null || currentUser.isGuest()) {
-            throw new IllegalStateException("login_required");
-        }
-
-        deleteCurrentUserByUserId(currentUser.id());
     }
 
     @Transactional
@@ -160,48 +105,30 @@ public class UserSessionService {
 
     public StoredUser resolveUserByToken(String token) {
         if (token == null || token.isBlank()) {
-            return guestUser;
+            return null;
         }
 
         try {
             AuthTokenService.TokenClaims claims = authTokenService.parseAccessToken(token);
             return findById(claims.userId())
                     .map(this::toStoredUser)
-                    .orElse(guestUser);
+                    .orElse(null);
         } catch (Exception error) {
-            return guestUser;
+            return null;
         }
     }
 
     public StoredUser loadUserById(Long userId) {
         if (userId == null || userId <= 0) {
-            return guestUser;
+            return null;
         }
         return findById(userId)
                 .map(this::toStoredUser)
-                .orElse(guestUser);
-    }
-
-    private Optional<UserRecord> findByOpenid(String openid) {
-        return Optional.ofNullable(userMapper.findByOpenid(openid)).map(this::toRecord);
+                .orElse(null);
     }
 
     private Optional<UserRecord> findById(Long id) {
         return Optional.ofNullable(userMapper.findById(id)).map(this::toRecord);
-    }
-
-    private UserRecord createUser(String openid, String nickname, String avatarUrl, String clientType) {
-        if ("web".equalsIgnoreCase(normalizeClientType(clientType))) {
-            userMapper.insertWebUser(openid, nickname, avatarUrl, "");
-        } else {
-            userMapper.insertMiniappUser(openid, nickname, avatarUrl, "");
-        }
-        return findByOpenid(openid).orElseThrow(() -> new IllegalStateException("created_user_not_found"));
-    }
-
-    private UserRecord updateProfileAndLogin(Long id, String nickname, String avatarUrl, String clientType) {
-        userMapper.updateProfileAndLogin(id, nickname, avatarUrl, normalizeClientType(clientType));
-        return findById(id).orElseThrow(() -> new IllegalStateException("updated_user_not_found"));
     }
 
     private UserRecord updateProfile(Long id, String nickname, String avatarUrl, String bio) {
@@ -217,19 +144,8 @@ public class UserSessionService {
         return token.isBlank() ? null : token;
     }
 
-    private String buildOpenId(String code, String nickName) {
-        String seed = code;
-        if (seed == null || seed.isBlank()) {
-            seed = nickName;
-        }
-        if (seed == null || seed.isBlank()) {
-            seed = "guest-" + System.currentTimeMillis();
-        }
-        return "wx_" + Integer.toUnsignedString(seed.hashCode());
-    }
-
     private String normalizeNickName(String nickName) {
-        return nickName == null || nickName.isBlank() ? "微信用户" : nickName.trim();
+        return nickName == null || nickName.isBlank() ? "" : nickName.trim();
     }
 
     private String normalizeAvatar(String avatarUrl) {
@@ -240,13 +156,6 @@ public class UserSessionService {
         return bio == null ? "" : bio.trim();
     }
 
-    private String normalizeClientType(String clientType) {
-        if (clientType == null || clientType.isBlank()) {
-            return "miniapp";
-        }
-        return clientType.trim();
-    }
-
     private StoredUser toStoredUser(UserRecord user) {
         return new StoredUser(
                 user.id(),
@@ -254,30 +163,6 @@ public class UserSessionService {
                 user.nickname(),
                 user.avatarUrl(),
                 user.bio(),
-                user.role(),
-                user.createdAt(),
-                user.lastLoginAt()
-        );
-    }
-
-    private MiniappUserResponse toResponse(StoredUser user) {
-        return user == null ? null : new MiniappUserResponse(
-                user.id(),
-                user.openid(),
-                user.nickName(),
-                user.avatarUrl(),
-                user.role(),
-                user.createdAt(),
-                user.lastLoginAt()
-        );
-    }
-
-    private MiniappUserResponse toResponse(UserRecord user) {
-        return user == null ? null : new MiniappUserResponse(
-                user.id(),
-                user.openid(),
-                user.nickname(),
-                user.avatarUrl(),
                 user.role(),
                 user.createdAt(),
                 user.lastLoginAt()

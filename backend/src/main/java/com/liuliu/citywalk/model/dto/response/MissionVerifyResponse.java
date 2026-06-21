@@ -1,6 +1,6 @@
 package com.liuliu.citywalk.model.dto.response;
 
-public record MiniappMissionVerifyResponse(
+public record MissionVerifyResponse(
         boolean passed,
         String comment,
         String confidence,

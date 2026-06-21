@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
-import com.liuliu.citywalk.model.dto.request.MiniappMissionVerifyRequest;
-import com.liuliu.citywalk.model.dto.response.MiniappMissionVerifyResponse;
+import com.liuliu.citywalk.model.dto.request.MissionVerifyRequest;
+import com.liuliu.citywalk.model.dto.response.MissionVerifyResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,20 +44,20 @@ public class MissionVerifyAiService {
                 .build();
     }
 
-    public MiniappMissionVerifyResponse verifyMission(MiniappMissionVerifyRequest request) {
+    public MissionVerifyResponse verifyMission(MissionVerifyRequest request) {
         if (request == null || isBlank(request.mission())) {
-            return new MiniappMissionVerifyResponse(false, MISSING_INPUT_COMMENT, "low", System.currentTimeMillis(), "missing_input");
+            return new MissionVerifyResponse(false, MISSING_INPUT_COMMENT, "low", System.currentTimeMillis(), "missing_input");
         }
 
         List<String> imageUrls = collectImageUrls(request);
         if (imageUrls.isEmpty()) {
-            return new MiniappMissionVerifyResponse(false, MISSING_INPUT_COMMENT, "low", System.currentTimeMillis(), "missing_input");
+            return new MissionVerifyResponse(false, MISSING_INPUT_COMMENT, "low", System.currentTimeMillis(), "missing_input");
         }
 
         try {
             VerifyPayload payload = callVisionModel(request.mission(), request.noteText(), imageUrls);
             boolean passed = payload != null && payload.passed();
-            return new MiniappMissionVerifyResponse(
+            return new MissionVerifyResponse(
                     passed,
                     firstNonBlank(payload == null ? null : payload.comment(), passed ? PASS_COMMENT : FAIL_COMMENT),
                     firstNonBlank(payload == null ? null : payload.confidence(), "medium"),
@@ -66,7 +66,7 @@ public class MissionVerifyAiService {
             );
         } catch (Exception error) {
             log.warn("Mission verify AI failed, fallback to pass: {}", error.getMessage());
-            return new MiniappMissionVerifyResponse(true, FALLBACK_COMMENT, "fallback", System.currentTimeMillis(), error.getMessage());
+            return new MissionVerifyResponse(true, FALLBACK_COMMENT, "fallback", System.currentTimeMillis(), error.getMessage());
         }
     }
 
@@ -119,7 +119,7 @@ public class MissionVerifyAiService {
         return objectMapper.readValue(stripCodeFence(rawContent), VerifyPayload.class);
     }
 
-    private List<String> collectImageUrls(MiniappMissionVerifyRequest request) {
+    private List<String> collectImageUrls(MissionVerifyRequest request) {
         Set<String> urls = new LinkedHashSet<>();
         appendUrls(urls, request.fileUrls(), false);
         appendUrls(urls, request.fileIDs(), true);

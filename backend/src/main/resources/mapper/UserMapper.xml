@@ -29,11 +29,6 @@
         limit 1
     </select>
 
-    <insert id="insertMiniappUser">
-        insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
-        values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'miniapp', now(), now(), now())
-    </insert>
-
     <insert id="insertWebUser">
         insert into users (openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at)
         values (#{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', 'web', now(), now(), now())
@@ -44,12 +39,6 @@
           id, openid, nickname, avatar_url, bio, role, status, source, created_at, updated_at, last_login_at
         ) values (#{id}, #{openid}, #{nickname}, #{avatarUrl}, #{bio}, 'user', 'active', #{source}, now(), now(), now())
     </insert>
-
-    <update id="updateProfileAndLogin">
-        update users
-        set nickname = #{nickname}, avatar_url = #{avatarUrl}, source = #{source}, updated_at = now(), last_login_at = now()
-        where id = #{id}
-    </update>
 
     <update id="updateProfile">
         update users

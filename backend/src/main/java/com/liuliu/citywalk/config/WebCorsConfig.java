@@ -1,6 +1,5 @@
 package com.liuliu.citywalk.config;
 
-import com.liuliu.citywalk.interceptor.MiniappJwtInterceptor;
 import com.liuliu.citywalk.interceptor.WebJwtInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -13,11 +12,9 @@ import java.nio.file.Paths;
 @Configuration
 public class WebCorsConfig implements WebMvcConfigurer {
 
-    private final MiniappJwtInterceptor miniappJwtInterceptor;
     private final WebJwtInterceptor webJwtInterceptor;
 
-    public WebCorsConfig(MiniappJwtInterceptor miniappJwtInterceptor, WebJwtInterceptor webJwtInterceptor) {
-        this.miniappJwtInterceptor = miniappJwtInterceptor;
+    public WebCorsConfig(WebJwtInterceptor webJwtInterceptor) {
         this.webJwtInterceptor = webJwtInterceptor;
     }
 
@@ -57,13 +54,6 @@ public class WebCorsConfig implements WebMvcConfigurer {
     //拦截器
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(miniappJwtInterceptor)
-                .addPathPatterns(
-                        "/api/v1/miniapp/auth/me",
-                        "/api/v1/miniapp/walks",
-                        "/api/v1/miniapp/walks/me"
-                );
-
         registry.addInterceptor(webJwtInterceptor)
                 .addPathPatterns("/api/v1/**")
                 .excludePathPatterns(
