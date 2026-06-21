@@ -1,34 +1,75 @@
 # LiuLiu City Walk
 
-一个结合地图、AI 主题生成、轨迹记录、社区分享和多人共创房间的 City Walk Web 项目。
+一个围绕 City Walk 场景搭建的前后端一体项目，包含主题生成、路线探索、轨迹记录、社区分享、共创房间和 Agent 路线规划等能力。
 
 ## 项目结构
 
 ```text
 .
-├─ src/                         # React + Vite 前端
-├─ backend/                     # Spring Boot 后端
-│  ├─ src/main/java/...         # 控制器、服务、仓储
-│  ├─ src/main/resources/       # 本地配置
-│  ├─ liuliu (2).sql            # 现有数据库初始化脚本
-│  └─ LiuLiu.sql
-├─ docs/                        # 设计或补充资料
+├─ src/                              # React + Vite 前端
+│  ├─ components/                    # 页面组件与业务组件
+│  ├─ services/                      # 前端 API 封装
+│  ├─ App.tsx                        # 前端主页面
+│  ├─ main.tsx                       # 前端入口
+│  └─ index.css                      # 全局样式
+├─ backend/                          # Spring Boot 后端
+│  ├─ src/main/java/com/liuliu/citywalk
+│  │  ├─ controller/                 # REST / SSE 接口
+│  │  ├─ service/                    # 业务服务与 Agent 流程
+│  │  ├─ service/agent/              # LLM 客户端、消息模型、工具协议
+│  │  ├─ service/agent/tool/         # Agent 可调用工具
+│  │  ├─ service/rag/                # 向量检索、知识库摄取、召回
+│  │  ├─ mapper/                     # MyBatis Mapper
+│  │  ├─ mapper/entity/              # 数据库实体
+│  │  ├─ model/dto/                  # 请求响应 DTO
+│  │  ├─ config/                     # 配置类
+│  │  ├─ interceptor/                # 登录态拦截器
+│  │  ├─ websocket/                  # 共创房间实时通信
+│  │  └─ CityWalkBackendApplication  # 后端启动入口
+│  ├─ src/main/resources/
+│  │  ├─ application-local.yml       # 本地开发配置
+│  │  └─ application-prod.yml        # 生产配置模板
+│  ├─ liuliu (2).sql                 # 数据库初始化脚本
+│  └─ LiuLiu.sql                     # 另一份数据库初始化脚本
+├─ docs/                             # 部署、设计和补充文档
+├─ scripts/                          # 辅助脚本
+├─ docker-compose.milvus.yml         # 本地启动 Milvus 的示例编排
+├─ package.json                      # 前端依赖与脚本
 └─ README.md
 ```
 
-## 当前能力
+## 核心模块说明
 
-- AI 生成个人漫步主题、组合主题和任务
-- 高德地图定位、选点、轨迹记录和历史轨迹详情
-- QQ 邮箱注册 / 登录
-- 图片上传到阿里云 OSS
-- 社区公开记录浏览
-- 个人主页、详细记录卡、任务打卡
-- 进阶模式下的共创房间
-  - 房主创建房间号
-  - 其他成员输入房间号加入
-  - 最多 5 人
-  - 所有成员的位置点和轨迹同时显示在地图上
+### 前端
+
+- `src/App.tsx`
+  当前主交互页面，承接主题选择、地图、轨迹、社区、Agent、房间等主要 UI。
+- `src/services/`
+  按能力拆分 API 调用，例如：
+  - `authApi.ts`：登录、注册、用户信息
+  - `agentApi.ts`：Agent 同步对话和流式规划
+  - `walkApi.ts`：漫步记录、轨迹点、详情
+  - `communityApi.ts`：社区动态、评论、点赞、收藏
+  - `roomApi.ts`：共创房间
+  - `mapApi.ts`：地图搜索与 POI
+  - `fileApi.ts`：文件上传
+
+### 后端
+
+- `controller/`
+  暴露所有 HTTP 接口，按业务划分为认证、主题、Walk、社区、房间、Agent、RAG、文件上传等。
+- `service/`
+  业务编排层，处理主题生成、路线规划、通知、房间状态、用户会话等核心逻辑。
+- `service/agent/`
+  封装大模型调用协议，包括消息结构、工具调用定义和 DeepSeek 客户端。
+- `service/agent/tool/`
+  提供给 Agent 的外部工具，例如知识库检索、POI 搜索、社区路线检索、Walk 详情读取等。
+- `service/rag/`
+  负责知识库导入、Embedding、Milvus 向量检索、召回与重排。
+- `mapper/`
+  基于 MyBatis 操作 MySQL。
+- `websocket/`
+  处理共创房间的实时消息，默认入口为 `/ws/co-create`。
 
 ## 技术栈
 
@@ -38,27 +79,65 @@
 - TypeScript
 - Vite
 - Lucide React
-- 高德 JS API
+- Firebase SDK
 
 ### 后端
 
 - Spring Boot 3.4.4
-- Spring JDBC
+- Spring Web / Validation / WebSocket / Actuator / Mail / Redis
+- Spring AI
+- MyBatis
 - MySQL 8
-- JavaMail
-- 阿里云 OSS SDK
 
-## 本地开发
+### AI 与外部能力
 
-### 1. 前端
+- DeepSeek：对话和 Agent 规划
+- 高德地图：POI 搜索、地点上下文
+- 阿里云 OSS：图片上传
+- Milvus：向量知识库
 
-安装依赖：
+## 主要接口入口
+
+后端接口主要集中在以下几组路径：
+
+- `/api/v1/auth`：登录、注册、验证码、个人信息
+- `/api/v1/themes`：主题数据
+- `/api/v1/ai`：AI 主题生成、流式生成、任务校验
+- `/api/v1/walks`：漫步记录、会话、详情
+- `/api/v1/community`：社区动态、评论、互动
+- `/api/v1/co-create`：共创房间
+- `/api/v1/agent`：Agent 对话、流式规划、记忆清理
+- `/api/v1/map`：地图搜索与附近 POI
+- `/api/v1/rag`：知识库检索与摄取
+- `/api/v1/files`：文件上传
+- `/api/v1/notifications`：通知与 SSE 流
+
+## 本地启动前准备
+
+建议先准备这些基础环境：
+
+- Node.js 18 或更高版本
+- npm 9 或更高版本
+- Java 21
+- Maven 3.9+
+- MySQL 8
+
+可选依赖：
+
+- Redis：用于部分缓存、通知、会话和房间相关能力
+- Docker：如果要跑 Milvus / RAG，本地会更方便
+
+## 前端启动
+
+### 1. 安装依赖
 
 ```bash
 npm install
 ```
 
-创建或检查本地环境变量，例如 `.env.local`：
+### 2. 配置环境变量
+
+项目根目录可参考 `.env.example` 新建或修改 `.env.local`：
 
 ```env
 VITE_API_BASE_URL="http://localhost:8080"
@@ -66,19 +145,61 @@ VITE_USE_MOCK_LOGIN="false"
 VITE_AMAP_JS_KEY="YOUR_AMAP_JS_KEY"
 ```
 
-启动前端：
+说明：
+
+- `VITE_API_BASE_URL`：后端服务地址
+- `VITE_USE_MOCK_LOGIN`：是否启用前端的 mock 登录流程
+- `VITE_AMAP_JS_KEY`：高德 JS API Key
+
+### 3. 启动前端开发服务
 
 ```bash
 npm run dev
 ```
 
-默认地址：
+默认访问地址：
 
 ```text
 http://localhost:3000
 ```
 
-### 2. 后端
+## 后端启动
+
+### 1. 初始化数据库
+
+任选一份 SQL 脚本导入本地 MySQL：
+
+```bash
+mysql -uroot -p liuliu_citywalk < "backend/liuliu (2).sql"
+```
+
+或：
+
+```bash
+mysql -uroot -p liuliu_citywalk < "backend/LiuLiu.sql"
+```
+
+### 2. 检查本地配置
+
+后端本地配置文件在：
+
+- `backend/src/main/resources/application-local.yml`
+
+启动前至少要确认这些配置可用：
+
+- `spring.datasource`：MySQL 地址、账号、密码
+- `amap`：高德地图 Key
+- `deepseek`：大模型地址与 Key
+- `jwt`：登录态签名配置
+
+按需确认：
+
+- `spring.mail`：邮箱验证码功能
+- `sky.alioss`：图片上传功能
+- `spring.data.redis`：Redis 相关能力
+- `milvus` 与 `embedding`：RAG / 知识库能力
+
+### 3. 启动 Spring Boot
 
 进入后端目录：
 
@@ -86,193 +207,69 @@ http://localhost:3000
 cd backend
 ```
 
-启动方式二选一：
+使用本地 profile 启动：
 
 ```bash
-mvn spring-boot:run
+mvn spring-boot:run "-Dspring-boot.run.profiles=local"
 ```
 
-或
+如果你的 Maven 不在环境变量里，也可以直接指定完整路径，例如：
 
 ```bash
-mvn -DskipTests package
-java -jar target/citywalk-backend-0.0.1-SNAPSHOT.jar
+D:\Maven\apache-maven-3.9.11\bin\mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=local"
 ```
 
-## 数据库初始化
+默认后端端口：
 
-### 基础表
-
-先导入已有 SQL：
-
-```bash
-mysql -uroot -p liuliu_citywalk < "backend/liuliu (2).sql"
+```text
+http://localhost:8080
 ```
 
-或根据你实际使用的脚本导入：
-
-```bash
-mysql -uroot -p liuliu_citywalk < "backend/LiuLiu.sql"
-```
-
-### 房间共创表
-
-由于项目已经移除了“后端启动时自动建表”逻辑，所以新增的房间表需要手动创建。
-
-执行下面这段 SQL：
-
-```sql
-CREATE TABLE IF NOT EXISTS co_create_rooms (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  room_code VARCHAR(16) NOT NULL UNIQUE,
-  owner_user_id BIGINT NOT NULL,
-  theme_snapshot TEXT NULL,
-  status VARCHAR(16) NOT NULL DEFAULT 'active',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_co_create_rooms_owner_user_id (owner_user_id)
-);
-
-CREATE TABLE IF NOT EXISTS co_create_room_members (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  room_id BIGINT NOT NULL,
-  user_id BIGINT NOT NULL,
-  nickname VARCHAR(64) NOT NULL,
-  avatar_url VARCHAR(512) NULL,
-  track_color VARCHAR(32) NOT NULL,
-  route_points TEXT NULL,
-  current_position TEXT NULL,
-  completed_missions TEXT NULL,
-  is_tracking TINYINT(1) NOT NULL DEFAULT 0,
-  last_active_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_co_create_room_member (room_id, user_id),
-  INDEX idx_co_create_room_members_room_id (room_id),
-  INDEX idx_co_create_room_members_user_id (user_id)
-);
-```
-
-## 配置说明
-
-### 前端环境变量
-
-常用项：
-
-```env
-VITE_API_BASE_URL="http://localhost:8080"
-VITE_USE_MOCK_LOGIN="false"
-VITE_AMAP_JS_KEY="YOUR_AMAP_JS_KEY"
-```
-
-### 后端配置
-
-后端生产环境通常通过外部配置文件启动，例如：
-
-```bash
-java -jar target/citywalk-backend-0.0.1-SNAPSHOT.jar \
-  --spring.config.location=file:/opt/liuliu/config/application-prod.yml
-```
-
-生产配置需要至少包含：
-
-- `spring.datasource`
-- `spring.mail`
-- `amap`
-- `deepseek`
-- `mission-verify-ai`
-- `sky.alioss`
-- `jwt`
-
-## 图片上传说明
-
-项目当前是：
-
-- 前端先请求后端获取 OSS 直传签名
-- 浏览器直接上传到 OSS
-- 后端只负责签名和落库
-
-这意味着你需要在 OSS Bucket 上配置：
-
-- 公共读
-- CORS 放行以下来源
-
-本地开发：
-
-- `http://localhost:3000`
-- `http://127.0.0.1:3000`
-
-线上域名：
-
-- `https://liu--liu.com`
-- `https://www.liu--liu.com`
-
-推荐允许的方法：
-
-- `POST`
-- `GET`
-- `OPTIONS`
-
-## 生产部署
-
-### 前端
-
-构建前端：
-
-```bash
-npm run build
-```
-
-通常使用 Nginx 托管 `dist/`。
-
-### 后端
-
-构建后端：
+### 4. 打包后运行
 
 ```bash
 cd backend
 mvn -DskipTests package
+java -jar target/citywalk-backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-启动：
+## 可选能力启动说明
+
+### Redis
+
+如果你要测试通知、缓存、会话或部分实时能力，建议准备 Redis，并确保 `application-local.yml` 中的 Redis 地址可访问。
+
+### Milvus / RAG
+
+如果你要测试知识库检索链路，需要额外准备 Milvus 和 Embedding 配置。
+
+仓库里已经提供了编排文件：
 
 ```bash
-java -jar target/citywalk-backend-0.0.1-SNAPSHOT.jar \
-  --spring.config.location=file:/opt/liuliu/config/application-prod.yml
+docker compose -f docker-compose.milvus.yml up -d
 ```
 
-### Nginx 反向代理示例
+如果你暂时不想启用知识库，可以把本地配置中的相关开关关闭，或使用不依赖 RAG 的功能先联调前后端。
 
-```nginx
-server {
-    listen 80;
-    server_name liu--liu.com www.liu--liu.com;
+## 推荐启动顺序
 
-    root /opt/liuliu/liuliu/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
+```text
+1. 启动 MySQL
+2. 导入 SQL
+3. 检查 backend/application-local.yml
+4. 启动后端（8080）
+5. 配置前端 .env.local
+6. 启动前端（3000）
+7. 打开浏览器联调
 ```
-
-## 开发提示
-
-- 纯净模式保持单人漫步体验
-- 进阶模式是房间共创模式
-- 项目已经移除了 Gemini 相关后端代码，当前主用 AI 侧为 DeepSeek / 其他现有配置
-- 项目已经移除了后端启动自动建表，请把数据库迁移和建表放到 SQL 或迁移脚本中管理
 
 ## 常用命令
+
+前端开发：
+
+```bash
+npm run dev
+```
 
 前端类型检查：
 
@@ -280,15 +277,32 @@ server {
 npm run lint
 ```
 
-前端构建：
+前端打包：
 
 ```bash
 npm run build
 ```
 
-后端构建：
+后端开发启动：
+
+```bash
+cd backend
+mvn spring-boot:run "-Dspring-boot.run.profiles=local"
+```
+
+后端打包：
 
 ```bash
 cd backend
 mvn -DskipTests package
 ```
+
+## 部署相关文档
+
+如果你后面要继续整理上线流程，可以看 `docs/` 目录里的资料：
+
+- `docs/deploy-server.md`
+- `docs/seed-community-walks.md`
+- `docs/springboot-api-plan.md`
+
+其中部分文档可能更偏阶段性记录，建议以当前代码和配置文件为准。
