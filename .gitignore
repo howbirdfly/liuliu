@@ -15,3 +15,10 @@ backend/target/
 
 # Local runtime / container data
 volumes/
+
+# Local generated docs / scratch files
+tmp_*.txt
+tools/plantuml.jar
+docs/uml/
+docs/osdi23-gupta-*.md
+docs/*SRS.md

@@ -48,6 +48,10 @@ public class AgentPromptAssemblyService {
         agentLongTermMemoryService.rememberTurn(userId, userPrompt, assistantAnswer);
     }
 
+    public void rememberConversationShortTerm(Long userId, String userPrompt, String assistantAnswer) {
+        agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
+    }
+
     public void clearConversation(Long userId) {
         agentMemoryService.clearConversation(userId);
     }

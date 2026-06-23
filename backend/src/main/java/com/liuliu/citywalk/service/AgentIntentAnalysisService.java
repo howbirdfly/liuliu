@@ -32,11 +32,13 @@ public class AgentIntentAnalysisService {
     );
 
     private static final List<String> AVOID_KEYWORDS = List.of(
-            "人多", "排队", "商业化", "暴走", "爬坡", "太晒", "室内", "吵", "绕路"
+            "人多", "排队", "商业区", "暴走", "爬坡", "太晒", "室内", "吵", "绕路"
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile("(半天|一天|两天|\\d+(?:\\.\\d+)?\\s*(?:小时|h|H))");
-    private static final Pattern AREA_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|巷|里|区|镇|村|园|江|湖|浜|滩|桥|口|站|校园|公园|商圈))");
+    private static final Pattern AREA_PATTERN = Pattern.compile(
+            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|巷|里|园|区|镇|村|站|校区|校园|公园|商圈|广场|码头|滨江|湖|河|山))"
+    );
 
     private final ObjectMapper objectMapper;
 
@@ -57,7 +59,7 @@ public class AgentIntentAnalysisService {
         boolean useCurrentLocation = containsAny(normalizedPrompt, "当前定位", "当前位置", "我附近", "离我近", "周边", "附近");
         boolean needsKnowledgeReference = containsAny(normalizedPrompt, "类似", "参考", "别人", "攻略", "社区", "帖子", "同款");
         boolean needsThemeGeneration = containsAny(normalizedPrompt, "主题", "风格", "玩法", "灵感");
-        boolean needsRoutePlanning = containsAny(normalizedPrompt, "路线", "怎么走", "规划", "串起来", "先去", "安排", "city walk");
+        boolean needsRoutePlanning = containsAny(normalizedPrompt, "路线", "怎么走", "规划", "串起来", "先去", "安排", "city walk", "citywalk");
         boolean needsPoiSearch = useCurrentLocation
                 || needsRoutePlanning
                 || containsAny(normalizedPrompt, "地点", "店", "街区", "公园", "附近有什么", "去哪");
@@ -88,7 +90,7 @@ public class AgentIntentAnalysisService {
         }
 
         List<String> lines = new ArrayList<>();
-        lines.add("以下是本轮用户需求的结构化提要，如与长期记忆冲突，以本轮需求为准：");
+        lines.add("以下是本轮用户需求的结构化摘要，如与长期记忆冲突，以本轮需求为准：");
         if (!intent.cities().isEmpty()) {
             lines.add("- 城市：" + String.join("、", intent.cities()));
         }
@@ -285,6 +287,34 @@ public class AgentIntentAnalysisService {
     ) {
         public boolean isEmpty() {
             return prompt == null || prompt.isBlank();
+        }
+
+        public boolean missingLocationContext() {
+            return cities.isEmpty() && areas.isEmpty() && !useCurrentLocation;
+        }
+
+        public boolean missingThemeDirection() {
+            return styles.isEmpty() && objectives.isEmpty();
+        }
+
+        public boolean missingDuration() {
+            return duration == null || duration.isBlank();
+        }
+
+        public boolean requiresClarification() {
+            if (isEmpty()) {
+                return true;
+            }
+            if (needsRoutePlanning || needsPoiSearch) {
+                if (missingLocationContext()) {
+                    return true;
+                }
+                return missingThemeDirection() && missingDuration();
+            }
+            if (needsThemeGeneration) {
+                return missingLocationContext() && missingThemeDirection();
+            }
+            return false;
         }
 
         public String summary() {

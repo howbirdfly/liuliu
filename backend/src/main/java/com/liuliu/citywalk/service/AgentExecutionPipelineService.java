@@ -78,6 +78,10 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
+        AgentChatResponse clarification = tryCompleteWithClarification(execution, executionHandle, listener);
+        if (clarification != null) {
+            return clarification;
+        }
         return runPlanningLoop(execution, executionHandle, listener);
     }
 
@@ -143,7 +147,60 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
-        return new PreparedExecution(userId, normalizedPrompt, instructions, messages, steps, toolExecutionMemoByKey);
+        return new PreparedExecution(userId, normalizedPrompt, intent, instructions, messages, steps, toolExecutionMemoByKey);
+    }
+
+    private AgentChatResponse tryCompleteWithClarification(
+            PreparedExecution execution,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
+        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
+        if (intent == null || !intent.requiresClarification()) {
+            return null;
+        }
+
+        checkCancelled(executionHandle);
+        String clarification = buildClarificationQuestion(intent);
+        execution.steps().add(new AgentStepResponse(
+                "clarification",
+                "clarification_gate",
+                intent.summary(),
+                clarification
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "final_answer",
+                "assistant",
+                intent.summary(),
+                clarification,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                "clarification_required"
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "complete",
+                "agent",
+                null,
+                clarification,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                "clarification_required"
+        ));
+
+        agentPromptAssemblyService.rememberConversationShortTerm(
+                execution.userId(),
+                execution.normalizedPrompt(),
+                clarification
+        );
+        return new AgentChatResponse(
+                clarification,
+                execution.steps(),
+                0,
+                llmClient.provider(),
+                llmClient.model()
+        );
     }
 
     private AgentChatResponse runPlanningLoop(
@@ -339,6 +396,28 @@ public class AgentExecutionPipelineService {
         return String.join(" -> ", steps);
     }
 
+    private String buildClarificationQuestion(AgentIntentAnalysisService.AgentIntent intent) {
+        if (intent == null || intent.isEmpty()) {
+            return "先告诉我你想在哪个城市或区域走、偏什么风格，以及大概想走多久，我再帮你开始规划。";
+        }
+        if (intent.missingLocationContext() && intent.missingThemeDirection()) {
+            return "先告诉我你想在哪个城市或区域走，或者是否直接用当前位置；另外也说一下你更想要什么风格或目标，比如拍照、夜景、安静散步，我再继续规划。";
+        }
+        if (intent.missingLocationContext()) {
+            return "先告诉我你想在哪个城市或区域走，或者是否直接用当前位置，我再帮你继续规划路线。";
+        }
+        if (intent.missingThemeDirection() && intent.missingDuration()) {
+            return "先补两点我就能更稳地规划：你更想看什么或怎么玩，以及这次大概想走多久。";
+        }
+        if (intent.missingThemeDirection()) {
+            return "先告诉我你这次更偏什么风格或目标，比如拍照、夜景、安静散步或觅食，我再继续规划。";
+        }
+        if (intent.missingDuration()) {
+            return "先告诉我你这次大概想走多久，比如 1 小时、半天或一整晚，我再把路线收紧一点。";
+        }
+        return "我还差一点关键信息。你可以补一下城市、区域、风格偏好或预计时长，我再继续规划。";
+    }
+
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
@@ -364,6 +443,7 @@ public class AgentExecutionPipelineService {
     private record PreparedExecution(
             Long userId,
             String normalizedPrompt,
+            AgentIntentAnalysisService.AgentIntent intent,
             String instructions,
             List<LlmMessage> messages,
             List<AgentStepResponse> steps,
