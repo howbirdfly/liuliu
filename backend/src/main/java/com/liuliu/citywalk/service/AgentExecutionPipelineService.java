@@ -64,6 +64,7 @@ public class AgentExecutionPipelineService {
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
+    private final AgentConversationStateService agentConversationStateService;
     private final AgentPromptAssemblyService agentPromptAssemblyService;
     private final AgentAnswerFormatterService agentAnswerFormatterService;
     private final AgentToolExecutionService agentToolExecutionService;
@@ -74,6 +75,7 @@ public class AgentExecutionPipelineService {
             LlmClient llmClient,
             ObjectMapper objectMapper,
             AgentIntentAnalysisService agentIntentAnalysisService,
+            AgentConversationStateService agentConversationStateService,
             AgentPromptAssemblyService agentPromptAssemblyService,
             AgentAnswerFormatterService agentAnswerFormatterService,
             AgentToolExecutionService agentToolExecutionService,
@@ -83,6 +85,7 @@ public class AgentExecutionPipelineService {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
         this.agentIntentAnalysisService = agentIntentAnalysisService;
+        this.agentConversationStateService = agentConversationStateService;
         this.agentPromptAssemblyService = agentPromptAssemblyService;
         this.agentAnswerFormatterService = agentAnswerFormatterService;
         this.agentToolExecutionService = agentToolExecutionService;
@@ -120,15 +123,15 @@ public class AgentExecutionPipelineService {
         checkCancelled(executionHandle);
 
         List<LlmMessage> history = agentPromptAssemblyService.loadConversationHistory(userId);
-        AgentIntentAnalysisService.AgentIntent currentIntent = agentIntentAnalysisService.analyze(normalizedPrompt);
-        AgentIntentAnalysisService.AgentIntent carryoverIntent = agentIntentAnalysisService.deriveCarryoverIntent(history);
-        AgentIntentAnalysisService.AgentIntent intent = agentIntentAnalysisService.mergeWithCarryover(currentIntent, carryoverIntent);
-        String carryoverContext = agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, carryoverIntent, intent);
+        AgentConversationStateService.ResolvedConversationState conversationState =
+                agentConversationStateService.resolve(history, normalizedPrompt);
+        AgentIntentAnalysisService.AgentIntent intent = conversationState.effectiveIntent();
+        String carryoverContext = conversationState.carryoverPromptContext();
         List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(history, normalizedPrompt, carryoverContext);
         String instructions = agentPromptAssemblyService.buildInstructions(
                 userId,
                 DEFAULT_INSTRUCTIONS,
-                buildRuntimeContext(intent),
+                agentConversationStateService.buildPromptContext(conversationState) + buildRuntimeContext(intent),
                 FALLBACK_GUIDE
         );
         List<AgentStepResponse> steps = new ArrayList<>();
@@ -138,11 +141,17 @@ public class AgentExecutionPipelineService {
                 normalizedPrompt,
                 agentIntentAnalysisService.toStepOutput(intent)
         ));
+        steps.add(new AgentStepResponse(
+                "conversation_state",
+                "effective_conversation_state",
+                normalizedPrompt,
+                agentConversationStateService.toStepOutput(conversationState)
+        ));
         if (!carryoverContext.isBlank()) {
             steps.add(new AgentStepResponse(
-                    "context_carryover",
-                    "recent_conversation_context",
-                    normalizedPrompt,
+                "context_carryover",
+                "recent_conversation_context",
+                normalizedPrompt,
                     carryoverContext
             ));
         }
@@ -169,6 +178,16 @@ public class AgentExecutionPipelineService {
                 "intent",
                 normalizedPrompt,
                 agentIntentAnalysisService.toStepOutput(intent),
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                null
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "conversation_state",
+                "effective_conversation_state",
+                normalizedPrompt,
+                agentConversationStateService.toStepOutput(conversationState),
                 0,
                 llmClient.provider(),
                 llmClient.model(),

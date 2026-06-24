@@ -42,7 +42,9 @@ public class AgentLongTermMemoryService {
             "三亚", "洛阳", "开封", "扬州", "绍兴", "沈阳", "长春", "哈尔滨", "太原", "兰州"
     );
 
-    private static final Pattern DURATION_PATTERN = Pattern.compile("(半天|一天|两天|\\d+(?:\\.\\d+)?\\s*(?:小时|h|H))");
+    private static final Pattern DURATION_PATTERN = Pattern.compile(
+            "(半小时|半天|一天|两天|一小时|两小时|三小时|四小时|五小时|六小时|一个晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:小时|h|H))"
+    );
     private static final Pattern AREA_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|校区|公园|商圈|古镇|湖|湾|岛|区|镇|村))");
 
     private final AgentUserMemoryMapper agentUserMemoryMapper;
