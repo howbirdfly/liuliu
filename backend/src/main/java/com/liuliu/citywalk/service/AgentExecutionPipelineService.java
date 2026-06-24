@@ -340,7 +340,7 @@ public class AgentExecutionPipelineService {
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             checkCancelled(executionHandle);
             AgentRoundService.AgentRoundOutcome roundOutcome = executePlanningRound(execution, round, executionHandle, listener);
-            if (roundOutcome.continueToNextRound()) {
+            if (roundOutcome.roundType() == AgentRoundService.RoundType.TOOL_CALLING) {
                 continue;
             }
             return completeSuccessfulExecution(execution, roundOutcome.finalContent(), round, executionHandle, listener);

@@ -53,8 +53,9 @@ public class AgentRoundService {
         cancellationCheck.run();
 
         if (response.hasToolCalls()) {
-            messages.add(LlmMessage.assistant(response.content(), response.toolCalls()));
-            for (LlmToolCall toolCall : response.toolCalls()) {
+            List<LlmToolCall> toolCalls = response.toolCalls();
+            messages.add(LlmMessage.assistant(response.content(), toolCalls));
+            for (LlmToolCall toolCall : toolCalls) {
                 cancellationCheck.run();
                 toolEventListener.onToolCall(toolCall, round);
                 AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.execute(
@@ -70,10 +71,10 @@ public class AgentRoundService {
                         agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
                 ));
             }
-            return AgentRoundOutcome.requiresAnotherRound();
+            return AgentRoundOutcome.toolCalling(toolCalls);
         }
 
-        return AgentRoundOutcome.completed(response.content());
+        return AgentRoundOutcome.finalText(response.content());
     }
 
     public interface DeltaListener {
@@ -87,15 +88,29 @@ public class AgentRoundService {
     }
 
     public record AgentRoundOutcome(
-            boolean continueToNextRound,
-            String finalContent
+            RoundType roundType,
+            String finalContent,
+            List<LlmToolCall> toolCalls
     ) {
-        public static AgentRoundOutcome requiresAnotherRound() {
-            return new AgentRoundOutcome(true, null);
+        public boolean continueToNextRound() {
+            return roundType == RoundType.TOOL_CALLING;
         }
 
-        public static AgentRoundOutcome completed(String finalContent) {
-            return new AgentRoundOutcome(false, finalContent);
+        public static AgentRoundOutcome toolCalling(List<LlmToolCall> toolCalls) {
+            return new AgentRoundOutcome(
+                    RoundType.TOOL_CALLING,
+                    null,
+                    toolCalls == null ? List.of() : List.copyOf(toolCalls)
+            );
         }
+
+        public static AgentRoundOutcome finalText(String finalContent) {
+            return new AgentRoundOutcome(RoundType.FINAL_TEXT, finalContent, List.of());
+        }
+    }
+
+    public enum RoundType {
+        TOOL_CALLING,
+        FINAL_TEXT
     }
 }
