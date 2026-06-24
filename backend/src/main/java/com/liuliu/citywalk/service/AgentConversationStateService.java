@@ -12,31 +12,40 @@ import java.util.List;
 public class AgentConversationStateService {
 
     private final AgentIntentAnalysisService agentIntentAnalysisService;
+    private final AgentConversationStateStore agentConversationStateStore;
     private final ObjectMapper objectMapper;
 
     public AgentConversationStateService(
             AgentIntentAnalysisService agentIntentAnalysisService,
+            AgentConversationStateStore agentConversationStateStore,
             ObjectMapper objectMapper
     ) {
         this.agentIntentAnalysisService = agentIntentAnalysisService;
+        this.agentConversationStateStore = agentConversationStateStore;
         this.objectMapper = objectMapper;
     }
 
-    public ResolvedConversationState resolve(List<LlmMessage> history, String userPrompt) {
+    public ResolvedConversationState resolve(Long userId, List<LlmMessage> history, String userPrompt) {
         AgentIntentAnalysisService.AgentIntent currentIntent = agentIntentAnalysisService.analyze(userPrompt);
+        AgentIntentAnalysisService.AgentIntent sessionStateIntent = toIntent(agentConversationStateStore.loadState(userId));
         AgentIntentAnalysisService.AgentIntent carryoverIntent = agentIntentAnalysisService.deriveCarryoverIntent(history);
+        AgentIntentAnalysisService.AgentIntent mergedCarryoverIntent = agentIntentAnalysisService.mergeWithCarryover(
+                sessionStateIntent,
+                carryoverIntent
+        );
         AgentIntentAnalysisService.AgentIntent effectiveIntent = agentIntentAnalysisService.mergeWithCarryover(
                 currentIntent,
-                carryoverIntent
+                mergedCarryoverIntent
         );
         return new ResolvedConversationState(
                 currentIntent,
+                sessionStateIntent,
                 carryoverIntent,
                 effectiveIntent,
-                resolveLocationSlot(currentIntent, effectiveIntent),
-                resolveThemeSlot(currentIntent, effectiveIntent),
-                resolveDurationSlot(currentIntent, effectiveIntent),
-                agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, carryoverIntent, effectiveIntent)
+                resolveLocationSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
+                resolveThemeSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
+                resolveDurationSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
+                agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, mergedCarryoverIntent, effectiveIntent)
         );
     }
 
@@ -54,6 +63,24 @@ public class AgentConversationStateService {
         return "\n\n" + String.join("\n", lines);
     }
 
+    public String buildStateMessage(ResolvedConversationState state) {
+        if (state == null) {
+            return "";
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add("Effective conversation state for this turn:");
+        lines.add("- Use the merged conversation state below as the current truth for planning.");
+        lines.add("- If a slot is already ready from conversation_carryover, do not ask for it again unless the user explicitly changes it.");
+        appendSlotLine(lines, state.locationSlot());
+        appendSlotLine(lines, state.themeSlot());
+        appendSlotLine(lines, state.durationSlot());
+        if (state.effectiveIntent() != null && !state.effectiveIntent().summary().isBlank()) {
+            lines.add("- effective_intent_summary: " + state.effectiveIntent().summary());
+        }
+        return String.join("\n", lines);
+    }
+
     public String toStepOutput(ResolvedConversationState state) {
         if (state == null) {
             return "{}";
@@ -65,12 +92,46 @@ public class AgentConversationStateService {
         }
     }
 
+    public void rememberState(Long userId, ResolvedConversationState state) {
+        if (userId == null || userId <= 0 || state == null || state.effectiveIntent() == null) {
+            return;
+        }
+        AgentIntentAnalysisService.AgentIntent effectiveIntent = state.effectiveIntent();
+        if (!effectiveIntent.hasMeaningfulPlanningSignal()) {
+            return;
+        }
+        agentConversationStateStore.saveState(userId, new AgentConversationStateStore.ConversationStateSnapshot(
+                effectiveIntent.cities(),
+                effectiveIntent.areas(),
+                effectiveIntent.styles(),
+                effectiveIntent.objectives(),
+                effectiveIntent.duration(),
+                effectiveIntent.timePreference(),
+                effectiveIntent.mobilityPreference(),
+                effectiveIntent.avoidTags(),
+                effectiveIntent.useCurrentLocation(),
+                System.currentTimeMillis()
+        ));
+    }
+
+    public void clearState(Long userId) {
+        agentConversationStateStore.clearState(userId);
+    }
+
     private SlotResolution resolveLocationSlot(
             AgentIntentAnalysisService.AgentIntent currentIntent,
+            AgentIntentAnalysisService.AgentIntent sessionStateIntent,
+            AgentIntentAnalysisService.AgentIntent carryoverIntent,
             AgentIntentAnalysisService.AgentIntent effectiveIntent
     ) {
         if (!currentIntent.missingLocationContext()) {
             return new SlotResolution("location", "ready", "current_turn", describeLocation(currentIntent));
+        }
+        if (sessionStateIntent != null && !sessionStateIntent.missingLocationContext()) {
+            return new SlotResolution("location", "ready", "session_state", describeLocation(sessionStateIntent));
+        }
+        if (carryoverIntent != null && !carryoverIntent.missingLocationContext()) {
+            return new SlotResolution("location", "ready", "conversation_history", describeLocation(carryoverIntent));
         }
         if (!effectiveIntent.missingLocationContext()) {
             return new SlotResolution("location", "ready", "conversation_carryover", describeLocation(effectiveIntent));
@@ -80,10 +141,18 @@ public class AgentConversationStateService {
 
     private SlotResolution resolveThemeSlot(
             AgentIntentAnalysisService.AgentIntent currentIntent,
+            AgentIntentAnalysisService.AgentIntent sessionStateIntent,
+            AgentIntentAnalysisService.AgentIntent carryoverIntent,
             AgentIntentAnalysisService.AgentIntent effectiveIntent
     ) {
         if (!currentIntent.missingThemeDirection()) {
             return new SlotResolution("theme", "ready", "current_turn", describeTheme(currentIntent));
+        }
+        if (sessionStateIntent != null && !sessionStateIntent.missingThemeDirection()) {
+            return new SlotResolution("theme", "ready", "session_state", describeTheme(sessionStateIntent));
+        }
+        if (carryoverIntent != null && !carryoverIntent.missingThemeDirection()) {
+            return new SlotResolution("theme", "ready", "conversation_history", describeTheme(carryoverIntent));
         }
         if (!effectiveIntent.missingThemeDirection()) {
             return new SlotResolution("theme", "ready", "conversation_carryover", describeTheme(effectiveIntent));
@@ -93,10 +162,18 @@ public class AgentConversationStateService {
 
     private SlotResolution resolveDurationSlot(
             AgentIntentAnalysisService.AgentIntent currentIntent,
+            AgentIntentAnalysisService.AgentIntent sessionStateIntent,
+            AgentIntentAnalysisService.AgentIntent carryoverIntent,
             AgentIntentAnalysisService.AgentIntent effectiveIntent
     ) {
         if (!currentIntent.missingDuration()) {
             return new SlotResolution("duration", "ready", "current_turn", currentIntent.duration());
+        }
+        if (sessionStateIntent != null && !sessionStateIntent.missingDuration()) {
+            return new SlotResolution("duration", "ready", "session_state", sessionStateIntent.duration());
+        }
+        if (carryoverIntent != null && !carryoverIntent.missingDuration()) {
+            return new SlotResolution("duration", "ready", "conversation_history", carryoverIntent.duration());
         }
         if (!effectiveIntent.missingDuration()) {
             return new SlotResolution("duration", "ready", "conversation_carryover", effectiveIntent.duration());
@@ -136,8 +213,52 @@ public class AgentConversationStateService {
         return parts.isEmpty() ? "missing" : String.join(", ", parts);
     }
 
+    private AgentIntentAnalysisService.AgentIntent toIntent(AgentConversationStateStore.ConversationStateSnapshot snapshot) {
+        if (snapshot == null) {
+            return agentIntentAnalysisService.analyze("");
+        }
+        return new AgentIntentAnalysisService.AgentIntent(
+                "",
+                normalizeList(snapshot.cities()),
+                normalizeList(snapshot.areas()),
+                normalizeList(snapshot.styles()),
+                normalizeList(snapshot.objectives()),
+                normalize(snapshot.duration()),
+                normalize(snapshot.timePreference()),
+                normalize(snapshot.mobilityPreference()),
+                normalizeList(snapshot.avoidTags()),
+                snapshot.useCurrentLocation(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of()
+        );
+    }
+
+    private List<String> normalizeList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (String value : values) {
+            String normalized = normalize(value);
+            if (!normalized.isBlank() && !result.contains(normalized)) {
+                result.add(normalized);
+            }
+        }
+        return result;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     public record ResolvedConversationState(
             AgentIntentAnalysisService.AgentIntent currentIntent,
+            AgentIntentAnalysisService.AgentIntent sessionStateIntent,
             AgentIntentAnalysisService.AgentIntent carryoverIntent,
             AgentIntentAnalysisService.AgentIntent effectiveIntent,
             SlotResolution locationSlot,

@@ -32,13 +32,22 @@ public class AgentContextWindowService {
     }
 
     public List<LlmMessage> buildConversationMessages(List<LlmMessage> history, String userPrompt) {
-        return buildConversationMessages(history, userPrompt, "");
+        return buildConversationMessages(history, userPrompt, "", "");
     }
 
     public List<LlmMessage> buildConversationMessages(
             List<LlmMessage> history,
             String userPrompt,
             String carryoverContext
+    ) {
+        return buildConversationMessages(history, userPrompt, carryoverContext, "");
+    }
+
+    public List<LlmMessage> buildConversationMessages(
+            List<LlmMessage> history,
+            String userPrompt,
+            String carryoverContext,
+            String stateMessage
     ) {
         List<LlmMessage> normalizedHistory = sanitizeHistory(history, false);
         List<LlmMessage> result = new ArrayList<>();
@@ -52,6 +61,10 @@ public class AgentContextWindowService {
         String normalizedCarryoverContext = trimText(carryoverContext, NORMAL_MESSAGE_CHAR_LIMIT);
         if (!normalizedCarryoverContext.isBlank()) {
             result.add(LlmMessage.system(normalizedCarryoverContext));
+        }
+        String normalizedStateMessage = trimText(stateMessage, NORMAL_MESSAGE_CHAR_LIMIT);
+        if (!normalizedStateMessage.isBlank()) {
+            result.add(LlmMessage.system(normalizedStateMessage));
         }
         result.addAll(normalizedHistory.subList(recentStart, normalizedHistory.size()));
 

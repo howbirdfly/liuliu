@@ -9,21 +9,24 @@ import java.util.List;
 public class AgentPromptAssemblyService {
 
     private final AgentMemoryService agentMemoryService;
+    private final AgentConversationStateService agentConversationStateService;
     private final AgentLongTermMemoryService agentLongTermMemoryService;
     private final AgentContextWindowService agentContextWindowService;
 
     public AgentPromptAssemblyService(
             AgentMemoryService agentMemoryService,
+            AgentConversationStateService agentConversationStateService,
             AgentLongTermMemoryService agentLongTermMemoryService,
             AgentContextWindowService agentContextWindowService
     ) {
         this.agentMemoryService = agentMemoryService;
+        this.agentConversationStateService = agentConversationStateService;
         this.agentLongTermMemoryService = agentLongTermMemoryService;
         this.agentContextWindowService = agentContextWindowService;
     }
 
     public List<LlmMessage> buildConversationMessages(Long userId, String userPrompt) {
-        return buildConversationMessages(loadConversationHistory(userId), userPrompt, "");
+        return buildConversationMessages(loadConversationHistory(userId), userPrompt, "", "");
     }
 
     public List<LlmMessage> buildConversationMessages(
@@ -31,10 +34,20 @@ public class AgentPromptAssemblyService {
             String userPrompt,
             String carryoverContext
     ) {
+        return buildConversationMessages(history, userPrompt, carryoverContext, "");
+    }
+
+    public List<LlmMessage> buildConversationMessages(
+            List<LlmMessage> history,
+            String userPrompt,
+            String carryoverContext,
+            String stateMessage
+    ) {
         return agentContextWindowService.buildConversationMessages(
                 history,
                 userPrompt,
-                carryoverContext
+                carryoverContext,
+                stateMessage
         );
     }
 
@@ -67,5 +80,6 @@ public class AgentPromptAssemblyService {
 
     public void clearConversation(Long userId) {
         agentMemoryService.clearConversation(userId);
+        agentConversationStateService.clearState(userId);
     }
 }

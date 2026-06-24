@@ -124,10 +124,16 @@ public class AgentExecutionPipelineService {
 
         List<LlmMessage> history = agentPromptAssemblyService.loadConversationHistory(userId);
         AgentConversationStateService.ResolvedConversationState conversationState =
-                agentConversationStateService.resolve(history, normalizedPrompt);
+                agentConversationStateService.resolve(userId, history, normalizedPrompt);
         AgentIntentAnalysisService.AgentIntent intent = conversationState.effectiveIntent();
         String carryoverContext = conversationState.carryoverPromptContext();
-        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(history, normalizedPrompt, carryoverContext);
+        String stateMessage = agentConversationStateService.buildStateMessage(conversationState);
+        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(
+                history,
+                normalizedPrompt,
+                carryoverContext,
+                stateMessage
+        );
         String instructions = agentPromptAssemblyService.buildInstructions(
                 userId,
                 DEFAULT_INSTRUCTIONS,
@@ -215,7 +221,7 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
-        return new PreparedExecution(userId, normalizedPrompt, intent, instructions, messages, steps, toolExecutionMemoByKey);
+        return new PreparedExecution(userId, normalizedPrompt, intent, conversationState, instructions, messages, steps, toolExecutionMemoByKey);
     }
 
     private AgentChatResponse tryCompleteWithInvalidInputPrompt(
@@ -262,6 +268,7 @@ public class AgentExecutionPipelineService {
                 execution.normalizedPrompt(),
                 response
         );
+        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         return new AgentChatResponse(
                 response,
                 execution.steps(),
@@ -315,6 +322,7 @@ public class AgentExecutionPipelineService {
                 execution.normalizedPrompt(),
                 clarification
         );
+        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         return new AgentChatResponse(
                 clarification,
                 execution.steps(),
@@ -598,6 +606,7 @@ public class AgentExecutionPipelineService {
                 llmClient.model()
         );
         agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), answer);
+        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model(), null));
         return result;
     }
@@ -610,6 +619,7 @@ public class AgentExecutionPipelineService {
         );
         execution.steps().add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
         agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), fallback);
+        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         emit(listener, new AgentExecutionEvent(
                 "complete",
                 "agent",
@@ -903,6 +913,7 @@ public class AgentExecutionPipelineService {
             Long userId,
             String normalizedPrompt,
             AgentIntentAnalysisService.AgentIntent intent,
+            AgentConversationStateService.ResolvedConversationState conversationState,
             String instructions,
             List<LlmMessage> messages,
             List<AgentStepResponse> steps,
