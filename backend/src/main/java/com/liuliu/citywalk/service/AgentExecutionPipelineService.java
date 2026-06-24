@@ -1,5 +1,6 @@
 package com.liuliu.citywalk.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class AgentExecutionPipelineService {
@@ -55,19 +57,28 @@ public class AgentExecutionPipelineService {
             """;
 
     private final LlmClient llmClient;
+    private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
     private final AgentPromptAssemblyService agentPromptAssemblyService;
+    private final AgentToolExecutionService agentToolExecutionService;
+    private final AgentContextWindowService agentContextWindowService;
     private final AgentRoundService agentRoundService;
 
     public AgentExecutionPipelineService(
             LlmClient llmClient,
+            ObjectMapper objectMapper,
             AgentIntentAnalysisService agentIntentAnalysisService,
             AgentPromptAssemblyService agentPromptAssemblyService,
+            AgentToolExecutionService agentToolExecutionService,
+            AgentContextWindowService agentContextWindowService,
             AgentRoundService agentRoundService
     ) {
         this.llmClient = llmClient;
+        this.objectMapper = objectMapper;
         this.agentIntentAnalysisService = agentIntentAnalysisService;
         this.agentPromptAssemblyService = agentPromptAssemblyService;
+        this.agentToolExecutionService = agentToolExecutionService;
+        this.agentContextWindowService = agentContextWindowService;
         this.agentRoundService = agentRoundService;
     }
 
@@ -82,6 +93,7 @@ public class AgentExecutionPipelineService {
         if (clarification != null) {
             return clarification;
         }
+        applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
         return runPlanningLoop(execution, executionHandle, listener);
     }
 
@@ -217,6 +229,89 @@ public class AgentExecutionPipelineService {
             return completeSuccessfulExecution(execution, roundOutcome.finalContent(), round, executionHandle, listener);
         }
         return completeMaxRoundExecution(execution, listener);
+    }
+
+    private void applyDeterministicKnowledgePrefetch(
+            PreparedExecution execution,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
+        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
+        if (!shouldPrefetchKnowledge(intent, execution.normalizedPrompt())) {
+            return;
+        }
+        if (!agentToolExecutionService.hasTool("search_knowledge_base")) {
+            return;
+        }
+
+        checkCancelled(executionHandle);
+        String query = buildKnowledgePrefetchQuery(intent, execution.normalizedPrompt());
+        if (query.isBlank()) {
+            return;
+        }
+
+        try {
+            String argumentsJson = objectMapper.writeValueAsString(Map.of(
+                    "query", query,
+                    "topK", 5
+            ));
+            LlmToolCall toolCall = new LlmToolCall(
+                    "prefetch-knowledge-" + UUID.randomUUID(),
+                    "search_knowledge_base",
+                    argumentsJson
+            );
+
+            emit(listener, new AgentExecutionEvent(
+                    "tool_call",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    null,
+                    0,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    "deterministic_prefetch"
+            ));
+            AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    () -> checkCancelled(executionHandle),
+                    execution.toolExecutionMemoByKey()
+            );
+            execution.steps().add(new AgentStepResponse(
+                    "prefetch_tool",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    outcome.output()
+            ));
+            execution.messages().add(LlmMessage.assistant(
+                    "System prefetch executed before planning: search_knowledge_base.",
+                    List.of(toolCall)
+            ));
+            execution.messages().add(LlmMessage.tool(
+                    toolCall.id(),
+                    toolCall.name(),
+                    agentContextWindowService.compactToolOutputForModel(outcome.output())
+            ));
+            emit(listener, new AgentExecutionEvent(
+                    "tool_result",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    outcome.output(),
+                    0,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    outcome.code() == null ? "deterministic_prefetch" : outcome.code()
+            ));
+        } catch (AgentExecutionCancelledException error) {
+            throw error;
+        } catch (Exception error) {
+            execution.steps().add(new AgentStepResponse(
+                    "prefetch_tool",
+                    "search_knowledge_base",
+                    execution.normalizedPrompt(),
+                    "knowledge_prefetch_skipped: " + safeText(error.getMessage(), "unknown_error")
+            ));
+        }
     }
 
     private AgentRoundService.AgentRoundOutcome executePlanningRound(
@@ -384,6 +479,7 @@ public class AgentExecutionPipelineService {
         if (intent != null && intent.needsThemeGeneration() && !intent.needsRoutePlanning()) {
             steps.add("theme direction first");
         } else {
+            steps.add("deterministic knowledge prefetch");
             steps.add("knowledge-first retrieval");
         }
         if (intent != null && intent.useCurrentLocation()) {
@@ -416,6 +512,51 @@ public class AgentExecutionPipelineService {
             return "先告诉我你这次大概想走多久，比如 1 小时、半天或一整晚，我再把路线收紧一点。";
         }
         return "我还差一点关键信息。你可以补一下城市、区域、风格偏好或预计时长，我再继续规划。";
+    }
+
+    private boolean shouldPrefetchKnowledge(AgentIntentAnalysisService.AgentIntent intent, String prompt) {
+        if (intent == null) {
+            return false;
+        }
+        if (safeText(prompt, "").isBlank()) {
+            return false;
+        }
+        if (intent.needsThemeGeneration() && !intent.needsRoutePlanning() && !intent.needsKnowledgeReference()) {
+            return false;
+        }
+        return intent.needsKnowledgeReference() || intent.needsRoutePlanning();
+    }
+
+    private String buildKnowledgePrefetchQuery(AgentIntentAnalysisService.AgentIntent intent, String prompt) {
+        if (intent == null) {
+            return safeText(prompt, "");
+        }
+        List<String> parts = new ArrayList<>();
+        if (!intent.cities().isEmpty()) {
+            parts.add(String.join(" ", intent.cities()));
+        }
+        if (!intent.areas().isEmpty()) {
+            parts.add(String.join(" ", intent.areas()));
+        }
+        if (!intent.styles().isEmpty()) {
+            parts.add(String.join(" ", intent.styles()));
+        }
+        if (!intent.objectives().isEmpty()) {
+            parts.add(String.join(" ", intent.objectives()));
+        }
+        if (!intent.timePreference().isBlank()) {
+            parts.add(intent.timePreference());
+        }
+        if (!intent.duration().isBlank()) {
+            parts.add(intent.duration());
+        }
+        if (intent.needsRoutePlanning()) {
+            parts.add("city walk 路线");
+        } else if (intent.needsKnowledgeReference()) {
+            parts.add("city walk 参考");
+        }
+        String query = String.join(" ", parts).trim();
+        return query.isBlank() ? safeText(prompt, "") : query;
     }
 
     private String safeText(String value, String fallback) {

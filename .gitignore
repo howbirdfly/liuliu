@@ -22,3 +22,8 @@ tools/plantuml.jar
 docs/uml/
 docs/osdi23-gupta-*.md
 docs/*SRS.md
+scripts/append_reflection_before_last3.py
+scripts/generate-srs-doc.ps1
+scripts/generate_exam_doc.py
+scripts/generate_srs_doc.py
+scripts/generate_translation_doc.py

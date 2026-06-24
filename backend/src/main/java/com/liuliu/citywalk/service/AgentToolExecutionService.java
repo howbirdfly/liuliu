@@ -44,20 +44,47 @@ public class AgentToolExecutionService {
         return toolDefinitions;
     }
 
+    public boolean hasTool(String toolName) {
+        return toolName != null && toolsByName.containsKey(toolName);
+    }
+
     public AgentToolExecutionOutcome execute(
             LlmToolCall toolCall,
             Runnable cancellationCheck,
             Map<String, ToolExecutionMemo> toolExecutionMemoByKey
     ) {
         cancellationCheck.run();
+        return executeInternal(
+                toolCall == null ? null : toolCall.name(),
+                toolCall == null ? null : toolCall.argumentsJson(),
+                cancellationCheck,
+                toolExecutionMemoByKey
+        );
+    }
 
-        AgentTool tool = toolsByName.get(toolCall.name());
+    public AgentToolExecutionOutcome executePrefetched(
+            String toolName,
+            String argumentsJson,
+            Runnable cancellationCheck,
+            Map<String, ToolExecutionMemo> toolExecutionMemoByKey
+    ) {
+        cancellationCheck.run();
+        return executeInternal(toolName, argumentsJson, cancellationCheck, toolExecutionMemoByKey);
+    }
+
+    private AgentToolExecutionOutcome executeInternal(
+            String toolName,
+            String argumentsJson,
+            Runnable cancellationCheck,
+            Map<String, ToolExecutionMemo> toolExecutionMemoByKey
+    ) {
+        AgentTool tool = toolsByName.get(toolName);
         if (tool == null) {
-            return failure(toolCall.name(), "tool_not_found", "tool_not_found", toolExecutionMemoByKey, null);
+            return failure(toolName, "tool_not_found", "tool_not_found", toolExecutionMemoByKey, null);
         }
 
         try {
-            Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
+            Map<String, Object> arguments = parseArguments(argumentsJson);
             String invocationKey = buildToolInvocationKey(tool, arguments);
             if (invocationKey != null) {
                 ToolExecutionMemo memo = toolExecutionMemoByKey.get(invocationKey);
@@ -84,12 +111,12 @@ public class AgentToolExecutionService {
             String message = safeText(error.getMessage(), "unknown_error");
             String failureOutput;
             try {
-                Map<String, Object> arguments = parseArguments(toolCall.argumentsJson());
+                Map<String, Object> arguments = parseArguments(argumentsJson);
                 String invocationKey = buildToolInvocationKey(tool, arguments);
-                failureOutput = agentToolFailurePayloadService.build(toolCall.name(), errorCode, message);
+                failureOutput = agentToolFailurePayloadService.build(toolName, errorCode, message);
                 cacheToolExecution(toolExecutionMemoByKey, invocationKey, failureOutput);
             } catch (Exception ignored) {
-                failureOutput = agentToolFailurePayloadService.build(toolCall.name(), errorCode, message);
+                failureOutput = agentToolFailurePayloadService.build(toolName, errorCode, message);
             }
             return new AgentToolExecutionOutcome(failureOutput, errorCode);
         }
