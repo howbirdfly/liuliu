@@ -8,10 +8,11 @@ public interface AgentTool {
 
     String description();
 
-    Map<String, Object> parametersSchema();
+    Map<String, Object> inputSchema();
 
-    default Map<String, Object> inputSchema() {
-        return parametersSchema();
+    @Deprecated
+    default Map<String, Object> parametersSchema() {
+        return inputSchema();
     }
 
     String execute(Map<String, Object> arguments);

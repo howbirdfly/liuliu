@@ -6,6 +6,10 @@ public interface LlmClient {
 
     String model();
 
+    default boolean supportsNativeToolCalling() {
+        return false;
+    }
+
     LlmResponse createResponse(LlmRequest request);
 
     default LlmResponse createStreamingResponse(LlmRequest request, LlmStreamListener listener) {

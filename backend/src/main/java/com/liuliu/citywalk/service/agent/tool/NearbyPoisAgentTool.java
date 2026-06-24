@@ -29,7 +29,7 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
     }
 
     @Override
-    public Map<String, Object> parametersSchema() {
+    public Map<String, Object> inputSchema() {
         return jsonObjectSchema(
                 Map.of(
                         "lat", numberProperty("Latitude."),

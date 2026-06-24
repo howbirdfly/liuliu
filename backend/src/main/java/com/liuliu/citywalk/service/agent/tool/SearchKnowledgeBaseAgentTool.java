@@ -32,7 +32,7 @@ public class SearchKnowledgeBaseAgentTool extends AbstractJsonAgentTool {
     }
 
     @Override
-    public Map<String, Object> parametersSchema() {
+    public Map<String, Object> inputSchema() {
         return jsonObjectSchema(
                 Map.of(
                         "query", stringProperty("Semantic search query, such as seaside sunset, campus walk, or old-street photography."),

@@ -29,7 +29,7 @@ public class GetWalkDetailAgentTool extends AbstractJsonAgentTool {
     }
 
     @Override
-    public Map<String, Object> parametersSchema() {
+    public Map<String, Object> inputSchema() {
         return jsonObjectSchema(
                 Map.of(
                         "walkId", integerProperty("Public walk record id.")

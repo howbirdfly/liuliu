@@ -29,7 +29,7 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
     }
 
     @Override
-    public Map<String, Object> parametersSchema() {
+    public Map<String, Object> inputSchema() {
         return jsonObjectSchema(
                 Map.of(
                         "query", stringProperty("Place keyword to search, such as Wukang Road, Qianmen, or a cafe street.")

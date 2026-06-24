@@ -61,6 +61,11 @@ public class DeepSeekLlmClient implements LlmClient {
     }
 
     @Override
+    public boolean supportsNativeToolCalling() {
+        return true;
+    }
+
+    @Override
     public LlmResponse createResponse(LlmRequest request) {
         DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
         if (!isConfigured() || chatModel == null) {
@@ -306,7 +311,7 @@ public class DeepSeekLlmClient implements LlmClient {
             if (tool == null || tool.name() == null || tool.name().isBlank()) {
                 continue;
             }
-            callbacks.add(new DefinitionOnlyToolCallback(tool, json(tool.parametersSchema())));
+            callbacks.add(new DefinitionOnlyToolCallback(tool, json(tool.inputSchema())));
         }
         return callbacks;
     }

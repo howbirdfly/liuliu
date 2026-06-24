@@ -28,7 +28,7 @@ public class SearchCommunityWalksAgentTool extends AbstractJsonAgentTool {
     }
 
     @Override
-    public Map<String, Object> parametersSchema() {
+    public Map<String, Object> inputSchema() {
         return jsonObjectSchema(
                 Map.of(
                         "keyword", stringProperty("Search keyword, such as old street, photography, night view, or family friendly."),
