@@ -211,7 +211,7 @@ public class AgentLongTermMemoryService {
         Matcher matcher = AREA_PATTERN.matcher(text);
         List<String> hits = new ArrayList<>();
         while (matcher.find()) {
-            String value = normalize(matcher.group(1));
+            String value = normalizeAreaCandidate(matcher.group(1));
             if (value.length() < 2 || value.length() > 20) {
                 continue;
             }
@@ -397,6 +397,12 @@ public class AgentLongTermMemoryService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String normalizeAreaCandidate(String value) {
+        String normalized = normalize(value);
+        normalized = normalized.replaceFirst("^(?:我想在|想在|我在|在|去|到)", "");
+        return normalize(normalized);
     }
 
     public record AgentLongTermMemoryProfile(

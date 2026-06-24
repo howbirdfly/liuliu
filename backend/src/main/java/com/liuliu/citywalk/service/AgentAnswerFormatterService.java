@@ -34,6 +34,9 @@ public class AgentAnswerFormatterService {
             List<AgentStepResponse> steps
     ) {
         String normalized = normalize(rawAnswer);
+        if (isClarificationStyleAnswer(normalized)) {
+            return normalized;
+        }
         if (containsAllSections(normalized)) {
             return normalized;
         }
@@ -51,6 +54,23 @@ public class AgentAnswerFormatterService {
         sections.add("## 不确定项\n" + toBulletList(uncertainties));
         sections.add("## 实用提醒\n" + toBulletList(reminders));
         return String.join("\n\n", sections).trim();
+    }
+
+    private boolean isClarificationStyleAnswer(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = normalize(value);
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        boolean asksQuestion = normalized.contains("?")
+                || normalized.contains("？")
+                || lower.contains("想先问你")
+                || lower.contains("可以告诉我")
+                || lower.contains("请告诉我")
+                || lower.contains("请确认")
+                || lower.contains("先问你")
+                || lower.contains("还想问你");
+        return asksQuestion && !containsAllSections(normalized);
     }
 
     private boolean containsAllSections(String value) {
