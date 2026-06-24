@@ -52,22 +52,45 @@ public class AgentToolResultSlicerService {
         result.put("success", payload.getOrDefault("success", true));
         appendIfPresent(payload, result, "query");
         appendIfPresent(payload, result, "sourceType");
+        appendIfPresent(payload, result, "topK");
 
         List<Map<String, Object>> slicedResults = new ArrayList<>();
         for (Object item : toList(payload.get("results"), 4)) {
             if (!(item instanceof Map<?, ?> raw)) {
                 continue;
             }
+
+            String title = firstText(raw, "title", "name");
+            String area = firstText(raw, "locationName", "area", "city");
+            if (area.isBlank()) {
+                area = metadataText(raw, "location_name", "area", "district");
+            }
+            String summary = trim(firstText(raw, "content", "summary", "description"), DEFAULT_TEXT_LIMIT);
+            String sourceType = text(raw.get("sourceType"));
+            List<String> tags = toStringList(firstNonNull(raw.get("tags"), metadataValue(raw, "tags")), 4, 20);
+            String author = firstText(raw, "authorNickname", "nickname");
+            if (author.isBlank()) {
+                author = metadataText(raw, "author_nickname");
+            }
+            String recallSource = metadataText(raw, "recall_source");
+            String keywordMatch = metadataText(raw, "keyword_match");
+            String createdAt = metadataText(raw, "created_at");
+
             Map<String, Object> entry = new LinkedHashMap<>();
-            putIfNotBlank(entry, "title", firstText(raw, "title", "name"));
-            putIfNotBlank(entry, "area", metadataText(raw, "location_name", "area", "district"));
-            List<String> tags = toStringList(raw.get("tags"), 4, 20);
+            putIfNotBlank(entry, "sourceId", text(raw.get("sourceId")));
+            putIfNotBlank(entry, "sourceType", sourceType);
+            putIfNotBlank(entry, "title", title);
+            putIfNotBlank(entry, "area", area);
+            putIfNotBlank(entry, "author", author);
             if (!tags.isEmpty()) {
                 entry.put("tags", tags);
             }
-            putIfNotBlank(entry, "summary", trim(firstText(raw, "content", "summary", "description"), DEFAULT_TEXT_LIMIT));
-            putIfNotBlank(entry, "sourceType", text(raw.get("sourceType")));
+            putIfNotBlank(entry, "summary", summary);
             putIfPresent(entry, "score", roundScore(raw.get("score")));
+            putIfNotBlank(entry, "matchSignal", buildKnowledgeMatchSignal(keywordMatch, recallSource, tags, area));
+            putIfNotBlank(entry, "routeSignal", buildKnowledgeRouteSignal(sourceType, title, summary, tags));
+            putIfNotBlank(entry, "freshness", buildFreshness(createdAt));
+            putIfNotBlank(entry, "createdAt", createdAt);
             if (!entry.isEmpty()) {
                 slicedResults.add(entry);
             }
@@ -75,7 +98,7 @@ public class AgentToolResultSlicerService {
 
         result.put("resultCount", slicedResults.size());
         result.put("results", slicedResults);
-        result.put("guidance", "Prefer these grounded references before expanding to fresh map search.");
+        result.put("guidance", "Treat these as evidence snippets. Reuse the facts and signals, not the raw wording.");
         return result;
     }
 
@@ -270,6 +293,66 @@ public class AgentToolResultSlicerService {
         putIfPresent(popularity, "favorites", raw.get("favoriteCount"));
         putIfPresent(popularity, "views", raw.get("viewCount"));
         return popularity;
+    }
+
+    private String buildKnowledgeMatchSignal(
+            String keywordMatch,
+            String recallSource,
+            List<String> tags,
+            String area
+    ) {
+        List<String> parts = new ArrayList<>();
+        if (!normalize(keywordMatch).isBlank()) {
+            parts.add("命中关键词 " + normalize(keywordMatch));
+        }
+        if (!normalize(recallSource).isBlank()) {
+            parts.add("召回来源: " + normalize(recallSource));
+        }
+        if (!tags.isEmpty()) {
+            parts.add("带标签线索");
+        }
+        if (!normalize(area).isBlank()) {
+            parts.add("带片区信息");
+        }
+        return parts.isEmpty() ? "" : String.join("；", trimList(parts, 3));
+    }
+
+    private String buildKnowledgeRouteSignal(
+            String sourceType,
+            String title,
+            String summary,
+            List<String> tags
+    ) {
+        String merged = String.join(
+                " ",
+                normalize(sourceType),
+                normalize(title),
+                normalize(summary),
+                String.join(" ", tags)
+        ).toLowerCase(Locale.ROOT);
+
+        List<String> parts = new ArrayList<>();
+        if (containsAny(merged, "路线", "walk", "city walk", "citywalk", "散步", "步行")) {
+            parts.add("偏路线参考");
+        }
+        if (containsAny(merged, "拍照", "夜景", "咖啡", "书店", "建筑", "老街")) {
+            parts.add("偏主题灵感");
+        }
+        if (containsAny(merged, "攻略", "建议", "体验", "记录")) {
+            parts.add("偏经验总结");
+        }
+        return parts.isEmpty() ? "" : String.join("；", trimList(parts, 3));
+    }
+
+    private String buildFreshness(String createdAt) {
+        String normalized = normalize(createdAt);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        if (normalized.length() >= 10) {
+            return normalized.substring(0, 10);
+        }
+        return normalized;
     }
 
     private String buildCommunityFitFor(
@@ -508,6 +591,21 @@ public class AgentToolResultSlicerService {
             }
         }
         return "";
+    }
+
+    private Object metadataValue(Map<?, ?> raw, String key) {
+        if (raw == null || key == null || key.isBlank()) {
+            return null;
+        }
+        Object metadataObj = raw.get("metadata");
+        if (!(metadataObj instanceof Map<?, ?> metadata)) {
+            return null;
+        }
+        return metadata.get(key);
+    }
+
+    private Object firstNonNull(Object first, Object second) {
+        return first != null ? first : second;
     }
 
     private Object roundScore(Object value) {
