@@ -97,6 +97,10 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
+        AgentChatResponse invalidInput = tryCompleteWithInvalidInputPrompt(execution, executionHandle, listener);
+        if (invalidInput != null) {
+            return invalidInput;
+        }
         AgentChatResponse clarification = tryCompleteWithClarification(execution, executionHandle, listener);
         if (clarification != null) {
             return clarification;
@@ -169,6 +173,59 @@ public class AgentExecutionPipelineService {
                 null
         ));
         return new PreparedExecution(userId, normalizedPrompt, intent, instructions, messages, steps, toolExecutionMemoByKey);
+    }
+
+    private AgentChatResponse tryCompleteWithInvalidInputPrompt(
+            PreparedExecution execution,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
+        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
+        if (intent == null || !intent.requiresValidInputPrompt()) {
+            return null;
+        }
+
+        checkCancelled(executionHandle);
+        String response = buildValidInputPrompt(intent);
+        execution.steps().add(new AgentStepResponse(
+                "input_gate",
+                "valid_input_gate",
+                execution.normalizedPrompt(),
+                response
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "final_answer",
+                "assistant",
+                execution.normalizedPrompt(),
+                response,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                "valid_input_required"
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "complete",
+                "agent",
+                null,
+                response,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                "valid_input_required"
+        ));
+
+        agentPromptAssemblyService.rememberConversationShortTerm(
+                execution.userId(),
+                execution.normalizedPrompt(),
+                response
+        );
+        return new AgentChatResponse(
+                response,
+                execution.steps(),
+                0,
+                llmClient.provider(),
+                llmClient.model()
+        );
     }
 
     private AgentChatResponse tryCompleteWithClarification(
@@ -630,6 +687,33 @@ public class AgentExecutionPipelineService {
             return "先告诉我你这次大概想走多久，比如 1 小时、半天或一整晚，我再把路线收紧一点。";
         }
         return "我还差一点关键信息。你可以补一下城市、区域、风格偏好或预计时长，我再继续规划。";
+    }
+
+    private String buildValidInputPrompt(AgentIntentAnalysisService.AgentIntent intent) {
+        if (intent != null && intent.acknowledgementOnly()) {
+            return """
+                    我还没拿到新的有效需求，所以这轮先不开始规划。
+
+                    你可以随时再叫我，直接补这 2 到 3 类信息里的任意几项就行：
+                    - 城市、区域，或者直接说“用当前定位”
+                    - 想要的主题或玩法，比如夜景、拍照、老街、咖啡、安静散步
+                    - 大概时长，比如 1 小时、半天、一个晚上
+
+                    例如你可以直接说：
+                    “在上海徐汇，想走一条适合晚上拍照的 2 小时 City Walk。”
+                    """.trim();
+        }
+        return """
+                这轮输入还不足以开始有效规划，我先不继续生成路线。
+
+                你可以随时来找我，只要补一点有效信息我就能继续：
+                - 城市、区域，或者直接说“用当前定位”
+                - 想看的主题或目标，比如夜景、拍照、老街、咖啡、放空散步
+                - 大概时长，比如 1 小时、半天、一个晚上
+
+                例如：
+                “我在杭州，想找一条适合傍晚散步和拍照的 City Walk，2 小时左右。”
+                """.trim();
     }
 
     private boolean shouldPrefetchKnowledge(AgentIntentAnalysisService.AgentIntent intent, String prompt) {

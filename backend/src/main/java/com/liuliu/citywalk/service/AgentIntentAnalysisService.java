@@ -32,12 +32,23 @@ public class AgentIntentAnalysisService {
     );
 
     private static final List<String> AVOID_KEYWORDS = List.of(
-            "人多", "排队", "商业区", "暴走", "爬坡", "太晒", "室内", "吵", "绕路"
+            "人多", "排队", "商业化", "暴走", "爬坡", "太晒", "室内", "吵", "绕路"
+    );
+
+    private static final List<String> REQUEST_KEYWORDS = List.of(
+            "推荐", "规划", "路线", "route", "city walk", "citywalk", "主题", "散步",
+            "walk", "地点", "去哪", "怎么玩", "附近", "适合", "参考", "攻略", "灵感",
+            "拍照", "夜景", "老街", "咖啡", "书店", "公园", "帮我", "想找", "想去"
+    );
+
+    private static final List<String> ACKNOWLEDGEMENT_ONLY_TEXTS = List.of(
+            "好", "好的", "行", "可以", "继续", "嗯", "嗯嗯", "收到", "明白", "知道了",
+            "ok", "okay", "yes", "yep"
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile("(半天|一天|两天|\\d+(?:\\.\\d+)?\\s*(?:小时|h|H))");
     private static final Pattern AREA_PATTERN = Pattern.compile(
-            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|巷|里|园|区|镇|村|站|校区|校园|公园|商圈|广场|码头|滨江|湖|河|山))"
+            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|公园|商圈|广场|码头|滨江|湖|河|山|巷|里|桥|站|校区|校园|园区|古镇|片区))"
     );
 
     private final ObjectMapper objectMapper;
@@ -56,6 +67,7 @@ public class AgentIntentAnalysisService {
         String duration = extractDuration(normalizedPrompt);
         String timePreference = extractTimePreference(normalizedPrompt);
         String mobilityPreference = extractMobilityPreference(normalizedPrompt);
+
         boolean useCurrentLocation = containsAny(normalizedPrompt, "当前定位", "当前位置", "我附近", "离我近", "周边", "附近");
         boolean needsKnowledgeReference = containsAny(normalizedPrompt, "类似", "参考", "别人", "攻略", "社区", "帖子", "同款");
         boolean needsThemeGeneration = containsAny(normalizedPrompt, "主题", "风格", "玩法", "灵感");
@@ -63,6 +75,8 @@ public class AgentIntentAnalysisService {
         boolean needsPoiSearch = useCurrentLocation
                 || needsRoutePlanning
                 || containsAny(normalizedPrompt, "地点", "店", "街区", "公园", "附近有什么", "去哪");
+        boolean acknowledgementOnly = isAcknowledgementOnly(normalizedPrompt);
+        boolean requestLike = containsAny(normalizedPrompt, REQUEST_KEYWORDS.toArray(String[]::new));
         List<String> missingSlots = extractMissingSlots(cities, areas, styles, objectives, duration, useCurrentLocation);
 
         return new AgentIntent(
@@ -80,6 +94,8 @@ public class AgentIntentAnalysisService {
                 needsPoiSearch,
                 needsRoutePlanning,
                 needsThemeGeneration,
+                acknowledgementOnly,
+                requestLike,
                 missingSlots
         );
     }
@@ -92,36 +108,36 @@ public class AgentIntentAnalysisService {
         List<String> lines = new ArrayList<>();
         lines.add("以下是本轮用户需求的结构化摘要，如与长期记忆冲突，以本轮需求为准：");
         if (!intent.cities().isEmpty()) {
-            lines.add("- 城市：" + String.join("、", intent.cities()));
+            lines.add("- 城市: " + String.join("、", intent.cities()));
         }
         if (!intent.areas().isEmpty()) {
-            lines.add("- 区域/地标：" + String.join("、", intent.areas()));
+            lines.add("- 区域/地标: " + String.join("、", intent.areas()));
         }
         if (!intent.styles().isEmpty()) {
-            lines.add("- 风格偏好：" + String.join("、", intent.styles()));
+            lines.add("- 风格偏好: " + String.join("、", intent.styles()));
         }
         if (!intent.objectives().isEmpty()) {
-            lines.add("- 主要目标：" + String.join("、", intent.objectives()));
+            lines.add("- 主要目标: " + String.join("、", intent.objectives()));
         }
         if (!intent.duration().isBlank()) {
-            lines.add("- 期望时长：" + intent.duration());
+            lines.add("- 期望时长: " + intent.duration());
         }
         if (!intent.timePreference().isBlank()) {
-            lines.add("- 时间偏好：" + intent.timePreference());
+            lines.add("- 时间偏好: " + intent.timePreference());
         }
         if (!intent.mobilityPreference().isBlank()) {
-            lines.add("- 行走强度：" + intent.mobilityPreference());
+            lines.add("- 行走强度: " + intent.mobilityPreference());
         }
         if (!intent.avoidTags().isEmpty()) {
-            lines.add("- 避免内容：" + String.join("、", intent.avoidTags()));
+            lines.add("- 避免内容: " + String.join("、", intent.avoidTags()));
         }
-        lines.add("- 是否优先使用当前位置：" + (intent.useCurrentLocation() ? "是" : "否"));
-        lines.add("- 是否需要真实案例参考：" + (intent.needsKnowledgeReference() ? "是" : "否"));
-        lines.add("- 是否需要地点检索：" + (intent.needsPoiSearch() ? "是" : "否"));
-        lines.add("- 是否需要路线规划：" + (intent.needsRoutePlanning() ? "是" : "否"));
-        lines.add("- 是否需要主题生成：" + (intent.needsThemeGeneration() ? "是" : "否"));
+        lines.add("- 是否优先使用当前定位: " + (intent.useCurrentLocation() ? "是" : "否"));
+        lines.add("- 是否需要真实案例参考: " + (intent.needsKnowledgeReference() ? "是" : "否"));
+        lines.add("- 是否需要地点检索: " + (intent.needsPoiSearch() ? "是" : "否"));
+        lines.add("- 是否需要路线规划: " + (intent.needsRoutePlanning() ? "是" : "否"));
+        lines.add("- 是否需要主题生成: " + (intent.needsThemeGeneration() ? "是" : "否"));
         if (!intent.missingSlots().isEmpty()) {
-            lines.add("- 当前缺失信息：" + String.join("、", intent.missingSlots()));
+            lines.add("- 当前缺失信息: " + String.join("、", intent.missingSlots()));
         }
         return "\n\n" + String.join("\n", lines);
     }
@@ -239,12 +255,30 @@ public class AgentIntentAnalysisService {
     }
 
     private boolean containsAny(String text, String... candidates) {
+        if (text == null || text.isBlank() || candidates == null) {
+            return false;
+        }
         for (String candidate : candidates) {
-            if (text.contains(candidate)) {
+            if (candidate != null && !candidate.isBlank() && text.contains(candidate)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private boolean isAcknowledgementOnly(String text) {
+        String normalized = normalize(text).toLowerCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        for (String candidate : ACKNOWLEDGEMENT_ONLY_TEXTS) {
+            if (normalized.equals(candidate)) {
+                return true;
+            }
+        }
+        return normalized.matches("^[\\p{IsHan}a-zA-Z0-9\\s!！,.，~～?？]+$")
+                && normalized.length() <= 6
+                && !containsAny(normalized, REQUEST_KEYWORDS.toArray(String[]::new));
     }
 
     private List<String> trimList(List<String> values, int limit) {
@@ -283,6 +317,8 @@ public class AgentIntentAnalysisService {
             boolean needsPoiSearch,
             boolean needsRoutePlanning,
             boolean needsThemeGeneration,
+            boolean acknowledgementOnly,
+            boolean requestLike,
             List<String> missingSlots
     ) {
         public boolean isEmpty() {
@@ -301,9 +337,36 @@ public class AgentIntentAnalysisService {
             return duration == null || duration.isBlank();
         }
 
-        public boolean requiresClarification() {
+        public boolean hasMeaningfulPlanningSignal() {
+            return !cities.isEmpty()
+                    || !areas.isEmpty()
+                    || !styles.isEmpty()
+                    || !objectives.isEmpty()
+                    || (duration != null && !duration.isBlank())
+                    || (timePreference != null && !timePreference.isBlank())
+                    || (mobilityPreference != null && !mobilityPreference.isBlank())
+                    || !avoidTags.isEmpty()
+                    || useCurrentLocation
+                    || needsKnowledgeReference
+                    || needsPoiSearch
+                    || needsRoutePlanning
+                    || needsThemeGeneration
+                    || requestLike;
+        }
+
+        public boolean requiresValidInputPrompt() {
             if (isEmpty()) {
                 return true;
+            }
+            if (acknowledgementOnly) {
+                return true;
+            }
+            return !hasMeaningfulPlanningSignal();
+        }
+
+        public boolean requiresClarification() {
+            if (requiresValidInputPrompt()) {
+                return false;
             }
             if (needsRoutePlanning || needsPoiSearch) {
                 if (missingLocationContext()) {
@@ -342,6 +405,12 @@ public class AgentIntentAnalysisService {
             }
             if (!avoidTags.isEmpty()) {
                 parts.add("避开=" + String.join("、", avoidTags));
+            }
+            if (acknowledgementOnly) {
+                parts.add("ack_only=true");
+            }
+            if (requestLike) {
+                parts.add("request_like=true");
             }
             return String.join("; ", parts);
         }
