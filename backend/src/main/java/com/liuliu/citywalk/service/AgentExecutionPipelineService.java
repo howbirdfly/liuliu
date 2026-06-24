@@ -526,7 +526,7 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         final int currentRound = round;
-        return agentRoundService.executeRound(
+        AgentRoundService.AgentRoundOutcome outcome = agentRoundService.executeRound(
                 execution.instructions(),
                 execution.messages(),
                 execution.steps(),
@@ -573,6 +573,40 @@ public class AgentExecutionPipelineService {
                 },
                 execution.toolExecutionMemoByKey()
         );
+        execution.steps().add(new AgentStepResponse(
+                "round_type",
+                outcome.roundType().name().toLowerCase(),
+                "round=" + round,
+                buildRoundTypeOutput(outcome)
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "round_type",
+                outcome.roundType().name().toLowerCase(),
+                "round=" + round,
+                buildRoundTypeOutput(outcome),
+                round,
+                llmClient.provider(),
+                llmClient.model(),
+                null
+        ));
+        return outcome;
+    }
+
+    private String buildRoundTypeOutput(AgentRoundService.AgentRoundOutcome outcome) {
+        if (outcome == null || outcome.roundType() == null) {
+            return "unknown";
+        }
+        if (outcome.roundType() == AgentRoundService.RoundType.TOOL_CALLING) {
+            int toolCount = outcome.toolCalls() == null ? 0 : outcome.toolCalls().size();
+            return "tool_calling: model requested " + toolCount + " tool call(s)";
+        }
+        String preview = safeText(outcome.finalContent(), "");
+        if (preview.length() > 80) {
+            preview = preview.substring(0, 80) + "...";
+        }
+        return preview.isBlank()
+                ? "final_text: model returned direct text answer"
+                : "final_text: " + preview;
     }
 
     private AgentChatResponse completeSuccessfulExecution(
