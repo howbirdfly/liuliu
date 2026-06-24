@@ -28,29 +28,18 @@ public class SearchKnowledgeBaseAgentTool extends AbstractJsonAgentTool {
 
     @Override
     public String description() {
-        return "检索已经向量化入库的 City Walk 知识片段，比如公开攻略、路线摘要和历史漫步内容。";
+        return "Search vectorized City Walk knowledge, such as public guides, route summaries, and historical walking content.";
     }
 
     @Override
     public Map<String, Object> parametersSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "query", Map.of(
-                                "type", "string",
-                                "description", "要检索的语义查询，比如海边日落、校园散步、老街拍照。"
-                        ),
-                        "topK", Map.of(
-                                "type", "integer",
-                                "description", "返回结果数量，默认 5。"
-                        ),
-                        "sourceType", Map.of(
-                                "type", "string",
-                                "description", "可选，限制知识来源类型，比如 community_walk。"
-                        )
+        return jsonObjectSchema(
+                Map.of(
+                        "query", stringProperty("Semantic search query, such as seaside sunset, campus walk, or old-street photography."),
+                        "topK", integerProperty("Maximum number of results to return. Defaults to 5."),
+                        "sourceType", stringProperty("Optional source type filter, such as community_walk.")
                 ),
-                "required", List.of("query"),
-                "additionalProperties", false
+                List.of("query")
         );
     }
 

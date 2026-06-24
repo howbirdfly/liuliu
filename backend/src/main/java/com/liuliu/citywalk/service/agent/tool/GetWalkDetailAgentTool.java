@@ -25,21 +25,16 @@ public class GetWalkDetailAgentTool extends AbstractJsonAgentTool {
 
     @Override
     public String description() {
-        return "查看一条公开 Walk 记录的详细信息，用于补充路线灵感。";
+        return "Fetch the details of one public walk record to enrich route planning context.";
     }
 
     @Override
     public Map<String, Object> parametersSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "walkId", Map.of(
-                                "type", "integer",
-                                "description", "公开 Walk 记录的 id"
-                        )
+        return jsonObjectSchema(
+                Map.of(
+                        "walkId", integerProperty("Public walk record id.")
                 ),
-                "required", List.of("walkId"),
-                "additionalProperties", false
+                List.of("walkId")
         );
     }
 

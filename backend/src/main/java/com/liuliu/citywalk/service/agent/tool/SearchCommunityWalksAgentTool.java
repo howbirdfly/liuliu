@@ -24,23 +24,18 @@ public class SearchCommunityWalksAgentTool extends AbstractJsonAgentTool {
 
     @Override
     public String description() {
-        return "检索社区公开攻略、Walk 记录和相关路线灵感。";
+        return "Search public community guides, walk records, and related route inspiration.";
     }
 
     @Override
     public Map<String, Object> parametersSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "keyword", Map.of(
-                                "type", "string",
-                                "description", "检索关键词，例如复古街区、拍照、夜景、亲子。"
-                        ),
-                        "page", Map.of("type", "integer", "description", "页码，默认 1"),
-                        "pageSize", Map.of("type", "integer", "description", "返回数量，默认 5")
+        return jsonObjectSchema(
+                Map.of(
+                        "keyword", stringProperty("Search keyword, such as old street, photography, night view, or family friendly."),
+                        "page", integerProperty("Page number. Defaults to 1."),
+                        "pageSize", integerProperty("Maximum number of results to return. Defaults to 5.")
                 ),
-                "required", List.of("keyword"),
-                "additionalProperties", false
+                List.of("keyword")
         );
     }
 

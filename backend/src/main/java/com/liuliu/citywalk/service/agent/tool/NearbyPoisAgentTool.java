@@ -25,19 +25,17 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
 
     @Override
     public String description() {
-        return "根据经纬度查询周边适合漫步探索的兴趣点。";
+        return "Search nearby places of interest around a latitude and longitude.";
     }
 
     @Override
     public Map<String, Object> parametersSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "lat", Map.of("type", "number", "description", "纬度"),
-                        "lng", Map.of("type", "number", "description", "经度")
+        return jsonObjectSchema(
+                Map.of(
+                        "lat", numberProperty("Latitude."),
+                        "lng", numberProperty("Longitude.")
                 ),
-                "required", List.of("lat", "lng"),
-                "additionalProperties", false
+                List.of("lat", "lng")
         );
     }
 
@@ -56,7 +54,7 @@ public class NearbyPoisAgentTool extends AbstractJsonAgentTool {
         payload.put("results", searchResult.results());
         if (searchResult.error() != null) {
             payload.put("error", searchResult.error());
-            payload.put("fallbackSuggestion", "附近兴趣点检索失败时，可以改用区域级推荐，不要假设具体 POI 已经确认。");
+            payload.put("fallbackSuggestion", "If nearby POI search fails, fall back to area-level suggestions and avoid claiming exact places were confirmed.");
         }
         if (searchResult.message() != null) {
             payload.put("message", searchResult.message());

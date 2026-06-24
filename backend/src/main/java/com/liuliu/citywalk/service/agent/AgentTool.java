@@ -10,6 +10,10 @@ public interface AgentTool {
 
     Map<String, Object> parametersSchema();
 
+    default Map<String, Object> inputSchema() {
+        return parametersSchema();
+    }
+
     String execute(Map<String, Object> arguments);
 
     default boolean supportsIdempotentReplay() {
@@ -21,6 +25,6 @@ public interface AgentTool {
     }
 
     default LlmToolDefinition toDefinition() {
-        return new LlmToolDefinition(name(), description(), parametersSchema());
+        return new LlmToolDefinition(name(), description(), inputSchema());
     }
 }

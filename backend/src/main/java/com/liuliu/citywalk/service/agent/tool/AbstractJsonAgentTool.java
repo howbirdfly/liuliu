@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.agent.AgentTool;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public abstract class AbstractJsonAgentTool implements AgentTool {
@@ -70,5 +72,36 @@ public abstract class AbstractJsonAgentTool implements AgentTool {
         } catch (NumberFormatException error) {
             return fallback;
         }
+    }
+
+    protected Map<String, Object> jsonObjectSchema(
+            Map<String, Object> properties,
+            List<String> required
+    ) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties == null ? Map.of() : properties);
+        schema.put("required", required == null ? List.of() : required);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    protected Map<String, Object> stringProperty(String description) {
+        return scalarProperty("string", description);
+    }
+
+    protected Map<String, Object> integerProperty(String description) {
+        return scalarProperty("integer", description);
+    }
+
+    protected Map<String, Object> numberProperty(String description) {
+        return scalarProperty("number", description);
+    }
+
+    private Map<String, Object> scalarProperty(String type, String description) {
+        Map<String, Object> property = new LinkedHashMap<>();
+        property.put("type", type);
+        property.put("description", description == null ? "" : description.trim());
+        return property;
     }
 }

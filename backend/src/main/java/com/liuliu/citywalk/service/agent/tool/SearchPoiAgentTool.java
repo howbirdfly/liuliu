@@ -25,21 +25,16 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
 
     @Override
     public String description() {
-        return "按关键词搜索适合 City Walk 的地点候选。";
+        return "Search candidate places that may fit a City Walk query.";
     }
 
     @Override
     public Map<String, Object> parametersSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "query", Map.of(
-                                "type", "string",
-                                "description", "用户想搜索的地点关键词，例如武康路、前门、咖啡街区。"
-                        )
+        return jsonObjectSchema(
+                Map.of(
+                        "query", stringProperty("Place keyword to search, such as Wukang Road, Qianmen, or a cafe street.")
                 ),
-                "required", List.of("query"),
-                "additionalProperties", false
+                List.of("query")
         );
     }
 
@@ -53,7 +48,7 @@ public class SearchPoiAgentTool extends AbstractJsonAgentTool {
         payload.put("results", searchResult.results());
         if (searchResult.error() != null) {
             payload.put("error", searchResult.error());
-            payload.put("fallbackSuggestion", "地图结果不可用时，可以继续参考社区公开攻略和用户已给出的区域偏好，提供保守路线建议。");
+            payload.put("fallbackSuggestion", "When map search is unavailable, continue from community guides and the user's stated area preference, and keep the route suggestion conservative.");
         }
         if (searchResult.message() != null) {
             payload.put("message", searchResult.message());

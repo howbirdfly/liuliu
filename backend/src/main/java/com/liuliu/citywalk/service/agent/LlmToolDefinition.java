@@ -7,4 +7,7 @@ public record LlmToolDefinition(
         String description,
         Map<String, Object> parametersSchema
 ) {
+    public Map<String, Object> inputSchema() {
+        return parametersSchema;
+    }
 }
