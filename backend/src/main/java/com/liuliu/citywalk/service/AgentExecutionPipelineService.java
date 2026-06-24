@@ -32,12 +32,17 @@ public class AgentExecutionPipelineService {
     private static final String FINAL_ANSWER_GUIDE = """
 
             Final answer contract:
-            - Start with the recommended area, route theme, or route direction.
-            - Explain briefly why it fits the user's request.
-            - Provide a suggested route order or walking sequence when possible.
-            - Mention interesting stops, scenes, or observations worth noticing.
-            - End with one or two practical reminders.
-            - If some details are inferred instead of confirmed by tools, say that explicitly.
+            - Use markdown and keep these exact sections in order:
+              ## 推荐区域
+              ## 路线顺序
+              ## 依据来源
+              ## 不确定项
+              ## 实用提醒
+            - In 推荐区域, say the best area or route direction first and briefly explain why it fits.
+            - In 路线顺序, give a short ordered walking sequence when possible.
+            - In 依据来源, distinguish tool-confirmed references from general synthesis.
+            - In 不确定项, explicitly mention what is inferred or still needs live confirmation.
+            - In 实用提醒, end with one or two practical tips.
             """;
     private static final String FALLBACK_GUIDE = """
 
@@ -60,6 +65,7 @@ public class AgentExecutionPipelineService {
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
     private final AgentPromptAssemblyService agentPromptAssemblyService;
+    private final AgentAnswerFormatterService agentAnswerFormatterService;
     private final AgentToolExecutionService agentToolExecutionService;
     private final AgentContextWindowService agentContextWindowService;
     private final AgentRoundService agentRoundService;
@@ -69,6 +75,7 @@ public class AgentExecutionPipelineService {
             ObjectMapper objectMapper,
             AgentIntentAnalysisService agentIntentAnalysisService,
             AgentPromptAssemblyService agentPromptAssemblyService,
+            AgentAnswerFormatterService agentAnswerFormatterService,
             AgentToolExecutionService agentToolExecutionService,
             AgentContextWindowService agentContextWindowService,
             AgentRoundService agentRoundService
@@ -77,6 +84,7 @@ public class AgentExecutionPipelineService {
         this.objectMapper = objectMapper;
         this.agentIntentAnalysisService = agentIntentAnalysisService;
         this.agentPromptAssemblyService = agentPromptAssemblyService;
+        this.agentAnswerFormatterService = agentAnswerFormatterService;
         this.agentToolExecutionService = agentToolExecutionService;
         this.agentContextWindowService = agentContextWindowService;
         this.agentRoundService = agentRoundService;
@@ -466,7 +474,7 @@ public class AgentExecutionPipelineService {
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener
     ) {
-        String answer = normalizeAssistantAnswer(content);
+        String answer = normalizeAssistantAnswer(content, execution.intent(), execution.steps());
         checkCancelled(executionHandle);
         if (!answer.isBlank()) {
             execution.steps().add(new AgentStepResponse("assistant", "final_answer", null, answer));
@@ -495,7 +503,11 @@ public class AgentExecutionPipelineService {
     }
 
     private AgentChatResponse completeMaxRoundExecution(PreparedExecution execution, AgentExecutionListener listener) {
-        String fallback = "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。";
+        String fallback = agentAnswerFormatterService.formatFinalAnswer(
+                "我已经完成了多轮工具检索，但这次信息仍然不够稳定。你可以再补充城市、偏好或时间段，我会继续细化路线。",
+                execution.intent(),
+                execution.steps()
+        );
         execution.steps().add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
         agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), fallback);
         emit(listener, new AgentExecutionEvent(
@@ -523,6 +535,22 @@ public class AgentExecutionPipelineService {
             return normalized;
         }
         return "我已经整理出一版基础漫步建议，但这轮没有拿到足够完整的模型文本输出。你可以继续追问我想去的城市、时间段或偏好。";
+    }
+
+    private String normalizeAssistantAnswer(
+            String content,
+            AgentIntentAnalysisService.AgentIntent intent,
+            List<AgentStepResponse> steps
+    ) {
+        String normalized = safeText(content, "");
+        if (!normalized.isBlank()) {
+            return agentAnswerFormatterService.formatFinalAnswer(normalized, intent, steps);
+        }
+        return agentAnswerFormatterService.formatFinalAnswer(
+                "我已经整理出一版基础漫步建议，但这轮没有拿到足够完整的模型文本输出。你可以继续追问想去的城市、时间段或偏好。",
+                intent,
+                steps
+        );
     }
 
     private String buildRuntimeContext(AgentIntentAnalysisService.AgentIntent intent) {
