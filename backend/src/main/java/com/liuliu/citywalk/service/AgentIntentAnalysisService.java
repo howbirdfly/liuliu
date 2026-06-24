@@ -78,8 +78,24 @@ public class AgentIntentAnalysisService {
         boolean needsPoiSearch = useCurrentLocation
                 || needsRoutePlanning
                 || containsAny(normalizedPrompt, "地点", "店", "街区", "公园", "附近有什么", "去哪");
-        boolean acknowledgementOnly = isAcknowledgementOnly(normalizedPrompt);
         boolean requestLike = containsAny(normalizedPrompt, REQUEST_KEYWORDS.toArray(String[]::new));
+        boolean acknowledgementOnly = isAcknowledgementOnly(
+                normalizedPrompt,
+                cities,
+                areas,
+                styles,
+                objectives,
+                duration,
+                timePreference,
+                mobilityPreference,
+                avoidTags,
+                useCurrentLocation,
+                needsKnowledgeReference,
+                needsPoiSearch,
+                needsRoutePlanning,
+                needsThemeGeneration,
+                requestLike
+        );
         List<String> missingSlots = extractMissingSlots(cities, areas, styles, objectives, duration, useCurrentLocation);
 
         return new AgentIntent(
@@ -462,7 +478,41 @@ public class AgentIntentAnalysisService {
         return false;
     }
 
-    private boolean isAcknowledgementOnly(String text) {
+    private boolean isAcknowledgementOnly(
+            String text,
+            List<String> cities,
+            List<String> areas,
+            List<String> styles,
+            List<String> objectives,
+            String duration,
+            String timePreference,
+            String mobilityPreference,
+            List<String> avoidTags,
+            boolean useCurrentLocation,
+            boolean needsKnowledgeReference,
+            boolean needsPoiSearch,
+            boolean needsRoutePlanning,
+            boolean needsThemeGeneration,
+            boolean requestLike
+    ) {
+        boolean hasExplicitSignal = (cities != null && !cities.isEmpty())
+                || (areas != null && !areas.isEmpty())
+                || (styles != null && !styles.isEmpty())
+                || (objectives != null && !objectives.isEmpty())
+                || (duration != null && !duration.isBlank())
+                || (timePreference != null && !timePreference.isBlank())
+                || (mobilityPreference != null && !mobilityPreference.isBlank())
+                || (avoidTags != null && !avoidTags.isEmpty())
+                || useCurrentLocation
+                || needsKnowledgeReference
+                || needsPoiSearch
+                || needsRoutePlanning
+                || needsThemeGeneration
+                || requestLike;
+        if (hasExplicitSignal) {
+            return false;
+        }
+
         String normalized = normalize(text).toLowerCase(Locale.ROOT);
         if (normalized.isBlank()) {
             return false;
