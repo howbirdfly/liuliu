@@ -93,7 +93,8 @@ public class AgentExecutionPipelineService {
         if (clarification != null) {
             return clarification;
         }
-        applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
+        DeterministicPrefetchOutcome knowledgePrefetch = applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
+        applyDeterministicPoiPrefetch(execution, knowledgePrefetch, executionHandle, listener);
         return runPlanningLoop(execution, executionHandle, listener);
     }
 
@@ -231,23 +232,23 @@ public class AgentExecutionPipelineService {
         return completeMaxRoundExecution(execution, listener);
     }
 
-    private void applyDeterministicKnowledgePrefetch(
+    private DeterministicPrefetchOutcome applyDeterministicKnowledgePrefetch(
             PreparedExecution execution,
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener
     ) {
         AgentIntentAnalysisService.AgentIntent intent = execution.intent();
         if (!shouldPrefetchKnowledge(intent, execution.normalizedPrompt())) {
-            return;
+            return DeterministicPrefetchOutcome.skipped();
         }
         if (!agentToolExecutionService.hasTool("search_knowledge_base")) {
-            return;
+            return DeterministicPrefetchOutcome.skipped();
         }
 
         checkCancelled(executionHandle);
         String query = buildKnowledgePrefetchQuery(intent, execution.normalizedPrompt());
         if (query.isBlank()) {
-            return;
+            return DeterministicPrefetchOutcome.skipped();
         }
 
         try {
@@ -302,6 +303,12 @@ public class AgentExecutionPipelineService {
                     llmClient.model(),
                     outcome.code() == null ? "deterministic_prefetch" : outcome.code()
             ));
+            return DeterministicPrefetchOutcome.executed(
+                    toolCall.name(),
+                    outcome.output(),
+                    countResults(outcome.output()),
+                    outcome.code() == null
+            );
         } catch (AgentExecutionCancelledException error) {
             throw error;
         } catch (Exception error) {
@@ -310,6 +317,88 @@ public class AgentExecutionPipelineService {
                     "search_knowledge_base",
                     execution.normalizedPrompt(),
                     "knowledge_prefetch_skipped: " + safeText(error.getMessage(), "unknown_error")
+            ));
+            return DeterministicPrefetchOutcome.skipped();
+        }
+    }
+
+    private void applyDeterministicPoiPrefetch(
+            PreparedExecution execution,
+            DeterministicPrefetchOutcome knowledgePrefetch,
+            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
+            AgentExecutionListener listener
+    ) {
+        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
+        if (!shouldPrefetchPoi(intent, knowledgePrefetch)) {
+            return;
+        }
+        if (!agentToolExecutionService.hasTool("search_poi")) {
+            return;
+        }
+
+        checkCancelled(executionHandle);
+        String query = buildPoiPrefetchQuery(intent, execution.normalizedPrompt());
+        if (query.isBlank()) {
+            return;
+        }
+
+        try {
+            String argumentsJson = objectMapper.writeValueAsString(Map.of("query", query));
+            LlmToolCall toolCall = new LlmToolCall(
+                    "prefetch-poi-" + UUID.randomUUID(),
+                    "search_poi",
+                    argumentsJson
+            );
+
+            emit(listener, new AgentExecutionEvent(
+                    "tool_call",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    null,
+                    0,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    "deterministic_prefetch"
+            ));
+            AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    () -> checkCancelled(executionHandle),
+                    execution.toolExecutionMemoByKey()
+            );
+            execution.steps().add(new AgentStepResponse(
+                    "prefetch_tool",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    outcome.output()
+            ));
+            execution.messages().add(LlmMessage.assistant(
+                    "System prefetch executed before planning: search_poi.",
+                    List.of(toolCall)
+            ));
+            execution.messages().add(LlmMessage.tool(
+                    toolCall.id(),
+                    toolCall.name(),
+                    agentContextWindowService.compactToolOutputForModel(outcome.output())
+            ));
+            emit(listener, new AgentExecutionEvent(
+                    "tool_result",
+                    toolCall.name(),
+                    toolCall.argumentsJson(),
+                    outcome.output(),
+                    0,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    outcome.code() == null ? "deterministic_prefetch" : outcome.code()
+            ));
+        } catch (AgentExecutionCancelledException error) {
+            throw error;
+        } catch (Exception error) {
+            execution.steps().add(new AgentStepResponse(
+                    "prefetch_tool",
+                    "search_poi",
+                    execution.normalizedPrompt(),
+                    "poi_prefetch_skipped: " + safeText(error.getMessage(), "unknown_error")
             ));
         }
     }
@@ -480,6 +569,7 @@ public class AgentExecutionPipelineService {
             steps.add("theme direction first");
         } else {
             steps.add("deterministic knowledge prefetch");
+            steps.add("deterministic poi prefetch if needed");
             steps.add("knowledge-first retrieval");
         }
         if (intent != null && intent.useCurrentLocation()) {
@@ -559,6 +649,79 @@ public class AgentExecutionPipelineService {
         return query.isBlank() ? safeText(prompt, "") : query;
     }
 
+    private boolean shouldPrefetchPoi(
+            AgentIntentAnalysisService.AgentIntent intent,
+            DeterministicPrefetchOutcome knowledgePrefetch
+    ) {
+        if (intent == null || !intent.needsRoutePlanning()) {
+            return false;
+        }
+        if (intent.useCurrentLocation()) {
+            return false;
+        }
+        if (intent.missingLocationContext()) {
+            return false;
+        }
+        if (knowledgePrefetch == null || !knowledgePrefetch.executed()) {
+            return true;
+        }
+        if (!knowledgePrefetch.successful()) {
+            return true;
+        }
+        return knowledgePrefetch.resultCount() < 2;
+    }
+
+    private String buildPoiPrefetchQuery(AgentIntentAnalysisService.AgentIntent intent, String prompt) {
+        if (intent == null) {
+            return safeText(prompt, "");
+        }
+        List<String> parts = new ArrayList<>();
+        if (!intent.cities().isEmpty()) {
+            parts.add(String.join(" ", intent.cities()));
+        }
+        if (!intent.areas().isEmpty()) {
+            parts.add(String.join(" ", intent.areas()));
+        }
+        if (!intent.styles().isEmpty()) {
+            parts.add(String.join(" ", intent.styles()));
+        }
+        if (!intent.objectives().isEmpty()) {
+            parts.add(String.join(" ", intent.objectives()));
+        }
+        if (!intent.timePreference().isBlank()) {
+            parts.add(intent.timePreference());
+        }
+        parts.add("city walk 地点");
+        String query = String.join(" ", parts).trim();
+        return query.isBlank() ? safeText(prompt, "") : query;
+    }
+
+    private int countResults(String output) {
+        if (output == null || output.isBlank()) {
+            return 0;
+        }
+        try {
+            Object value = objectMapper.readValue(output, Object.class);
+            if (!(value instanceof Map<?, ?> map)) {
+                return 0;
+            }
+            Object results = map.get("results");
+            if (results instanceof Iterable<?> iterable) {
+                int count = 0;
+                for (Object ignored : iterable) {
+                    count++;
+                }
+                return count;
+            }
+            if (results != null && results.getClass().isArray()) {
+                return java.lang.reflect.Array.getLength(results);
+            }
+            return 0;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
@@ -590,5 +753,26 @@ public class AgentExecutionPipelineService {
             List<AgentStepResponse> steps,
             Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
     ) {
+    }
+
+    private record DeterministicPrefetchOutcome(
+            boolean executed,
+            String toolName,
+            String output,
+            int resultCount,
+            boolean successful
+    ) {
+        private static DeterministicPrefetchOutcome skipped() {
+            return new DeterministicPrefetchOutcome(false, null, null, 0, false);
+        }
+
+        private static DeterministicPrefetchOutcome executed(
+                String toolName,
+                String output,
+                int resultCount,
+                boolean successful
+        ) {
+            return new DeterministicPrefetchOutcome(true, toolName, output, resultCount, successful);
+        }
     }
 }
