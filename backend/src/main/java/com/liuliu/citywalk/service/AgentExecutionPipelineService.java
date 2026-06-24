@@ -67,7 +67,7 @@ public class AgentExecutionPipelineService {
     private final AgentPromptAssemblyService agentPromptAssemblyService;
     private final AgentAnswerFormatterService agentAnswerFormatterService;
     private final AgentToolExecutionService agentToolExecutionService;
-    private final AgentContextWindowService agentContextWindowService;
+    private final AgentToolResultSlicerService agentToolResultSlicerService;
     private final AgentRoundService agentRoundService;
 
     public AgentExecutionPipelineService(
@@ -77,7 +77,7 @@ public class AgentExecutionPipelineService {
             AgentPromptAssemblyService agentPromptAssemblyService,
             AgentAnswerFormatterService agentAnswerFormatterService,
             AgentToolExecutionService agentToolExecutionService,
-            AgentContextWindowService agentContextWindowService,
+            AgentToolResultSlicerService agentToolResultSlicerService,
             AgentRoundService agentRoundService
     ) {
         this.llmClient = llmClient;
@@ -86,7 +86,7 @@ public class AgentExecutionPipelineService {
         this.agentPromptAssemblyService = agentPromptAssemblyService;
         this.agentAnswerFormatterService = agentAnswerFormatterService;
         this.agentToolExecutionService = agentToolExecutionService;
-        this.agentContextWindowService = agentContextWindowService;
+        this.agentToolResultSlicerService = agentToolResultSlicerService;
         this.agentRoundService = agentRoundService;
     }
 
@@ -299,7 +299,7 @@ public class AgentExecutionPipelineService {
             execution.messages().add(LlmMessage.tool(
                     toolCall.id(),
                     toolCall.name(),
-                    agentContextWindowService.compactToolOutputForModel(outcome.output())
+                    agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
             ));
             emit(listener, new AgentExecutionEvent(
                     "tool_result",
@@ -387,7 +387,7 @@ public class AgentExecutionPipelineService {
             execution.messages().add(LlmMessage.tool(
                     toolCall.id(),
                     toolCall.name(),
-                    agentContextWindowService.compactToolOutputForModel(outcome.output())
+                    agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
             ));
             emit(listener, new AgentExecutionEvent(
                     "tool_result",

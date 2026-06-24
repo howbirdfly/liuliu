@@ -16,16 +16,16 @@ public class AgentRoundService {
 
     private final LlmClient llmClient;
     private final AgentToolExecutionService agentToolExecutionService;
-    private final AgentContextWindowService agentContextWindowService;
+    private final AgentToolResultSlicerService agentToolResultSlicerService;
 
     public AgentRoundService(
             LlmClient llmClient,
             AgentToolExecutionService agentToolExecutionService,
-            AgentContextWindowService agentContextWindowService
+            AgentToolResultSlicerService agentToolResultSlicerService
     ) {
         this.llmClient = llmClient;
         this.agentToolExecutionService = agentToolExecutionService;
-        this.agentContextWindowService = agentContextWindowService;
+        this.agentToolResultSlicerService = agentToolResultSlicerService;
     }
 
     public AgentRoundOutcome executeRound(
@@ -67,7 +67,7 @@ public class AgentRoundService {
                 messages.add(LlmMessage.tool(
                         toolCall.id(),
                         toolCall.name(),
-                        agentContextWindowService.compactToolOutputForModel(outcome.output())
+                        agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
                 ));
             }
             return AgentRoundOutcome.requiresAnotherRound();
