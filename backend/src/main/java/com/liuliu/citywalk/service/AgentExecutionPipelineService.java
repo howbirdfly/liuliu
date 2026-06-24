@@ -119,8 +119,12 @@ public class AgentExecutionPipelineService {
         String normalizedPrompt = prompt == null ? "" : prompt.trim();
         checkCancelled(executionHandle);
 
-        AgentIntentAnalysisService.AgentIntent intent = agentIntentAnalysisService.analyze(normalizedPrompt);
-        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(userId, normalizedPrompt);
+        List<LlmMessage> history = agentPromptAssemblyService.loadConversationHistory(userId);
+        AgentIntentAnalysisService.AgentIntent currentIntent = agentIntentAnalysisService.analyze(normalizedPrompt);
+        AgentIntentAnalysisService.AgentIntent carryoverIntent = agentIntentAnalysisService.deriveCarryoverIntent(history);
+        AgentIntentAnalysisService.AgentIntent intent = agentIntentAnalysisService.mergeWithCarryover(currentIntent, carryoverIntent);
+        String carryoverContext = agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, carryoverIntent, intent);
+        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(history, normalizedPrompt, carryoverContext);
         String instructions = agentPromptAssemblyService.buildInstructions(
                 userId,
                 DEFAULT_INSTRUCTIONS,
@@ -134,6 +138,14 @@ public class AgentExecutionPipelineService {
                 normalizedPrompt,
                 agentIntentAnalysisService.toStepOutput(intent)
         ));
+        if (!carryoverContext.isBlank()) {
+            steps.add(new AgentStepResponse(
+                    "context_carryover",
+                    "recent_conversation_context",
+                    normalizedPrompt,
+                    carryoverContext
+            ));
+        }
         steps.add(new AgentStepResponse(
                 "pipeline_strategy",
                 "knowledge_first_pipeline",
@@ -162,6 +174,18 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
+        if (!carryoverContext.isBlank()) {
+            emit(listener, new AgentExecutionEvent(
+                    "context_carryover",
+                    "recent_conversation_context",
+                    normalizedPrompt,
+                    carryoverContext,
+                    0,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    null
+            ));
+        }
         emit(listener, new AgentExecutionEvent(
                 "pipeline_strategy",
                 "knowledge_first_pipeline",

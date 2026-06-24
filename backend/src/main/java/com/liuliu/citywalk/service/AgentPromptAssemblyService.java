@@ -23,10 +23,23 @@ public class AgentPromptAssemblyService {
     }
 
     public List<LlmMessage> buildConversationMessages(Long userId, String userPrompt) {
+        return buildConversationMessages(loadConversationHistory(userId), userPrompt, "");
+    }
+
+    public List<LlmMessage> buildConversationMessages(
+            List<LlmMessage> history,
+            String userPrompt,
+            String carryoverContext
+    ) {
         return agentContextWindowService.buildConversationMessages(
-                agentMemoryService.loadConversation(userId),
-                userPrompt
+                history,
+                userPrompt,
+                carryoverContext
         );
+    }
+
+    public List<LlmMessage> loadConversationHistory(Long userId) {
+        return agentMemoryService.loadConversation(userId);
     }
 
     public String buildInstructions(

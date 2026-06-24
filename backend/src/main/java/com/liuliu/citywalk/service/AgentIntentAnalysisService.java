@@ -2,6 +2,7 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.service.agent.LlmMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -19,7 +20,7 @@ public class AgentIntentAnalysisService {
             "上海", "北京", "广州", "深圳", "杭州", "苏州", "南京", "武汉", "成都", "重庆",
             "西安", "长沙", "青岛", "厦门", "福州", "天津", "珠海", "佛山", "东莞", "宁波",
             "无锡", "昆明", "大连", "郑州", "济南", "合肥", "南昌", "南宁", "贵阳", "海口",
-            "三亚", "洛阳", "开封", "扬州", "绍兴", "沈阳", "长春", "哈尔滨", "太原", "兰州"
+            "三亚", "洛阳", "开封", "扬州", "绍兴", "沈阳", "长春", "哈尔滨", "太原", "兰州", "中山"
     );
 
     private static final List<String> STYLE_KEYWORDS = List.of(
@@ -151,6 +152,199 @@ public class AgentIntentAnalysisService {
         } catch (JsonProcessingException ignored) {
             return "{intent_summary=" + intent.summary() + "}";
         }
+    }
+
+    public AgentIntent deriveCarryoverIntent(List<LlmMessage> history) {
+        if (history == null || history.isEmpty()) {
+            return emptyIntent();
+        }
+
+        List<String> cities = List.of();
+        List<String> areas = List.of();
+        List<String> styles = List.of();
+        List<String> objectives = List.of();
+        String duration = "";
+        String timePreference = "";
+        String mobilityPreference = "";
+        List<String> avoidTags = List.of();
+        boolean useCurrentLocation = false;
+
+        for (int index = history.size() - 1; index >= 0; index--) {
+            LlmMessage message = history.get(index);
+            if (message == null || !"user".equals(message.role())) {
+                continue;
+            }
+
+            AgentIntent turnIntent = analyze(message.content());
+            if (cities.isEmpty() && !turnIntent.cities().isEmpty()) {
+                cities = turnIntent.cities();
+            }
+            if (areas.isEmpty() && !turnIntent.areas().isEmpty()) {
+                areas = turnIntent.areas();
+            }
+            if (styles.isEmpty() && !turnIntent.styles().isEmpty()) {
+                styles = turnIntent.styles();
+            }
+            if (objectives.isEmpty() && !turnIntent.objectives().isEmpty()) {
+                objectives = turnIntent.objectives();
+            }
+            if (duration.isBlank() && !turnIntent.duration().isBlank()) {
+                duration = turnIntent.duration();
+            }
+            if (timePreference.isBlank() && !turnIntent.timePreference().isBlank()) {
+                timePreference = turnIntent.timePreference();
+            }
+            if (mobilityPreference.isBlank() && !turnIntent.mobilityPreference().isBlank()) {
+                mobilityPreference = turnIntent.mobilityPreference();
+            }
+            if (avoidTags.isEmpty() && !turnIntent.avoidTags().isEmpty()) {
+                avoidTags = turnIntent.avoidTags();
+            }
+            if (!useCurrentLocation && turnIntent.useCurrentLocation()) {
+                useCurrentLocation = true;
+            }
+
+            if ((!cities.isEmpty() || !areas.isEmpty() || useCurrentLocation)
+                    && !styles.isEmpty()
+                    && !objectives.isEmpty()
+                    && !duration.isBlank()
+                    && !timePreference.isBlank()
+                    && !mobilityPreference.isBlank()
+                    && !avoidTags.isEmpty()) {
+                break;
+            }
+        }
+
+        return new AgentIntent(
+                "",
+                cities,
+                areas,
+                styles,
+                objectives,
+                duration,
+                timePreference,
+                mobilityPreference,
+                avoidTags,
+                useCurrentLocation,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of()
+        );
+    }
+
+    public AgentIntent mergeWithCarryover(AgentIntent current, AgentIntent carryover) {
+        if (current == null) {
+            return carryover == null ? emptyIntent() : carryover;
+        }
+        if (carryover == null || carryover.isEmpty()) {
+            return current;
+        }
+
+        List<String> mergedCities = current.cities().isEmpty() ? carryover.cities() : current.cities();
+        List<String> mergedAreas = current.areas().isEmpty() ? carryover.areas() : current.areas();
+        List<String> mergedStyles = current.styles().isEmpty() ? carryover.styles() : current.styles();
+        List<String> mergedObjectives = current.objectives().isEmpty() ? carryover.objectives() : current.objectives();
+        String mergedDuration = current.duration().isBlank() ? carryover.duration() : current.duration();
+        String mergedTimePreference = current.timePreference().isBlank() ? carryover.timePreference() : current.timePreference();
+        String mergedMobilityPreference = current.mobilityPreference().isBlank() ? carryover.mobilityPreference() : current.mobilityPreference();
+        List<String> mergedAvoidTags = current.avoidTags().isEmpty() ? carryover.avoidTags() : current.avoidTags();
+        boolean mergedUseCurrentLocation = current.useCurrentLocation() || (current.missingLocationContext() && carryover.useCurrentLocation());
+
+        return new AgentIntent(
+                current.prompt(),
+                mergedCities,
+                mergedAreas,
+                mergedStyles,
+                mergedObjectives,
+                mergedDuration,
+                mergedTimePreference,
+                mergedMobilityPreference,
+                mergedAvoidTags,
+                mergedUseCurrentLocation,
+                current.needsKnowledgeReference(),
+                current.needsPoiSearch(),
+                current.needsRoutePlanning(),
+                current.needsThemeGeneration(),
+                current.acknowledgementOnly(),
+                current.requestLike(),
+                extractMissingSlots(
+                        mergedCities,
+                        mergedAreas,
+                        mergedStyles,
+                        mergedObjectives,
+                        mergedDuration,
+                        mergedUseCurrentLocation
+                )
+        );
+    }
+
+    public String buildCarryoverPromptContext(AgentIntent current, AgentIntent carryover, AgentIntent effective) {
+        if (current == null || carryover == null || effective == null) {
+            return "";
+        }
+
+        List<String> lines = new ArrayList<>();
+        if (current.missingLocationContext() && !effective.missingLocationContext()) {
+            if (effective.useCurrentLocation()) {
+                lines.add("- Continue using the current location context from earlier turns unless the user changes it.");
+            } else if (!effective.cities().isEmpty() || !effective.areas().isEmpty()) {
+                List<String> locationParts = new ArrayList<>();
+                if (!effective.cities().isEmpty()) {
+                    locationParts.add("city=" + String.join(" / ", effective.cities()));
+                }
+                if (!effective.areas().isEmpty()) {
+                    locationParts.add("area=" + String.join(" / ", effective.areas()));
+                }
+                lines.add("- Carry forward recent conversation location: " + String.join(", ", locationParts) + ".");
+            }
+        }
+        if (current.missingThemeDirection() && !effective.missingThemeDirection()) {
+            List<String> themeParts = new ArrayList<>();
+            if (!effective.styles().isEmpty()) {
+                themeParts.add("style=" + String.join(" / ", effective.styles()));
+            }
+            if (!effective.objectives().isEmpty()) {
+                themeParts.add("goal=" + String.join(" / ", effective.objectives()));
+            }
+            if (!themeParts.isEmpty()) {
+                lines.add("- Keep the recent theme direction unless the user explicitly changes it: " + String.join(", ", themeParts) + ".");
+            }
+        }
+        if (current.missingDuration() && !effective.missingDuration()) {
+            lines.add("- Reuse the recent duration preference for this turn: duration=" + effective.duration() + ".");
+        }
+        if (lines.isEmpty()) {
+            return "";
+        }
+
+        lines.add(0, "Carry-over context from earlier turns in the same conversation:");
+        return String.join("\n", lines);
+    }
+
+    private AgentIntent emptyIntent() {
+        return new AgentIntent(
+                "",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                "",
+                "",
+                "",
+                List.of(),
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                List.of()
+        );
     }
 
     private List<String> extractCities(String text) {
