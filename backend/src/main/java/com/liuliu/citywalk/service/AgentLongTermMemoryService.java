@@ -43,7 +43,7 @@ public class AgentLongTermMemoryService {
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile(
-            "(半小时|半天|一天|两天|一小时|两小时|三小时|四小时|五小时|六小时|一个晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:小时|h|H))"
+            "(半个小时|半小时|半天|一天|两天|一小时|一个小时|两小时|两个小时|三小时|三个小时|四小时|四个小时|五小时|五个小时|六小时|六个小时|一个晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:个?小时|h|H))"
     );
     private static final Pattern AREA_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|校区|公园|商圈|古镇|湖|湾|岛|区|镇|村))");
 
