@@ -1,0 +1,153 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: liuliu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-liuliu_citywalk}
+      MYSQL_USER: ${MYSQL_USERNAME:-liuliu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./backend/LiuLiu.sql:/docker-entrypoint-initdb.d/01-base.sql:ro
+      - ./backend/sql/2026-05-08-add-user-bio.sql:/docker-entrypoint-initdb.d/02-add-user-bio.sql:ro
+      - ./backend/sql/2026-05-14-upgrade-existing-db.sql:/docker-entrypoint-initdb.d/03-upgrade-existing-db.sql:ro
+      - ./backend/sql/2026-05-14-upgrade-community-interactions.sql:/docker-entrypoint-initdb.d/04-upgrade-community-interactions.sql:ro
+      - ./backend/sql/2026-05-19-add-notifications.sql:/docker-entrypoint-initdb.d/05-add-notifications.sql:ro
+      - ./backend/sql/2026-06-12-add-agent-user-memory.sql:/docker-entrypoint-initdb.d/06-add-agent-user-memory.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: liuliu-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  milvus-etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.18
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - milvus-etcd:/etcd
+
+  milvus-minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus-minio:/minio_data
+
+  milvus-standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.6.13
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: liuliu-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-liuliu_citywalk}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-liuliu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-1}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      AMAP_WEB_KEY: ${AMAP_WEB_KEY:-}
+      MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
+      MAIL_PORT: ${MAIL_PORT:-465}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-oss-cn-beijing.aliyuncs.com}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
+      JWT_SECRET: ${JWT_SECRET:-liuliu-citywalk-backend-secret-key-please-change}
+      JWT_ISSUER: ${JWT_ISSUER:-liuliu-backend}
+      LIULIU_RAG_ENABLED: ${LIULIU_RAG_ENABLED:-true}
+      MILVUS_ENABLED: ${MILVUS_ENABLED:-true}
+      MILVUS_URI: http://milvus-standalone:19530
+      MILVUS_TOKEN: ${MILVUS_TOKEN:-root:Milvus}
+      EMBEDDING_ENABLED: ${EMBEDDING_ENABLED:-false}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      MISSION_VERIFY_AI_API_KEY: ${MISSION_VERIFY_AI_API_KEY:-}
+      CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:-false}
+      AGENT_MEMORY_ENABLED: ${AGENT_MEMORY_ENABLED:-true}
+      AGENT_TOOL_CACHE_ENABLED: ${AGENT_TOOL_CACHE_ENABLED:-false}
+      SINGLE_WALK_SESSION_ENABLED: ${SINGLE_WALK_SESSION_ENABLED:-true}
+    volumes:
+      - backend-uploads:/app/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_AMAP_JS_KEY: ${VITE_AMAP_JS_KEY:-}
+        VITE_USE_MOCK_LOGIN: ${VITE_USE_MOCK_LOGIN:-false}
+    container_name: liuliu-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  mysql-data:
+  redis-data:
+  milvus-etcd:
+  milvus-minio:
+  milvus-data:
+  backend-uploads:

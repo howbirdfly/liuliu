@@ -306,3 +306,66 @@ mvn -DskipTests package
 - `docs/springboot-api-plan.md`
 
 其中部分文档可能更偏阶段性记录，建议以当前代码和配置文件为准。
+## Docker 整仓启动
+
+仓库现在已经补了一份整仓 `docker-compose.yml`，可以把前端、后端、MySQL、Redis 和 Milvus 一起拉起来。
+
+### 1. 准备环境变量
+
+先复制一份 Docker 环境模板：
+
+```bash
+cp .env.docker.example .env
+```
+
+Windows PowerShell 可以用：
+
+```powershell
+Copy-Item .env.docker.example .env
+```
+
+至少建议检查这些字段：
+
+- `DEEPSEEK_API_KEY`
+- `AMAP_WEB_KEY`
+- `VITE_AMAP_JS_KEY`
+- `OSS_ACCESS_KEY_ID`
+- `OSS_ACCESS_KEY_SECRET`
+- `OSS_BUCKET_NAME`
+
+如果你只是先把整仓跑起来，不立刻测试 AI、地图或上传，也可以先留空。
+
+### 2. 一条命令启动
+
+在项目根目录执行：
+
+```bash
+docker compose up -d --build
+```
+
+### 3. 默认访问地址
+
+- 前端：http://localhost:3000
+- 后端：http://localhost:8080
+- MySQL：localhost:3306
+- Redis：localhost:6379
+- Milvus：localhost:19530
+- MinIO Console：http://localhost:9001
+
+### 4. 停止
+
+```bash
+docker compose down
+```
+
+如果连数据卷一起删：
+
+```bash
+docker compose down -v
+```
+
+### 5. 说明
+
+- 前端容器通过 Nginx 反代 `/api`、`/ws` 和 `/uploads` 到后端，所以 SSE 和 WebSocket 可以直接走同域。
+- 后端容器默认使用 `prod` profile，并通过 Compose 环境变量连接 MySQL、Redis 和 Milvus。
+- MySQL 首次启动时会自动执行 `backend/LiuLiu.sql` 和几个增量 SQL 脚本完成初始化。

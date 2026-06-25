@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.idea
+.vscode
+*.log
+tmp_*.txt
+volumes
+backend/target
+backend/uploads
+backend/.mvn

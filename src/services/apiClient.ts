@@ -7,8 +7,11 @@ type ApiRequestInit = RequestInit & {
 };
 
 function getApiBaseUrl(): string {
-  const value = import.meta.env.VITE_API_BASE_URL?.trim();
-  return value ? value.replace(/\/$/, '') : DEFAULT_API_BASE_URL;
+  const rawValue = import.meta.env.VITE_API_BASE_URL;
+  if (rawValue !== undefined) {
+    return rawValue.trim().replace(/\/$/, '');
+  }
+  return DEFAULT_API_BASE_URL;
 }
 
 function getAuthStorage(): Storage | null {
@@ -103,6 +106,21 @@ export async function apiRequest<T>(path: string, init?: ApiRequestInit): Promis
 
 export function getApiBaseUrlForDebug(): string {
   return getApiBaseUrl();
+}
+
+export function getWebSocketBaseUrl(): string {
+  const apiBaseUrl = getApiBaseUrl();
+  if (/^https?:\/\//i.test(apiBaseUrl)) {
+    return apiBaseUrl.replace(/^http/i, 'ws');
+  }
+  if (typeof window !== 'undefined') {
+    const wsOrigin = window.location.origin.replace(/^http/i, 'ws');
+    if (!apiBaseUrl) {
+      return wsOrigin;
+    }
+    return `${wsOrigin}${apiBaseUrl.startsWith('/') ? apiBaseUrl : `/${apiBaseUrl}`}`.replace(/\/$/, '');
+  }
+  return DEFAULT_API_BASE_URL.replace(/^http/i, 'ws');
 }
 
 export function getAuthTokenStorageKey(): string {

@@ -1,4 +1,4 @@
-import { apiRequest, getApiBaseUrlForDebug, readAuthToken } from './apiClient';
+import { apiRequest, getWebSocketBaseUrl, readAuthToken } from './apiClient';
 import type { PathPoint } from './walkApi';
 
 export interface CoCreateRoomTheme {
@@ -126,8 +126,7 @@ export async function leaveCoCreateRoom(roomCode: string): Promise<boolean> {
 
 export function openCoCreateRoomSocket(roomCode: string): WebSocket {
   const token = readAuthToken();
-  const apiBaseUrl = getApiBaseUrlForDebug();
-  const wsBaseUrl = apiBaseUrl.replace(/^http/i, 'ws');
+  const wsBaseUrl = getWebSocketBaseUrl();
   const params = new URLSearchParams({
     roomCode,
     ...(token ? { token } : {}),
