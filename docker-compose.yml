@@ -12,13 +12,8 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     volumes:
-      - mysql-data:/var/lib/mysql
-      - ./backend/LiuLiu.sql:/docker-entrypoint-initdb.d/01-base.sql:ro
-      - ./backend/sql/2026-05-08-add-user-bio.sql:/docker-entrypoint-initdb.d/02-add-user-bio.sql:ro
-      - ./backend/sql/2026-05-14-upgrade-existing-db.sql:/docker-entrypoint-initdb.d/03-upgrade-existing-db.sql:ro
-      - ./backend/sql/2026-05-14-upgrade-community-interactions.sql:/docker-entrypoint-initdb.d/04-upgrade-community-interactions.sql:ro
-      - ./backend/sql/2026-05-19-add-notifications.sql:/docker-entrypoint-initdb.d/05-add-notifications.sql:ro
-      - ./backend/sql/2026-06-12-add-agent-user-memory.sql:/docker-entrypoint-initdb.d/06-add-agent-user-memory.sql:ro
+      - mysql-data-liuliunew:/var/lib/mysql
+      - ./backend/liuliunew.sql:/docker-entrypoint-initdb.d/01-base.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
       interval: 10s
@@ -92,6 +87,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8080
+      SPRING_AI_CHAT_MODEL: ${SPRING_AI_CHAT_MODEL:-deepseek}
       MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-liuliu_citywalk}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
       MYSQL_USERNAME: ${MYSQL_USERNAME:-liuliu}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
@@ -103,6 +99,7 @@ services:
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       AMAP_WEB_KEY: ${AMAP_WEB_KEY:-}
+      AMAP_BASE_URL: ${AMAP_BASE_URL:-https://restapi.amap.com}
       MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
       MAIL_PORT: ${MAIL_PORT:-465}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
@@ -113,7 +110,10 @@ services:
       OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
       JWT_SECRET: ${JWT_SECRET:-liuliu-citywalk-backend-secret-key-please-change}
       JWT_ISSUER: ${JWT_ISSUER:-liuliu-backend}
+      JWT_ACCESS_EXPIRE_SECONDS: ${JWT_ACCESS_EXPIRE_SECONDS:-7200}
+      JWT_REFRESH_EXPIRE_SECONDS: ${JWT_REFRESH_EXPIRE_SECONDS:-2592000}
       LIULIU_RAG_ENABLED: ${LIULIU_RAG_ENABLED:-true}
+      LIULIU_RAG_RERANK_ENABLED: ${LIULIU_RAG_RERANK_ENABLED:-true}
       MILVUS_ENABLED: ${MILVUS_ENABLED:-true}
       MILVUS_URI: http://milvus-standalone:19530
       MILVUS_TOKEN: ${MILVUS_TOKEN:-root:Milvus}
@@ -122,10 +122,15 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       MISSION_VERIFY_AI_API_KEY: ${MISSION_VERIFY_AI_API_KEY:-}
+      MISSION_VERIFY_AI_MODEL: ${MISSION_VERIFY_AI_MODEL:-qwen-vl-plus}
+      MISSION_VERIFY_AI_BASE_URL: ${MISSION_VERIFY_AI_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:-false}
       AGENT_MEMORY_ENABLED: ${AGENT_MEMORY_ENABLED:-true}
+      AGENT_MEMORY_TTL_SECONDS: ${AGENT_MEMORY_TTL_SECONDS:-21600}
+      AGENT_MEMORY_MAX_TURNS: ${AGENT_MEMORY_MAX_TURNS:-6}
       AGENT_TOOL_CACHE_ENABLED: ${AGENT_TOOL_CACHE_ENABLED:-false}
       SINGLE_WALK_SESSION_ENABLED: ${SINGLE_WALK_SESSION_ENABLED:-true}
+      SINGLE_WALK_SESSION_TTL_SECONDS: ${SINGLE_WALK_SESSION_TTL_SECONDS:-21600}
     volumes:
       - backend-uploads:/app/uploads
 
@@ -145,7 +150,7 @@ services:
       - "${FRONTEND_PORT:-3000}:80"
 
 volumes:
-  mysql-data:
+  mysql-data-liuliunew:
   redis-data:
   milvus-etcd:
   milvus-minio:

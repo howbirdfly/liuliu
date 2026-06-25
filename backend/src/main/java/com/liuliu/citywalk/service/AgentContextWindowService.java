@@ -58,13 +58,13 @@ public class AgentContextWindowService {
         if (!summary.isBlank()) {
             result.add(LlmMessage.system(summary));
         }
-        String normalizedCarryoverContext = trimText(carryoverContext, NORMAL_MESSAGE_CHAR_LIMIT);
-        if (!normalizedCarryoverContext.isBlank()) {
-            result.add(LlmMessage.system(normalizedCarryoverContext));
-        }
         String normalizedStateMessage = trimText(stateMessage, NORMAL_MESSAGE_CHAR_LIMIT);
         if (!normalizedStateMessage.isBlank()) {
             result.add(LlmMessage.system(normalizedStateMessage));
+        }
+        String normalizedCarryoverContext = trimText(carryoverContext, NORMAL_MESSAGE_CHAR_LIMIT);
+        if (!normalizedCarryoverContext.isBlank()) {
+            result.add(LlmMessage.system(normalizedCarryoverContext));
         }
         result.addAll(normalizedHistory.subList(recentStart, normalizedHistory.size()));
 

@@ -61,6 +61,18 @@ public class AgentExecutionPipelineService {
             最终回答尽量包含：适合的区域、推荐理由、可逛兴趣点、建议路线顺序，以及一两句贴心提醒。
             """;
 
+    private static final String CONVERSATION_STATE_RULES = """
+
+            Conversation-state rules:
+            - Always treat the effective conversation state as the main source of truth for location, theme, and duration.
+            - Judge completeness using the merged state of the whole conversation, not only the latest user sentence.
+            - Short user follow-ups are usually incremental updates to the active request, not brand-new standalone requests.
+            - Examples of valid incremental updates include "从榕园出发", "一小时", "还有别的吗", "改成晚上", and "换个安静一点的".
+            - If the latest user sentence only updates one slot, keep the other ready slots from the effective conversation state.
+            - Do not ask again for a slot that is already ready in the effective conversation state unless the user explicitly changes or resets it.
+            - Only treat the turn as a brand-new request when the user clearly starts over or explicitly asks to ignore earlier context.
+            """;
+
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
@@ -100,14 +112,6 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
-        AgentChatResponse invalidInput = tryCompleteWithInvalidInputPrompt(execution, executionHandle, listener);
-        if (invalidInput != null) {
-            return invalidInput;
-        }
-        AgentChatResponse clarification = tryCompleteWithClarification(execution, executionHandle, listener);
-        if (clarification != null) {
-            return clarification;
-        }
         DeterministicPrefetchOutcome knowledgePrefetch = applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
         applyDeterministicPoiPrefetch(execution, knowledgePrefetch, executionHandle, listener);
         return runPlanningLoop(execution, executionHandle, listener);
@@ -136,7 +140,7 @@ public class AgentExecutionPipelineService {
         );
         String instructions = agentPromptAssemblyService.buildInstructions(
                 userId,
-                DEFAULT_INSTRUCTIONS,
+                DEFAULT_INSTRUCTIONS + CONVERSATION_STATE_RULES,
                 agentConversationStateService.buildPromptContext(conversationState) + buildRuntimeContext(intent),
                 FALLBACK_GUIDE
         );

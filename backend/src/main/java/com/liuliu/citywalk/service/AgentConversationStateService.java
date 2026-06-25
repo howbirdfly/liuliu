@@ -57,6 +57,8 @@ public class AgentConversationStateService {
         List<String> lines = new ArrayList<>();
         lines.add("Conversation state for this turn:");
         lines.add("- Judge completeness using the effective conversation state, not only the latest user sentence.");
+        lines.add("- Treat short follow-up messages as incremental updates unless the user clearly starts a new request.");
+        lines.add("- If one slot is updated in the latest turn, keep the other ready slots from the effective conversation state.");
         appendSlotLine(lines, state.locationSlot());
         appendSlotLine(lines, state.themeSlot());
         appendSlotLine(lines, state.durationSlot());
@@ -72,6 +74,8 @@ public class AgentConversationStateService {
         lines.add("Effective conversation state for this turn:");
         lines.add("- Use the merged conversation state below as the current truth for planning.");
         lines.add("- If a slot is already ready from conversation_carryover, do not ask for it again unless the user explicitly changes it.");
+        lines.add("- Short messages such as location-only, duration-only, or follow-up refinement messages are valid updates, not empty requests.");
+        lines.add("- Only ignore earlier context when the user explicitly starts over or asks to discard it.");
         appendSlotLine(lines, state.locationSlot());
         appendSlotLine(lines, state.themeSlot());
         appendSlotLine(lines, state.durationSlot());
