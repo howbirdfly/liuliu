@@ -10,15 +10,17 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.MessageAggregator;
+import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -26,33 +28,41 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
-public class DeepSeekLlmClient implements LlmClient {
+public class SpringAiLlmClient implements LlmClient {
 
-    private static final Logger log = LoggerFactory.getLogger(DeepSeekLlmClient.class);
-    private static final String PROVIDER = "deepseek";
+    private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
+    private static final String DEFAULT_PROVIDER = "deepseek";
     private static final String CONFIG_FALLBACK = "AI 服务暂未配置完成，我先根据现有数据给出基础建议。";
     private static final String RUNTIME_FALLBACK = "AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。";
 
     private final DeepSeekProperties properties;
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<DeepSeekChatModel> chatModelProvider;
+    private final ObjectProvider<ChatModel> chatModelProvider;
+    private final ObjectProvider<StreamingChatModel> streamingChatModelProvider;
     private final AgentContextWindowService agentContextWindowService;
+    private final String configuredProvider;
 
-    public DeepSeekLlmClient(
+    public SpringAiLlmClient(
             DeepSeekProperties properties,
             ObjectMapper objectMapper,
-            ObjectProvider<DeepSeekChatModel> chatModelProvider,
-            AgentContextWindowService agentContextWindowService
+            ObjectProvider<ChatModel> chatModelProvider,
+            ObjectProvider<StreamingChatModel> streamingChatModelProvider,
+            AgentContextWindowService agentContextWindowService,
+            @Value("${spring.ai.model.chat:deepseek}") String configuredProvider
     ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.chatModelProvider = chatModelProvider;
+        this.streamingChatModelProvider = streamingChatModelProvider;
         this.agentContextWindowService = agentContextWindowService;
+        this.configuredProvider = configuredProvider == null || configuredProvider.isBlank()
+                ? DEFAULT_PROVIDER
+                : configuredProvider.trim();
     }
 
     @Override
     public String provider() {
-        return PROVIDER;
+        return configuredProvider;
     }
 
     @Override
@@ -67,7 +77,7 @@ public class DeepSeekLlmClient implements LlmClient {
 
     @Override
     public LlmResponse createResponse(LlmRequest request) {
-        DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
+        ChatModel chatModel = resolveChatModel();
         if (!isConfigured() || chatModel == null) {
             return fallbackResponse(CONFIG_FALLBACK, null);
         }
@@ -84,7 +94,7 @@ public class DeepSeekLlmClient implements LlmClient {
                 return compactedRetry;
             }
             log.warn(
-                    "DeepSeek agent call failed. requestSummary={}. causeType={}: {}",
+                    "Spring AI agent call failed. requestSummary={}. causeType={}: {}",
                     summarizeRequest(request),
                     error.getClass().getName(),
                     error.getMessage(),
@@ -96,21 +106,26 @@ public class DeepSeekLlmClient implements LlmClient {
 
     @Override
     public LlmResponse createStreamingResponse(LlmRequest request, LlmStreamListener listener) {
-        DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
+        ChatModel chatModel = resolveChatModel();
         if (!isConfigured() || chatModel == null) {
             return fallbackResponse(CONFIG_FALLBACK, listener);
+        }
+
+        StreamingChatModel streamingChatModel = resolveStreamingChatModel(chatModel);
+        if (streamingChatModel == null) {
+            return LlmClient.super.createStreamingResponse(request, listener);
         }
 
         try {
             AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
             new MessageAggregator()
-                    .aggregate(chatModel.stream(toPrompt(request)), aggregatedResponse::set)
+                    .aggregate(streamingChatModel.stream(toPrompt(request)), aggregatedResponse::set)
                     .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
                     .blockLast();
 
             ChatResponse response = aggregatedResponse.get();
             if (response == null) {
-                throw new IllegalStateException("deepseek_stream_empty");
+                throw new IllegalStateException("spring_ai_stream_empty");
             }
             return toLlmResponse(response);
         } catch (Exception error) {
@@ -123,7 +138,7 @@ public class DeepSeekLlmClient implements LlmClient {
                 return compactedRetry;
             }
             log.warn(
-                    "DeepSeek agent streaming call failed. requestSummary={}. causeType={}: {}. Falling back to single response mode.",
+                    "Spring AI agent streaming call failed. requestSummary={}. causeType={}: {}. Falling back to single response mode.",
                     summarizeRequest(request),
                     error.getClass().getName(),
                     error.getMessage(),
@@ -137,7 +152,7 @@ public class DeepSeekLlmClient implements LlmClient {
                     throw cancelled(fallbackError);
                 }
                 log.warn(
-                        "DeepSeek agent single-response fallback also failed. requestSummary={}. causeType={}: {}",
+                        "Spring AI agent single-response fallback also failed. requestSummary={}. causeType={}: {}",
                         summarizeRequest(request),
                         fallbackError.getClass().getName(),
                         fallbackError.getMessage(),
@@ -149,7 +164,7 @@ public class DeepSeekLlmClient implements LlmClient {
     }
 
     private LlmResponse tryContextOverflowRetry(
-            DeepSeekChatModel chatModel,
+            ChatModel chatModel,
             LlmRequest request,
             LlmStreamListener listener,
             Exception error
@@ -164,7 +179,7 @@ public class DeepSeekLlmClient implements LlmClient {
         }
 
         log.info(
-                "DeepSeek request exceeded context window. Retrying with compacted context. originalSummary={}, compactedMessages={}",
+                "Spring AI request exceeded context window. Retrying with compacted context. originalSummary={}, compactedMessages={}",
                 summarizeRequest(request),
                 compactedRequest.messages().size()
         );
@@ -176,7 +191,7 @@ public class DeepSeekLlmClient implements LlmClient {
                 throw cancelled(retryError);
             }
             log.warn(
-                    "DeepSeek compacted-context retry failed. requestSummary={}. causeType={}: {}",
+                    "Spring AI compacted-context retry failed. requestSummary={}. causeType={}: {}",
                     summarizeRequest(compactedRequest),
                     retryError.getClass().getName(),
                     retryError.getMessage(),
@@ -209,7 +224,7 @@ public class DeepSeekLlmClient implements LlmClient {
         return false;
     }
 
-    private LlmResponse callSingleResponse(DeepSeekChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
+    private LlmResponse callSingleResponse(ChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
         LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)));
         if (listener != null && response.content() != null && !response.content().isBlank()) {
             listener.onContentDelta(response.content());
@@ -222,6 +237,21 @@ public class DeepSeekLlmClient implements LlmClient {
                 && !properties.getApiKey().isBlank()
                 && properties.getBaseUrl() != null
                 && !properties.getBaseUrl().isBlank();
+    }
+
+    private ChatModel resolveChatModel() {
+        return chatModelProvider.getIfAvailable();
+    }
+
+    private StreamingChatModel resolveStreamingChatModel(ChatModel chatModel) {
+        StreamingChatModel streamingChatModel = streamingChatModelProvider.getIfAvailable();
+        if (streamingChatModel != null) {
+            return streamingChatModel;
+        }
+        if (chatModel instanceof StreamingChatModel compatibleStreamingModel) {
+            return compatibleStreamingModel;
+        }
+        return null;
     }
 
     private Prompt toPrompt(LlmRequest request) {
@@ -396,7 +426,8 @@ public class DeepSeekLlmClient implements LlmClient {
                 }
             }
         }
-        return "model=" + model()
+        return "provider=" + provider()
+                + ", model=" + model()
                 + ", messages=" + messageCount
                 + ", tools=" + toolCount
                 + ", lastUser=\"" + lastUserMessage + "\"";

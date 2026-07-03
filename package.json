@@ -9,7 +9,13 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "seed:community": "node scripts/seed-community-walks.mjs"
+    "seed:community": "node scripts/seed-community-walks.mjs",
+    "backend:docker:refresh": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 refresh",
+    "backend:docker:restart": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 restart",
+    "backend:docker:logs": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 logs",
+    "backend:docker:up": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 up",
+    "backend:docker:down": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 down",
+    "backend:docker:status": "powershell -ExecutionPolicy Bypass -File scripts/backend-docker.ps1 status"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
