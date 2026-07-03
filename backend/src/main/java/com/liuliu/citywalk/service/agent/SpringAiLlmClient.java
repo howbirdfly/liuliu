@@ -30,8 +30,6 @@ public class SpringAiLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
-    private static final String CONFIG_FALLBACK = "AI 服务暂未配置完成，我先根据现有数据给出基础建议。";
-    private static final String RUNTIME_FALLBACK = "AI 规划暂时有点忙，我建议先从附近热门地点和社区攻略开始探索。";
 
     private final DeepSeekProperties properties;
     private final ObjectMapper objectMapper;
@@ -75,10 +73,7 @@ public class SpringAiLlmClient implements LlmClient {
 
     @Override
     public LlmResponse createResponse(LlmRequest request) {
-        ChatModel chatModel = resolveChatModel();
-        if (!isConfigured() || chatModel == null) {
-            return fallbackResponse(CONFIG_FALLBACK, null);
-        }
+        ChatModel chatModel = requireChatModel();
 
         try {
             return callSingleResponse(chatModel, request, null);
@@ -98,21 +93,14 @@ public class SpringAiLlmClient implements LlmClient {
                     error.getMessage(),
                     error
             );
-            return fallbackResponse(RUNTIME_FALLBACK, null);
+            throw propagate(error);
         }
     }
 
     @Override
     public LlmResponse createStreamingResponse(LlmRequest request, LlmStreamListener listener) {
-        ChatModel chatModel = resolveChatModel();
-        if (!isConfigured() || chatModel == null) {
-            return fallbackResponse(CONFIG_FALLBACK, listener);
-        }
-
-        StreamingChatModel streamingChatModel = resolveStreamingChatModel(chatModel);
-        if (streamingChatModel == null) {
-            return LlmClient.super.createStreamingResponse(request, listener);
-        }
+        ChatModel chatModel = requireChatModel();
+        StreamingChatModel streamingChatModel = requireStreamingChatModel(chatModel);
 
         try {
             AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
@@ -136,28 +124,13 @@ public class SpringAiLlmClient implements LlmClient {
                 return compactedRetry;
             }
             log.warn(
-                    "Spring AI agent streaming call failed. requestSummary={}. causeType={}: {}. Falling back to single response mode.",
+                    "Spring AI agent streaming call failed. requestSummary={}. causeType={}: {}",
                     summarizeRequest(request),
                     error.getClass().getName(),
                     error.getMessage(),
                     error
             );
-            try {
-                return callSingleResponse(chatModel, request, listener);
-            } catch (Exception fallbackError) {
-                if (Thread.currentThread().isInterrupted()) {
-                    Thread.currentThread().interrupt();
-                    throw cancelled(fallbackError);
-                }
-                log.warn(
-                        "Spring AI agent single-response fallback also failed. requestSummary={}. causeType={}: {}",
-                        summarizeRequest(request),
-                        fallbackError.getClass().getName(),
-                        fallbackError.getMessage(),
-                        fallbackError
-                );
-                return fallbackResponse(RUNTIME_FALLBACK, listener);
-            }
+            throw propagate(error);
         }
     }
 
@@ -241,6 +214,17 @@ public class SpringAiLlmClient implements LlmClient {
         return chatModelProvider.getIfAvailable();
     }
 
+    private ChatModel requireChatModel() {
+        if (!isConfigured()) {
+            throw new IllegalStateException("spring_ai_chat_not_configured");
+        }
+        ChatModel chatModel = resolveChatModel();
+        if (chatModel == null) {
+            throw new IllegalStateException("spring_ai_chat_model_unavailable");
+        }
+        return chatModel;
+    }
+
     private StreamingChatModel resolveStreamingChatModel(ChatModel chatModel) {
         StreamingChatModel streamingChatModel = streamingChatModelProvider.getIfAvailable();
         if (streamingChatModel != null) {
@@ -250,6 +234,14 @@ public class SpringAiLlmClient implements LlmClient {
             return compatibleStreamingModel;
         }
         return null;
+    }
+
+    private StreamingChatModel requireStreamingChatModel(ChatModel chatModel) {
+        StreamingChatModel streamingChatModel = resolveStreamingChatModel(chatModel);
+        if (streamingChatModel == null) {
+            throw new IllegalStateException("spring_ai_streaming_chat_model_unavailable");
+        }
+        return streamingChatModel;
     }
 
     private Prompt toPrompt(LlmRequest request) {
@@ -381,22 +373,17 @@ public class SpringAiLlmClient implements LlmClient {
         }
     }
 
-    private LlmResponse fallbackResponse(String content, LlmStreamListener listener) {
-        if (listener != null && content != null && !content.isBlank()) {
-            listener.onContentDelta(content);
-        }
-        return new LlmResponse(
-                content,
-                List.of(),
-                null,
-                new LlmResponseMetadata(provider(), model(), listener != null, null)
-        );
-    }
-
     private AgentExecutionCancelledException cancelled(Throwable cause) {
         return cause == null
                 ? new AgentExecutionCancelledException("agent_execution_cancelled")
                 : new AgentExecutionCancelledException("agent_execution_cancelled", cause);
+    }
+
+    private RuntimeException propagate(Exception error) {
+        if (error instanceof RuntimeException runtimeException) {
+            return runtimeException;
+        }
+        return new IllegalStateException("spring_ai_call_failed", error);
     }
 
     private String summarizeRequest(LlmRequest request) {
@@ -432,5 +419,4 @@ public class SpringAiLlmClient implements LlmClient {
         }
         return normalized.substring(0, maxLength) + "...";
     }
-
 }
