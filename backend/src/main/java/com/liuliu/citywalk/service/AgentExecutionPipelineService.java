@@ -46,8 +46,8 @@ public class AgentExecutionPipelineService {
             """;
     private static final String FALLBACK_GUIDE = """
 
-            如果工具返回 success=false，或者包含 error / fallbackSuggestion 字段，说明这一步没有拿到可靠工具结果。
-            这种情况下不要假装拿到了真实数据，要结合已有上下文、其他工具结果和常识继续给出保守建议，并明确说明哪些信息缺少工具支撑。
+            如果工具返回 success=false，或者包含 error / fallbackSuggestion 字段，说明这一步没有拿到可靠的工具结果。
+            这种情况下不要假装得到了真实数据，要结合已有上下文、其他工具结果和常识继续给出保守建议，并明确说明哪些信息缺少工具支撑。
             """;
 
     private static final String DEFAULT_INSTRUCTIONS = """
@@ -67,12 +67,11 @@ public class AgentExecutionPipelineService {
             - Always treat the effective conversation state as the main source of truth for location, theme, and duration.
             - Judge completeness using the merged state of the whole conversation, not only the latest user sentence.
             - Short user follow-ups are usually incremental updates to the active request, not brand-new standalone requests.
-            - Examples of valid incremental updates include "从榕园出发", "一小时", "还有别的吗", "改成晚上", and "换个安静一点的".
+            - Examples of valid incremental updates include "从桂园出口", "一小时", "还有别的吗", "改成晚上", and "换个安静一点的".
             - If the latest user sentence only updates one slot, keep the other ready slots from the effective conversation state.
             - Do not ask again for a slot that is already ready in the effective conversation state unless the user explicitly changes or resets it.
             - Only treat the turn as a brand-new request when the user clearly starts over or explicitly asks to ignore earlier context.
             """;
-
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
@@ -676,15 +675,6 @@ public class AgentExecutionPipelineService {
                 llmClient.model()
         );
     }
-
-    private String normalizeAssistantAnswer(String content) {
-        String normalized = safeText(content, "");
-        if (!normalized.isBlank()) {
-            return normalized;
-        }
-        return "我已经整理出一版基础漫步建议，但这轮没有拿到足够完整的模型文本输出。你可以继续追问我想去的城市、时间段或偏好。";
-    }
-
     private String normalizeAssistantAnswer(
             String content,
             AgentIntentAnalysisService.AgentIntent intent,
@@ -700,7 +690,6 @@ public class AgentExecutionPipelineService {
                 steps
         );
     }
-
     private String buildRuntimeContext(AgentIntentAnalysisService.AgentIntent intent) {
         return agentIntentAnalysisService.buildPromptContext(intent)
                 + PIPELINE_GUIDE
@@ -784,29 +773,24 @@ public class AgentExecutionPipelineService {
         if (intent != null && intent.acknowledgementOnly()) {
             return """
                     我还没拿到新的有效需求，所以这轮先不开始规划。
-
                     你可以随时再叫我，直接补这 2 到 3 类信息里的任意几项就行：
-                    - 城市、区域，或者直接说“用当前定位”
+                    - 城市、区域，或者直接说“用当前位置”
                     - 想要的主题或玩法，比如夜景、拍照、老街、咖啡、安静散步
                     - 大概时长，比如 1 小时、半天、一个晚上
-
                     例如你可以直接说：
                     “在上海徐汇，想走一条适合晚上拍照的 2 小时 City Walk。”
                     """.trim();
         }
         return """
                 这轮输入还不足以开始有效规划，我先不继续生成路线。
-
                 你可以随时来找我，只要补一点有效信息我就能继续：
-                - 城市、区域，或者直接说“用当前定位”
+                - 城市、区域，或者直接说“用当前位置”
                 - 想看的主题或目标，比如夜景、拍照、老街、咖啡、放空散步
                 - 大概时长，比如 1 小时、半天、一个晚上
-
                 例如：
-                “我在杭州，想找一条适合傍晚散步和拍照的 City Walk，2 小时左右。”
+                “我在杭州，想找一条适合傍晚散步和拍照的 City Walk，1 小时左右。”
                 """.trim();
     }
-
     private boolean shouldPrefetchKnowledge(AgentIntentAnalysisService.AgentIntent intent, String prompt) {
         if (intent == null) {
             return false;
@@ -851,7 +835,6 @@ public class AgentExecutionPipelineService {
         String query = String.join(" ", parts).trim();
         return query.isBlank() ? safeText(prompt, "") : query;
     }
-
     private boolean shouldPrefetchPoi(
             AgentIntentAnalysisService.AgentIntent intent,
             DeterministicPrefetchOutcome knowledgePrefetch
@@ -898,7 +881,6 @@ public class AgentExecutionPipelineService {
         String query = String.join(" ", parts).trim();
         return query.isBlank() ? safeText(prompt, "") : query;
     }
-
     private int countResults(String output) {
         if (output == null || output.isBlank()) {
             return 0;

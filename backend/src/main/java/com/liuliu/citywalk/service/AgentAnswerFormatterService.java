@@ -64,11 +64,10 @@ public class AgentAnswerFormatterService {
         String lower = normalized.toLowerCase(Locale.ROOT);
         boolean asksQuestion = normalized.contains("?")
                 || normalized.contains("？")
-                || lower.contains("想先问你")
                 || lower.contains("可以告诉我")
                 || lower.contains("请告诉我")
                 || lower.contains("请确认")
-                || lower.contains("先问你")
+                || lower.contains("先告诉我")
                 || lower.contains("还想问你");
         return asksQuestion && !containsAllSections(normalized);
     }
