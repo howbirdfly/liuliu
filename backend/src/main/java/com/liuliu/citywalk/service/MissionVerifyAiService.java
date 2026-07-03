@@ -2,6 +2,7 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.model.dto.request.MissionVerifyRequest;
 import com.liuliu.citywalk.model.dto.response.MissionVerifyResponse;
 import org.slf4j.Logger;
@@ -12,15 +13,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.content.Media;
 import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.api.OpenAiApi;
-import org.springframework.ai.openai.api.ResponseFormat;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
-import org.springframework.web.client.RestClient;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -47,24 +43,17 @@ public class MissionVerifyAiService {
     private static final String FALLBACK_COMMENT = "AI 识图暂时不可用，这次先按完成处理；如果你愿意，也可以稍后再补一次更清晰的图片。";
 
     private final ObjectMapper objectMapper;
-    private final String apiKey;
-    private final String model;
-    private final String baseUrl;
-    private final int requestTimeoutMs;
-    private volatile OpenAiChatModel visionChatModel;
+    private final MissionVerifyAiProperties properties;
+    private final OpenAiChatModel missionVerifyChatModel;
 
     public MissionVerifyAiService(
             ObjectMapper objectMapper,
-            @Value("${liuliu.ai.mission-verify.api-key:}") String apiKey,
-            @Value("${liuliu.ai.mission-verify.model:qwen-vl-plus}") String model,
-            @Value("${liuliu.ai.mission-verify.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String baseUrl,
-            @Value("${liuliu.ai.mission-verify.request-timeout-ms:2200}") int requestTimeoutMs
+            MissionVerifyAiProperties properties,
+            @Qualifier("missionVerifyChatModel") OpenAiChatModel missionVerifyChatModel
     ) {
         this.objectMapper = objectMapper;
-        this.apiKey = apiKey == null ? "" : apiKey.trim();
-        this.model = model == null || model.isBlank() ? "qwen-vl-plus" : model.trim();
-        this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
-        this.requestTimeoutMs = requestTimeoutMs;
+        this.properties = properties;
+        this.missionVerifyChatModel = missionVerifyChatModel;
     }
 
     public MissionVerifyResponse verifyMission(MissionVerifyRequest request) {
@@ -94,7 +83,7 @@ public class MissionVerifyAiService {
     }
 
     private VerifyPayload callVisionModel(String mission, String noteText, List<String> imageUrls) throws Exception {
-        if (isBlank(apiKey)) {
+        if (isBlank(properties.getApiKey())) {
             throw new IllegalStateException("missing_ai_api_key");
         }
 
@@ -103,9 +92,8 @@ public class MissionVerifyAiService {
                 .media(toImageMedia(imageUrls))
                 .build();
 
-        ChatResponse response = getVisionChatModel().call(new Prompt(
-                List.of(new SystemMessage(SYSTEM_PROMPT), userMessage),
-                buildOptions()
+        ChatResponse response = missionVerifyChatModel.call(new Prompt(
+                List.of(new SystemMessage(SYSTEM_PROMPT), userMessage)
         ));
 
         String rawContent = extractText(response);
@@ -113,46 +101,6 @@ public class MissionVerifyAiService {
             throw new IllegalStateException("mission_verify_empty_content");
         }
         return objectMapper.readValue(stripCodeFence(rawContent), VerifyPayload.class);
-    }
-
-    private OpenAiChatModel getVisionChatModel() {
-        OpenAiChatModel current = visionChatModel;
-        if (current != null) {
-            return current;
-        }
-
-        synchronized (this) {
-            if (visionChatModel != null) {
-                return visionChatModel;
-            }
-
-            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
-            requestFactory.setConnectTimeout(Math.max(1000, safeTimeoutMs()));
-            requestFactory.setReadTimeout(Math.max(1000, safeTimeoutMs()));
-
-            OpenAiApi openAiApi = OpenAiApi.builder()
-                    .baseUrl(trimTrailingSlash(baseUrl))
-                    .completionsPath("/chat/completions")
-                    .apiKey(apiKey)
-                    .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
-                    .build();
-
-            visionChatModel = OpenAiChatModel.builder()
-                    .openAiApi(openAiApi)
-                    .defaultOptions(buildOptions())
-                    .build();
-            return visionChatModel;
-        }
-    }
-
-    private OpenAiChatOptions buildOptions() {
-        return OpenAiChatOptions.builder()
-                .model(model)
-                .temperature(0.3)
-                .responseFormat(ResponseFormat.builder()
-                        .type(ResponseFormat.Type.JSON_OBJECT)
-                        .build())
-                .build();
     }
 
     private String buildUserPrompt(String mission, String noteText) {
@@ -231,14 +179,6 @@ public class MissionVerifyAiService {
 
     private boolean isHttpUrl(String value) {
         return value.startsWith("http://") || value.startsWith("https://");
-    }
-
-    private int safeTimeoutMs() {
-        return requestTimeoutMs;
-    }
-
-    private String trimTrailingSlash(String value) {
-        return value == null ? "" : value.replaceAll("/+$", "");
     }
 
     private boolean isBlank(String value) {
