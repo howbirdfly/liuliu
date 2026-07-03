@@ -1,8 +1,8 @@
 package com.liuliu.citywalk.service.agent;
 
-import org.springframework.ai.tool.ToolCallback;
-
 import java.util.Map;
+
+import org.springframework.ai.tool.ToolCallback;
 
 public interface AgentTool {
 
@@ -11,11 +11,6 @@ public interface AgentTool {
     String description();
 
     Map<String, Object> inputSchema();
-
-    @Deprecated
-    default Map<String, Object> parametersSchema() {
-        return inputSchema();
-    }
 
     String execute(Map<String, Object> arguments);
 
@@ -27,11 +22,7 @@ public interface AgentTool {
         return false;
     }
 
-    default LlmToolDefinition toDefinition() {
-        return new LlmToolDefinition(name(), description(), inputSchema());
-    }
-
     default ToolCallback toToolCallback() {
-        return SpringAiToolCallbackAdapter.fromDefinition(toDefinition());
+        return SpringAiToolCallbackAdapter.fromAgentTool(this);
     }
 }

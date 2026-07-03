@@ -7,7 +7,6 @@ import java.util.List;
 public record LlmRequest(
         String instructions,
         List<LlmMessage> messages,
-        List<LlmToolDefinition> tools,
         List<ToolCallback> toolCallbacks,
         LlmOptions options
 ) {

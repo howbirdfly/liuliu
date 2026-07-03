@@ -43,7 +43,6 @@ public class AgentRoundService {
                 new LlmRequest(
                         instructions,
                         messages,
-                        agentToolExecutionService.toolDefinitions(),
                         agentToolExecutionService.toolCallbacks(),
                         LlmOptions.ofTemperature(0.2)
                 ),

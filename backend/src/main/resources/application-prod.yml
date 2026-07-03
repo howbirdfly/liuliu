@@ -11,9 +11,15 @@ spring:
   ai:
     model:
       chat: ${SPRING_AI_CHAT_MODEL:deepseek}
+      embedding: ${SPRING_AI_EMBEDDING_MODEL:none}
     deepseek:
       api-key: ${DEEPSEEK_API_KEY:replace_with_real_key}
       base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    openai:
+      embedding:
+        api-key: ${SPRING_AI_OPENAI_EMBEDDING_API_KEY:}
+        model: ${SPRING_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v4}
+        base-url: ${SPRING_AI_OPENAI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
   datasource:
     url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/liuliu_citywalk?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${MYSQL_USERNAME:liuliu}
@@ -126,12 +132,3 @@ milvus:
   metadata-field: ${MILVUS_METADATA_FIELD:metadata}
   dimension: ${MILVUS_DIMENSION:1024}
   default-top-k: ${MILVUS_DEFAULT_TOP_K:5}
-
-embedding:
-  enabled: ${EMBEDDING_ENABLED:false}
-  api-key: ${EMBEDDING_API_KEY:}
-  model: ${EMBEDDING_MODEL:text-embedding-v4}
-  base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-  path: ${EMBEDDING_PATH:/embeddings}
-  request-timeout-ms: ${EMBEDDING_REQUEST_TIMEOUT_MS:15000}
-  batch-size: ${EMBEDDING_BATCH_SIZE:10}

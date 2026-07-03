@@ -261,9 +261,7 @@ public class SpringAiLlmClient implements LlmClient {
                 .model(model())
                 .internalToolExecutionEnabled(false)
                 .temperature(request.temperature() == null ? 0.2 : request.temperature());
-        List<ToolCallback> toolCallbacks = request.toolCallbacks() == null || request.toolCallbacks().isEmpty()
-                ? buildToolCallbacks(request.tools())
-                : request.toolCallbacks();
+        List<ToolCallback> toolCallbacks = request.toolCallbacks() == null ? List.of() : request.toolCallbacks();
         if (!toolCallbacks.isEmpty()) {
             builder.toolCallbacks(toolCallbacks);
         }
@@ -329,21 +327,6 @@ public class SpringAiLlmClient implements LlmClient {
             ));
         }
         return result;
-    }
-
-    private List<ToolCallback> buildToolCallbacks(List<LlmToolDefinition> tools) {
-        if (tools == null || tools.isEmpty()) {
-            return List.of();
-        }
-
-        List<ToolCallback> callbacks = new ArrayList<>(tools.size());
-        for (LlmToolDefinition tool : tools) {
-            if (tool == null || tool.name() == null || tool.name().isBlank()) {
-                continue;
-            }
-            callbacks.add(SpringAiToolCallbackAdapter.fromDefinition(tool));
-        }
-        return callbacks;
     }
 
     private void emitStreamingDelta(ChatResponse chunk, LlmStreamListener listener) {
@@ -421,7 +404,7 @@ public class SpringAiLlmClient implements LlmClient {
             return "null_request";
         }
         int messageCount = request.messages() == null ? 0 : request.messages().size();
-        int toolCount = request.tools() == null ? 0 : request.tools().size();
+        int toolCount = request.toolCallbacks() == null ? 0 : request.toolCallbacks().size();
         String lastUserMessage = "";
         if (request.messages() != null) {
             for (int index = request.messages().size() - 1; index >= 0; index--) {

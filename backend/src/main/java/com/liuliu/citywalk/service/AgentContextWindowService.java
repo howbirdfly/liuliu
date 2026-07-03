@@ -83,7 +83,6 @@ public class AgentContextWindowService {
         return new LlmRequest(
                 request.instructions(),
                 buildOverflowMessageWindow(request.messages()),
-                request.tools(),
                 request.toolCallbacks(),
                 request.options() == null ? LlmOptions.ofTemperature(request.temperature()) : request.options()
         );
