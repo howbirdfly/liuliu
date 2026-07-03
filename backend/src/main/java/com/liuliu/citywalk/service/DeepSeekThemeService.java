@@ -12,107 +12,60 @@ import com.liuliu.citywalk.model.dto.response.ThemeResponse;
 import com.liuliu.citywalk.model.dto.response.WalkRecordCardTextResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.MessageAggregator;
-import org.springframework.ai.chat.model.StreamingChatModel;
-import org.springframework.ai.chat.prompt.ChatOptions;
-import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class DeepSeekThemeService {
 
     private static final Logger log = LoggerFactory.getLogger(DeepSeekThemeService.class);
-    private static final String PROVIDER = "deepseek";
-    private static final String SYSTEM_PROMPT =
-            "你是一名擅长中文表达的 City Walk 策划助手。严格按照要求返回内容，不要输出多余解释。";
 
     private final ObjectMapper objectMapper;
-    private final ChatModel chatModel;
+    private final DeepSeekThemeAiClient aiClient;
     private final MapSearchService mapSearchService;
-    private final String configuredModel;
-    private final String configuredApiKey;
 
     public DeepSeekThemeService(
             ObjectMapper objectMapper,
-            @Qualifier("deepSeekChatModel") ChatModel chatModel,
-            MapSearchService mapSearchService,
-            @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
-            @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey
+            DeepSeekThemeAiClient aiClient,
+            MapSearchService mapSearchService
     ) {
         this.objectMapper = objectMapper;
-        this.chatModel = chatModel;
+        this.aiClient = aiClient;
         this.mapSearchService = mapSearchService;
-        this.configuredModel = configuredModel == null || configuredModel.isBlank() ? "deepseek-chat" : configuredModel.trim();
-        this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
     }
 
     public ThemeResponse generateTheme(GenerateThemeRequest request) {
-        ThemePayload fallback = new ThemePayload(
-                "此刻城市散步提案",
-                "围绕你当前的心情与地点，安排一条适合边走边看的轻量 City Walk，让沿途的小变化自然成为这次漫步的亮点。",
-                "探索",
-                List.of("先选一段最容易进入状态的街区慢慢开走", "沿路记录一个最打动你的街角、气味或光线", "在收尾点留出十分钟坐下来整理这次感受"),
-                "#f59e0b"
-        );
+        ThemePayload fallback = defaultThemeFallback();
         return toThemeResponse(callThemePrompt(buildGenerateThemePrompt(request), fallback), 1L);
     }
 
     public ThemeResponse streamGenerateTheme(GenerateThemeRequest request, ThemeStreamListener listener) {
-        ThemePayload fallback = new ThemePayload(
-                "此刻城市散步提案",
-                "围绕你当前的心情与地点，安排一条适合边走边看的轻量 City Walk，让沿途的小变化自然成为这次漫步的亮点。",
-                "探索",
-                List.of("先选一段最容易进入状态的街区慢慢开走", "沿路记录一个最打动你的街角、气味或光线", "在收尾点留出十分钟坐下来整理这次感受"),
-                "#f59e0b"
-        );
+        ThemePayload fallback = defaultThemeFallback();
         return toThemeResponse(callThemePromptStreaming(buildGenerateThemePrompt(request), fallback, listener), 1L);
     }
 
     public ThemeResponse generatePreset(GeneratePresetThemeRequest request) {
-        ThemePayload fallback = new ThemePayload(
-                request.category() + "漫步提案",
-                "从当前位置周边挑选一片和主题气质契合、适合自然展开的步行区域，用轻松的节奏把这次主题感拉出来。",
-                request.category(),
-                List.of("先找到最能代表这个主题的第一眼场景", "途中记录一个最符合主题的细节瞬间", "在结尾点给这次散步下一个自己的定义"),
-                "#3b82f6"
-        );
+        ThemePayload fallback = presetThemeFallback(request);
         return toThemeResponse(callThemePrompt(buildPresetPrompt(request), fallback), 2L);
     }
 
     public ThemeResponse combineTheme(CombineThemeRequest request) {
         String categoriesText = String.join("、", request.categories());
-        ThemePayload fallback = new ThemePayload(
-                "混搭漫游提案",
-                "把多种主题气质压进一条可执行的城市散步线里，让路线既有变化感，也能保持整体节奏和情绪一致。",
-                "混搭",
-                List.of("先找到最适合作为开场的主题入口", "中段故意安排一次气质切换，制造层次变化", "最后在最容易回味的场景收尾"),
-                "#8b5cf6"
-        );
+        ThemePayload fallback = combinedThemeFallback();
         return toThemeResponse(callThemePrompt(buildCombinePrompt(request, categoriesText), fallback), 3L);
     }
 
     public WalkRecordCardTextResponse generateWalkRecordCardText(GenerateWalkRecordCardRequest request) {
-        WalkRecordCardPayload fallback = new WalkRecordCardPayload(
-                "今天这段路，刚好把心情放慢了一点。",
-                "小六六在%s慢慢走着，把一路上的风、光影和细碎感受都收进了今天这张记录卡里。这不是刻意完成任务的一次打卡，更像是城市在某个瞬间给出的温柔回应。"
-                        .formatted(request.locationName())
-        );
+        WalkRecordCardPayload fallback = walkRecordCardFallback(request);
 
         WalkRecordCardPayload payload = callWalkRecordCardPrompt(buildWalkRecordCardPrompt(request), fallback);
         return new WalkRecordCardTextResponse(
                 payload.shortNote(),
                 payload.story(),
-                PROVIDER
+                provider()
         );
     }
 
@@ -150,11 +103,11 @@ public class DeepSeekThemeService {
     }
 
     public String provider() {
-        return PROVIDER;
+        return aiClient.provider();
     }
 
     public String model() {
-        return configuredModel;
+        return aiClient.model();
     }
 
     private String buildGenerateThemePrompt(GenerateThemeRequest request) {
@@ -310,20 +263,13 @@ public class DeepSeekThemeService {
     }
 
     private WalkRecordCardPayload callWalkRecordCardPrompt(String prompt, WalkRecordCardPayload fallback) {
-        if (!isConfigured()) {
-            log.info("DeepSeek skipped: api key not configured, using fallback walk card text");
-            return fallback;
-        }
-
-        try {
-            String raw = callDeepSeek(prompt, true);
-            WalkRecordCardPayload parsed = objectMapper.readValue(extractJsonObject(raw), WalkRecordCardPayload.class);
-            log.info("DeepSeek walk card text generated successfully with model {}", model());
-            return sanitizeWalkRecordCardPayload(parsed, fallback);
-        } catch (Exception error) {
-            log.warn("DeepSeek walk card text generation failed, using fallback: {}", error.getMessage());
-            return fallback;
-        }
+        return executeJsonTask(
+                "walk card text",
+                prompt,
+                fallback,
+                WalkRecordCardPayload.class,
+                parsed -> sanitizeWalkRecordCardPayload(parsed, fallback)
+        );
     }
 
     private ThemeResponse toThemeResponse(ThemePayload payload, Long id) {
@@ -334,55 +280,41 @@ public class DeepSeekThemeService {
                 payload.category(),
                 payload.missions(),
                 payload.vibeColor(),
-                PROVIDER,
+                provider(),
                 null
         );
     }
 
     private ThemePayload callThemePrompt(String prompt, ThemePayload fallback) {
-        if (!isConfigured()) {
-            log.info("DeepSeek skipped: api key not configured, using fallback theme");
-            return fallback;
-        }
-
-        try {
-            String raw = callDeepSeek(prompt, true);
-            ThemePayload parsed = objectMapper.readValue(extractJsonObject(raw), ThemePayload.class);
-            log.info("DeepSeek theme generated successfully with model {}", model());
-            return sanitizeThemePayload(parsed, fallback);
-        } catch (Exception error) {
-            log.warn("DeepSeek theme generation failed, using fallback: {}", error.getMessage());
-            return fallback;
-        }
+        return executeJsonTask(
+                "theme",
+                prompt,
+                fallback,
+                ThemePayload.class,
+                parsed -> sanitizeThemePayload(parsed, fallback)
+        );
     }
 
     private ThemePayload callThemePromptStreaming(String prompt, ThemePayload fallback, ThemeStreamListener listener) {
-        if (!isConfigured()) {
-            log.info("DeepSeek skipped: api key not configured, using fallback streaming theme");
-            emitFallbackTheme(listener, fallback);
-            return fallback;
-        }
-
-        try {
-            String raw = callDeepSeekStreaming(prompt, true, listener);
-            ThemePayload parsed = objectMapper.readValue(extractJsonObject(raw), ThemePayload.class);
-            log.info("DeepSeek theme streamed successfully with model {}", model());
-            return sanitizeThemePayload(parsed, fallback);
-        } catch (Exception error) {
-            log.warn("DeepSeek theme streaming failed, using fallback: {}", error.getMessage());
-            emitFallbackTheme(listener, fallback);
-            return fallback;
-        }
+        return executeStreamingJsonTask(
+                "streaming theme",
+                prompt,
+                fallback,
+                listener,
+                ThemePayload.class,
+                parsed -> sanitizeThemePayload(parsed, fallback),
+                () -> emitFallbackTheme(listener, fallback)
+        );
     }
 
     private String callTextPrompt(String prompt, String fallback) {
-        if (!isConfigured()) {
+        if (!aiClient.isConfigured()) {
             log.info("DeepSeek skipped: api key not configured, using fallback text");
             return fallback;
         }
 
         try {
-            String raw = callDeepSeek(prompt, false).trim();
+            String raw = aiClient.callText(prompt);
             log.info("DeepSeek text generated successfully with model {}", model());
             return raw.isBlank() ? fallback : raw;
         } catch (Exception error) {
@@ -391,77 +323,52 @@ public class DeepSeekThemeService {
         }
     }
 
-    private boolean isConfigured() {
-        return configuredApiKey != null
-                && !configuredApiKey.isBlank()
-                && chatModel != null;
-    }
-
-    private String callDeepSeekStreaming(String prompt, boolean expectJson, ThemeStreamListener listener) {
-        AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
-        new MessageAggregator()
-                .aggregate(getStreamingChatModel().stream(buildPrompt(prompt, expectJson)), aggregatedResponse::set)
-                .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
-                .blockLast();
-
-        String content = extractText(aggregatedResponse.get());
-        if (content == null || content.isBlank()) {
-            throw new IllegalStateException("DeepSeek returned empty streamed content");
+    private <T> T executeJsonTask(
+            String taskName,
+            String prompt,
+            T fallback,
+            Class<T> responseType,
+            Function<T, T> sanitizer
+    ) {
+        if (!aiClient.isConfigured()) {
+            log.info("DeepSeek skipped: api key not configured, using fallback {}", taskName);
+            return fallback;
         }
-        return content;
-    }
 
-    private String callDeepSeek(String prompt, boolean expectJson) {
-        String content = extractText(getChatModel().call(buildPrompt(prompt, expectJson)));
-        if (content == null || content.isBlank()) {
-            throw new IllegalStateException("DeepSeek returned empty content");
-        }
-        return content;
-    }
-
-    private ChatModel getChatModel() {
-        if (chatModel == null) {
-            throw new IllegalStateException("ChatModel is not available");
-        }
-        return chatModel;
-    }
-
-    private StreamingChatModel getStreamingChatModel() {
-        ChatModel chatModel = getChatModel();
-        if (chatModel instanceof StreamingChatModel compatibleStreamingChatModel) {
-            return compatibleStreamingChatModel;
-        }
-        throw new IllegalStateException("StreamingChatModel is not available");
-    }
-
-    private Prompt buildPrompt(String prompt, boolean expectJson) {
-        String normalizedPrompt = expectJson
-                ? prompt + "\n\n只返回一个 JSON 对象，不要使用 markdown 代码块。"
-                : prompt;
-        return new Prompt(
-                List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(normalizedPrompt)),
-                ChatOptions.builder()
-                        .model(model())
-                        .temperature(0.8d)
-                        .build()
-        );
-    }
-
-    private void emitStreamingDelta(ChatResponse chunk, ThemeStreamListener listener) {
-        if (listener == null) {
-            return;
-        }
-        String delta = extractText(chunk);
-        if (delta != null && !delta.isEmpty()) {
-            listener.onContentDelta(delta);
+        try {
+            T parsed = aiClient.callJson(prompt, responseType);
+            log.info("DeepSeek {} generated successfully with model {}", taskName, model());
+            return sanitizer.apply(parsed);
+        } catch (Exception error) {
+            log.warn("DeepSeek {} generation failed, using fallback: {}", taskName, error.getMessage());
+            return fallback;
         }
     }
 
-    private String extractText(ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return "";
+    private <T> T executeStreamingJsonTask(
+            String taskName,
+            String prompt,
+            T fallback,
+            ThemeStreamListener listener,
+            Class<T> responseType,
+            Function<T, T> sanitizer,
+            Runnable fallbackEmitter
+    ) {
+        if (!aiClient.isConfigured()) {
+            log.info("DeepSeek skipped: api key not configured, using fallback {}", taskName);
+            fallbackEmitter.run();
+            return fallback;
         }
-        return response.getResult().getOutput().getText();
+
+        try {
+            T parsed = aiClient.callJsonStreaming(prompt, listener, responseType);
+            log.info("DeepSeek {} completed successfully with model {}", taskName, model());
+            return sanitizer.apply(parsed);
+        } catch (Exception error) {
+            log.warn("DeepSeek {} failed, using fallback: {}", taskName, error.getMessage());
+            fallbackEmitter.run();
+            return fallback;
+        }
     }
 
     private ThemePayload sanitizeThemePayload(ThemePayload payload, ThemePayload fallback) {
@@ -505,14 +412,42 @@ public class DeepSeekThemeService {
         );
     }
 
-    private String extractJsonObject(String raw) {
-        String trimmed = raw == null ? "" : raw.trim();
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        if (start < 0 || end <= start) {
-            throw new IllegalArgumentException("No JSON object found in DeepSeek response");
-        }
-        return trimmed.substring(start, end + 1);
+    private ThemePayload defaultThemeFallback() {
+        return new ThemePayload(
+                "此刻城市散步提案",
+                "围绕你当前的心情与地点，安排一条适合边走边看的轻量 City Walk，让沿途的小变化自然成为这次漫步的亮点。",
+                "探索",
+                List.of("先选一段最容易进入状态的街区慢慢开走", "沿路记录一个最打动你的街角、气味或光线", "在收尾点留出十分钟坐下来整理这次感受"),
+                "#f59e0b"
+        );
+    }
+
+    private ThemePayload presetThemeFallback(GeneratePresetThemeRequest request) {
+        return new ThemePayload(
+                request.category() + "漫步提案",
+                "从当前位置周边挑选一片和主题气质契合、适合自然展开的步行区域，用轻松的节奏把这次主题感拉出来。",
+                request.category(),
+                List.of("先找到最能代表这个主题的第一眼场景", "途中记录一个最符合主题的细节瞬间", "在结尾点给这次散步下一个自己的定义"),
+                "#3b82f6"
+        );
+    }
+
+    private ThemePayload combinedThemeFallback() {
+        return new ThemePayload(
+                "混搭漫游提案",
+                "把多种主题气质压进一条可执行的城市散步线里，让路线既有变化感，也能保持整体节奏和情绪一致。",
+                "混搭",
+                List.of("先找到最适合作为开场的主题入口", "中段故意安排一次气质切换，制造层次变化", "最后在最容易回味的场景收尾"),
+                "#8b5cf6"
+        );
+    }
+
+    private WalkRecordCardPayload walkRecordCardFallback(GenerateWalkRecordCardRequest request) {
+        return new WalkRecordCardPayload(
+                "今天这段路，刚好把心情放慢了一点。",
+                "小六六在%s慢慢走着，把一路上的风、光影和细碎感受都收进了今天这张记录卡里。这不是刻意完成任务的一次打卡，更像是城市在某个瞬间给出的温柔回应。"
+                        .formatted(request.locationName())
+        );
     }
 
     private void emitFallbackTheme(ThemeStreamListener listener, ThemePayload fallback) {
@@ -524,10 +459,6 @@ public class DeepSeekThemeService {
         } catch (Exception ignored) {
             listener.onContentDelta("{\"title\":\"城市漫步提案\"}");
         }
-    }
-
-    public interface ThemeStreamListener {
-        void onContentDelta(String delta);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

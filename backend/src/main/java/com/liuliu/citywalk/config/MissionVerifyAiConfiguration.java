@@ -1,5 +1,6 @@
 package com.liuliu.citywalk.config;
 
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
@@ -13,7 +14,7 @@ import org.springframework.web.client.RestClient;
 public class MissionVerifyAiConfiguration {
 
     @Bean("missionVerifyChatModel")
-    public OpenAiChatModel missionVerifyChatModel(MissionVerifyAiProperties properties) {
+    public ChatModel missionVerifyChatModel(MissionVerifyAiProperties properties) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         int timeoutMs = Math.max(1000, properties.getRequestTimeoutMs());
         requestFactory.setConnectTimeout(timeoutMs);

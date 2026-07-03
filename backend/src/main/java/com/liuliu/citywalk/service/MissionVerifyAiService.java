@@ -9,10 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.content.Media;
-import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
@@ -44,12 +44,12 @@ public class MissionVerifyAiService {
 
     private final ObjectMapper objectMapper;
     private final MissionVerifyAiProperties properties;
-    private final OpenAiChatModel missionVerifyChatModel;
+    private final ChatModel missionVerifyChatModel;
 
     public MissionVerifyAiService(
             ObjectMapper objectMapper,
             MissionVerifyAiProperties properties,
-            @Qualifier("missionVerifyChatModel") OpenAiChatModel missionVerifyChatModel
+            @Qualifier("missionVerifyChatModel") ChatModel missionVerifyChatModel
     ) {
         this.objectMapper = objectMapper;
         this.properties = properties;

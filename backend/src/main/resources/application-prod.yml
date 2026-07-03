@@ -80,10 +80,10 @@ liuliu:
       encoding-format: ${LIULIU_AI_EMBEDDING_ENCODING_FORMAT:float}
       request-timeout-ms: ${LIULIU_AI_EMBEDDING_REQUEST_TIMEOUT_MS:5000}
     mission-verify:
-      api-key: ${MISSION_VERIFY_AI_API_KEY:}
-      model: ${MISSION_VERIFY_AI_MODEL:qwen-vl-plus}
-      base-url: ${MISSION_VERIFY_AI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-      request-timeout-ms: 2200
+      api-key: ${LIULIU_AI_MISSION_VERIFY_API_KEY:}
+      model: ${LIULIU_AI_MISSION_VERIFY_MODEL:qwen-vl-plus}
+      base-url: ${LIULIU_AI_MISSION_VERIFY_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      request-timeout-ms: ${LIULIU_AI_MISSION_VERIFY_REQUEST_TIMEOUT_MS:2200}
   rag:
     enabled: ${LIULIU_RAG_ENABLED:false}
     rerank-enabled: ${LIULIU_RAG_RERANK_ENABLED:true}
