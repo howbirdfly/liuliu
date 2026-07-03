@@ -1,47 +1,70 @@
 package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.model.dto.request.MissionVerifyRequest;
 import com.liuliu.citywalk.model.dto.response.MissionVerifyResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.openai.OpenAiChatModel;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.api.ResponseFormat;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
+import org.springframework.util.MimeTypeUtils;
+import org.springframework.web.client.RestClient;
+import org.springframework.beans.factory.annotation.Value;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Service
 public class MissionVerifyAiService {
 
     private static final Logger log = LoggerFactory.getLogger(MissionVerifyAiService.class);
-    private static final String SYSTEM_PROMPT = "你是遛遛小程序的任务核验助手。请采用宽松、鼓励式标准判断用户是否完成了任务。只返回 JSON，字段为 passed、comment、confidence。即使不通过，也给简短温和评价。";
+    private static final String SYSTEM_PROMPT = """
+            你是遛遛小程序的任务核验助手。
+            请采用宽松、鼓励式标准，判断用户是否已经基本完成任务。
+            你只能返回 JSON，对象字段固定为：
+            - passed: boolean
+            - comment: string
+            - confidence: string
+            即使不通过，也要给出简短、温和的反馈。
+            """;
     private static final String MISSING_INPUT_COMMENT = "请至少上传一张图片，再让 AI 帮你判断是否完成了任务。";
     private static final String PASS_COMMENT = "这组记录和任务意图比较贴近，已经为你点亮任务。";
     private static final String FAIL_COMMENT = "这组记录已经很接近了，可以再补一张更贴近任务主题的图片。";
     private static final String FALLBACK_COMMENT = "AI 识别暂时较慢，已按宽松标准先为你记录这次打卡。";
 
-    private final MissionVerifyAiProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final String apiKey;
+    private final String model;
+    private final String baseUrl;
+    private final int requestTimeoutMs;
+    private volatile OpenAiChatModel visionChatModel;
 
-    public MissionVerifyAiService(MissionVerifyAiProperties properties, ObjectMapper objectMapper) {
-        this.properties = properties;
+    public MissionVerifyAiService(
+            ObjectMapper objectMapper,
+            @Value("${liuliu.ai.mission-verify.api-key:}") String apiKey,
+            @Value("${liuliu.ai.mission-verify.model:qwen-vl-plus}") String model,
+            @Value("${liuliu.ai.mission-verify.base-url:https://dashscope.aliyuncs.com/compatible-mode/v1}") String baseUrl,
+            @Value("${liuliu.ai.mission-verify.request-timeout-ms:2200}") int requestTimeoutMs
+    ) {
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        this.apiKey = apiKey == null ? "" : apiKey.trim();
+        this.model = model == null || model.isBlank() ? "qwen-vl-plus" : model.trim();
+        this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
+        this.requestTimeoutMs = requestTimeoutMs;
     }
 
     public MissionVerifyResponse verifyMission(MissionVerifyRequest request) {
@@ -70,53 +93,114 @@ public class MissionVerifyAiService {
         }
     }
 
-    private VerifyPayload callVisionModel(String mission, String noteText, List<String> imageUrls) throws IOException, InterruptedException {
-        if (isBlank(properties.getApiKey())) {
+    private VerifyPayload callVisionModel(String mission, String noteText, List<String> imageUrls) throws Exception {
+        if (isBlank(apiKey)) {
             throw new IllegalStateException("missing_ai_api_key");
         }
 
-        List<Object> content = new ArrayList<>();
-        content.add(Map.of(
-                "type", "text",
-                "text", "任务内容：" + mission + "\n用户备注：" + firstNonBlank(noteText, "无") + "\n请宽松判断这些图片和备注是否基本符合任务意图。"
-        ));
-        for (String imageUrl : imageUrls) {
-            content.add(Map.of(
-                    "type", "image_url",
-                    "image_url", Map.of("url", imageUrl)
-            ));
-        }
-
-        Map<String, Object> requestBody = Map.of(
-                "model", properties.getModel(),
-                "temperature", 0.3,
-                "response_format", Map.of("type", "json_object"),
-                "messages", List.of(
-                        Map.of("role", "system", "content", SYSTEM_PROMPT),
-                        Map.of("role", "user", "content", content)
-                )
-        );
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(trimTrailingSlash(properties.getBaseUrl()) + "/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + properties.getApiKey())
-                .timeout(Duration.ofMillis(Math.max(1000, safeTimeoutMs())))
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
+        UserMessage userMessage = UserMessage.builder()
+                .text(buildUserPrompt(mission, noteText))
+                .media(toImageMedia(imageUrls))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() >= 400) {
-            throw new IOException("mission_verify_http_" + response.statusCode() + ": " + response.body());
-        }
+        ChatResponse response = getVisionChatModel().call(new Prompt(
+                List.of(new SystemMessage(SYSTEM_PROMPT), userMessage),
+                buildOptions()
+        ));
 
-        JsonNode contentNode = objectMapper.readTree(response.body())
-                .path("choices").path(0).path("message").path("content");
-        String rawContent = contentNode.isMissingNode() ? "" : contentNode.asText("");
+        String rawContent = extractText(response);
         if (rawContent.isBlank()) {
-            throw new IOException("mission_verify_empty_content");
+            throw new IllegalStateException("mission_verify_empty_content");
         }
         return objectMapper.readValue(stripCodeFence(rawContent), VerifyPayload.class);
+    }
+
+    private OpenAiChatModel getVisionChatModel() {
+        OpenAiChatModel current = visionChatModel;
+        if (current != null) {
+            return current;
+        }
+
+        synchronized (this) {
+            if (visionChatModel != null) {
+                return visionChatModel;
+            }
+
+            SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(Math.max(1000, safeTimeoutMs()));
+            requestFactory.setReadTimeout(Math.max(1000, safeTimeoutMs()));
+
+            OpenAiApi openAiApi = OpenAiApi.builder()
+                    .baseUrl(trimTrailingSlash(baseUrl))
+                    .completionsPath("/chat/completions")
+                    .apiKey(apiKey)
+                    .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
+                    .build();
+
+            visionChatModel = OpenAiChatModel.builder()
+                    .openAiApi(openAiApi)
+                .defaultOptions(buildOptions())
+                    .build();
+            return visionChatModel;
+        }
+    }
+
+    private OpenAiChatOptions buildOptions() {
+        return OpenAiChatOptions.builder()
+                .model(model)
+                .temperature(0.3)
+                .responseFormat(ResponseFormat.builder()
+                        .type(ResponseFormat.Type.JSON_OBJECT)
+                        .build())
+                .build();
+    }
+
+    private String buildUserPrompt(String mission, String noteText) {
+        return """
+                任务内容：%s
+                用户备注：%s
+                请结合这些图片和备注，宽松判断是否已经基本符合任务意图。
+                """.formatted(mission, firstNonBlank(noteText, "无"));
+    }
+
+    private List<Media> toImageMedia(List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return List.of();
+        }
+
+        List<Media> media = new ArrayList<>(imageUrls.size());
+        for (String imageUrl : imageUrls) {
+            if (isBlank(imageUrl)) {
+                continue;
+            }
+            media.add(new Media(detectImageMimeType(imageUrl), URI.create(imageUrl.trim())));
+        }
+        return media;
+    }
+
+    private MimeType detectImageMimeType(String imageUrl) {
+        String normalized = imageUrl == null ? "" : imageUrl.trim().toLowerCase();
+        int queryIndex = normalized.indexOf('?');
+        if (queryIndex >= 0) {
+            normalized = normalized.substring(0, queryIndex);
+        }
+        if (normalized.endsWith(".png")) {
+            return MimeTypeUtils.IMAGE_PNG;
+        }
+        if (normalized.endsWith(".gif")) {
+            return MimeTypeUtils.parseMimeType("image/gif");
+        }
+        if (normalized.endsWith(".webp")) {
+            return MimeTypeUtils.parseMimeType("image/webp");
+        }
+        return MimeTypeUtils.IMAGE_JPEG;
+    }
+
+    private String extractText(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
+            return "";
+        }
+        return firstNonBlank(response.getResult().getOutput().getText(), "");
     }
 
     private List<String> collectImageUrls(MissionVerifyRequest request) {
@@ -147,8 +231,7 @@ public class MissionVerifyAiService {
     }
 
     private int safeTimeoutMs() {
-        Integer timeoutMs = properties.getRequestTimeoutMs();
-        return timeoutMs == null ? 2200 : timeoutMs;
+        return requestTimeoutMs;
     }
 
     private String trimTrailingSlash(String value) {

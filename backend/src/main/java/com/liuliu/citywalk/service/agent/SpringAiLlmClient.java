@@ -1,7 +1,6 @@
 package com.liuliu.citywalk.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.service.AgentContextWindowService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,22 +30,25 @@ public class SpringAiLlmClient implements LlmClient {
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
 
-    private final DeepSeekProperties properties;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ChatModel> chatModelProvider;
     private final ObjectProvider<StreamingChatModel> streamingChatModelProvider;
     private final AgentContextWindowService agentContextWindowService;
     private final String configuredProvider;
+    private final String configuredModel;
+    private final String configuredApiKey;
+    private final String configuredBaseUrl;
 
     public SpringAiLlmClient(
-            DeepSeekProperties properties,
             ObjectMapper objectMapper,
             ObjectProvider<ChatModel> chatModelProvider,
             ObjectProvider<StreamingChatModel> streamingChatModelProvider,
             AgentContextWindowService agentContextWindowService,
-            @Value("${spring.ai.model.chat:deepseek}") String configuredProvider
+            @Value("${spring.ai.model.chat:deepseek}") String configuredProvider,
+            @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
+            @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey,
+            @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}") String configuredBaseUrl
     ) {
-        this.properties = properties;
         this.objectMapper = objectMapper;
         this.chatModelProvider = chatModelProvider;
         this.streamingChatModelProvider = streamingChatModelProvider;
@@ -54,6 +56,11 @@ public class SpringAiLlmClient implements LlmClient {
         this.configuredProvider = configuredProvider == null || configuredProvider.isBlank()
                 ? DEFAULT_PROVIDER
                 : configuredProvider.trim();
+        this.configuredModel = configuredModel == null || configuredModel.isBlank()
+                ? "deepseek-chat"
+                : configuredModel.trim();
+        this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
+        this.configuredBaseUrl = configuredBaseUrl == null ? "" : configuredBaseUrl.trim();
     }
 
     @Override
@@ -63,7 +70,7 @@ public class SpringAiLlmClient implements LlmClient {
 
     @Override
     public String model() {
-        return properties.getModel();
+        return configuredModel;
     }
 
     @Override
@@ -204,10 +211,7 @@ public class SpringAiLlmClient implements LlmClient {
     }
 
     private boolean isConfigured() {
-        return properties.getApiKey() != null
-                && !properties.getApiKey().isBlank()
-                && properties.getBaseUrl() != null
-                && !properties.getBaseUrl().isBlank();
+        return !configuredApiKey.isBlank() && !configuredBaseUrl.isBlank();
     }
 
     private ChatModel resolveChatModel() {

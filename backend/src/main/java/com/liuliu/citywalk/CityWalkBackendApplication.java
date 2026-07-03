@@ -5,8 +5,6 @@ import com.liuliu.citywalk.config.AgentMemoryProperties;
 import com.liuliu.citywalk.config.AgentToolCacheProperties;
 import com.liuliu.citywalk.config.CoCreateRoomProperties;
 import com.liuliu.citywalk.config.CommunityCacheProperties;
-import com.liuliu.citywalk.config.DeepSeekProperties;
-import com.liuliu.citywalk.config.MissionVerifyAiProperties;
 import com.liuliu.citywalk.config.MilvusProperties;
 import com.liuliu.citywalk.config.NotificationCacheProperties;
 import com.liuliu.citywalk.config.RagProperties;
@@ -21,9 +19,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @MapperScan("com.liuliu.citywalk.mapper")
 @EnableConfigurationProperties({
-        DeepSeekProperties.class,
         AmapProperties.class,
-        MissionVerifyAiProperties.class,
         MilvusProperties.class,
         NotificationCacheProperties.class,
         CommunityCacheProperties.class,

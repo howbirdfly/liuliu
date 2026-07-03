@@ -2,7 +2,6 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.liuliu.citywalk.config.DeepSeekProperties;
 import com.liuliu.citywalk.model.dto.request.CombineThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GeneratePresetThemeRequest;
 import com.liuliu.citywalk.model.dto.request.GenerateThemeRequest;
@@ -15,13 +14,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.MessageAggregator;
+import org.springframework.ai.chat.model.StreamingChatModel;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.deepseek.DeepSeekChatModel;
-import org.springframework.ai.deepseek.DeepSeekChatOptions;
-import org.springframework.ai.deepseek.api.ResponseFormat;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -36,21 +36,27 @@ public class DeepSeekThemeService {
     private static final String SYSTEM_PROMPT =
             "You are a helpful Chinese City Walk planning assistant. Follow the requested output format exactly.";
 
-    private final DeepSeekProperties properties;
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<DeepSeekChatModel> chatModelProvider;
+    private final ObjectProvider<ChatModel> chatModelProvider;
+    private final ObjectProvider<StreamingChatModel> streamingChatModelProvider;
     private final MapSearchService mapSearchService;
+    private final String configuredModel;
+    private final String configuredApiKey;
 
     public DeepSeekThemeService(
-            DeepSeekProperties properties,
             ObjectMapper objectMapper,
-            ObjectProvider<DeepSeekChatModel> chatModelProvider,
-            MapSearchService mapSearchService
+            ObjectProvider<ChatModel> chatModelProvider,
+            ObjectProvider<StreamingChatModel> streamingChatModelProvider,
+            MapSearchService mapSearchService,
+            @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
+            @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey
     ) {
-        this.properties = properties;
         this.objectMapper = objectMapper;
         this.chatModelProvider = chatModelProvider;
+        this.streamingChatModelProvider = streamingChatModelProvider;
         this.mapSearchService = mapSearchService;
+        this.configuredModel = configuredModel == null || configuredModel.isBlank() ? "deepseek-chat" : configuredModel.trim();
+        this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
     }
 
     public ThemeResponse generateTheme(GenerateThemeRequest request) {
@@ -298,7 +304,7 @@ public class DeepSeekThemeService {
     }
 
     public String model() {
-        return properties.getModel();
+        return configuredModel;
     }
 
     private String buildPoiSummary(List<PoiResponse> nearbyPois) {
@@ -330,7 +336,7 @@ public class DeepSeekThemeService {
         try {
             String raw = callDeepSeek(prompt, true);
             WalkRecordCardPayload parsed = objectMapper.readValue(extractJsonObject(raw), WalkRecordCardPayload.class);
-            log.info("DeepSeek walk card text generated successfully with model {}", properties.getModel());
+            log.info("DeepSeek walk card text generated successfully with model {}", model());
             return sanitizeWalkRecordCardPayload(parsed, fallback);
         } catch (Exception error) {
             log.warn("DeepSeek walk card text generation failed, using fallback: {}", error.getMessage());
@@ -360,7 +366,7 @@ public class DeepSeekThemeService {
         try {
             String raw = callDeepSeek(prompt, true);
             ThemePayload parsed = objectMapper.readValue(extractJsonObject(raw), ThemePayload.class);
-            log.info("DeepSeek theme generated successfully with model {}", properties.getModel());
+            log.info("DeepSeek theme generated successfully with model {}", model());
             return sanitizeThemePayload(parsed, fallback);
         } catch (Exception error) {
             log.warn("DeepSeek theme generation failed, using fallback: {}", error.getMessage());
@@ -378,7 +384,7 @@ public class DeepSeekThemeService {
         try {
             String raw = callDeepSeekStreaming(prompt, true, listener);
             ThemePayload parsed = objectMapper.readValue(extractJsonObject(raw), ThemePayload.class);
-            log.info("DeepSeek theme streamed successfully with model {}", properties.getModel());
+            log.info("DeepSeek theme streamed successfully with model {}", model());
             return sanitizeThemePayload(parsed, fallback);
         } catch (Exception error) {
             log.warn("DeepSeek theme streaming failed, using fallback: {}", error.getMessage());
@@ -395,7 +401,7 @@ public class DeepSeekThemeService {
 
         try {
             String raw = callDeepSeek(prompt, false).trim();
-            log.info("DeepSeek text generated successfully with model {}", properties.getModel());
+            log.info("DeepSeek text generated successfully with model {}", model());
             return raw.isBlank() ? fallback : raw;
         } catch (Exception error) {
             log.warn("DeepSeek text generation failed, using fallback: {}", error.getMessage());
@@ -404,15 +410,15 @@ public class DeepSeekThemeService {
     }
 
     private boolean isConfigured() {
-        return properties.getApiKey() != null
-                && !properties.getApiKey().isBlank()
+        return configuredApiKey != null
+                && !configuredApiKey.isBlank()
                 && chatModelProvider.getIfAvailable() != null;
     }
 
     private String callDeepSeekStreaming(String prompt, boolean expectJson, ThemeStreamListener listener) {
         AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
         new MessageAggregator()
-                .aggregate(getChatModel().stream(buildPrompt(prompt, expectJson)), aggregatedResponse::set)
+                .aggregate(getStreamingChatModel().stream(buildPrompt(prompt, expectJson)), aggregatedResponse::set)
                 .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
                 .blockLast();
 
@@ -431,23 +437,35 @@ public class DeepSeekThemeService {
         return content;
     }
 
-    private DeepSeekChatModel getChatModel() {
-        DeepSeekChatModel chatModel = chatModelProvider.getIfAvailable();
+    private ChatModel getChatModel() {
+        ChatModel chatModel = chatModelProvider.getIfAvailable();
         if (chatModel == null) {
-            throw new IllegalStateException("DeepSeekChatModel is not available");
+            throw new IllegalStateException("ChatModel is not available");
         }
         return chatModel;
     }
 
+    private StreamingChatModel getStreamingChatModel() {
+        StreamingChatModel streamingChatModel = streamingChatModelProvider.getIfAvailable();
+        if (streamingChatModel != null) {
+            return streamingChatModel;
+        }
+        ChatModel chatModel = getChatModel();
+        if (chatModel instanceof StreamingChatModel compatibleStreamingChatModel) {
+            return compatibleStreamingChatModel;
+        }
+        throw new IllegalStateException("StreamingChatModel is not available");
+    }
+
     private Prompt buildPrompt(String prompt, boolean expectJson) {
+        String normalizedPrompt = expectJson
+                ? prompt + "\n\nReturn only one JSON object. Do not include markdown code fences."
+                : prompt;
         return new Prompt(
-                List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(prompt)),
-                DeepSeekChatOptions.builder()
-                        .model(properties.getModel())
-                        .temperature(0.8)
-                        .responseFormat(ResponseFormat.builder()
-                                .type(expectJson ? ResponseFormat.Type.JSON_OBJECT : ResponseFormat.Type.TEXT)
-                                .build())
+                List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(normalizedPrompt)),
+                ChatOptions.builder()
+                        .model(model())
+                        .temperature(0.8d)
                         .build()
         );
     }
