@@ -19,6 +19,7 @@ import java.util.UUID;
 public class AgentExecutionPipelineService {
 
     private static final int MAX_TOOL_ROUNDS = 6;
+
     private static final String PIPELINE_GUIDE = """
 
             Follow this planning pipeline for every request:
@@ -29,6 +30,7 @@ public class AgentExecutionPipelineService {
             5. Avoid repeated overlapping tool calls when existing results already answer the question.
             6. Never fabricate exact places when tools did not confirm them.
             """;
+
     private static final String FINAL_ANSWER_GUIDE = """
 
             Final answer contract:
@@ -44,18 +46,19 @@ public class AgentExecutionPipelineService {
             - In 不确定项, explicitly mention what is inferred or still needs live confirmation.
             - In 实用提醒, end with one or two practical tips.
             """;
+
     private static final String FALLBACK_GUIDE = """
 
             如果工具返回 success=false，或者包含 error / fallbackSuggestion 字段，说明这一步没有拿到可靠的工具结果。
-            这种情况下不要假装得到了真实数据，要结合已有上下文、其他工具结果和常识继续给出保守建议，并明确说明哪些信息缺少工具支撑。
+            这种情况下不要假装拿到了真实数据，要结合已有上下文、其他工具结果和常识继续给出保守建议，并明确说明哪些信息缺少工具支撑。
             """;
 
     private static final String DEFAULT_INSTRUCTIONS = """
             你是 Liuliu City Walk 的智能规划 Agent。
             你的目标是根据用户的自然语言需求，尽量结合工具结果生成可执行的城市漫步建议。
             当你缺少地点、社区攻略或路线细节时，优先调用工具，不要凭空编造具体地点。
-            如果用户在问有没有类似路线参考、别人怎么走、适合海边日落/校园散步/老街拍照的路线，
-            或者明显需要参考历史公开帖子时，优先调用 search_knowledge_base 检索知识库，再结合地图工具补地点。
+            如果用户在问有没有类似路线参考、别人怎么走、适合海边日落、校园散步、老街拍照的路线，
+            或者明显需要参考公开帖子和已有路线时，优先调用 search_knowledge_base 检索知识库，再结合地图工具补地点。
             如果知识库已经命中相关帖子，最终回答里要尽量吸收这些真实内容，但不要逐字照抄原文。
             如果工具返回的结果不足，也要明确告诉用户哪些内容是推测，哪些内容来自工具。
             最终回答尽量包含：适合的区域、推荐理由、可逛兴趣点、建议路线顺序，以及一两句贴心提醒。
@@ -72,6 +75,7 @@ public class AgentExecutionPipelineService {
             - Do not ask again for a slot that is already ready in the effective conversation state unless the user explicitly changes or resets it.
             - Only treat the turn as a brand-new request when the user clearly starts over or explicitly asks to ignore earlier context.
             """;
+
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
@@ -111,7 +115,19 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
-        DeterministicPrefetchOutcome knowledgePrefetch = applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
+
+        AgentChatResponse invalidInputResponse = tryCompleteWithInvalidInputPrompt(execution, executionHandle, listener);
+        if (invalidInputResponse != null) {
+            return invalidInputResponse;
+        }
+
+        AgentChatResponse clarificationResponse = tryCompleteWithClarification(execution, executionHandle, listener);
+        if (clarificationResponse != null) {
+            return clarificationResponse;
+        }
+
+        DeterministicPrefetchOutcome knowledgePrefetch =
+                applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
         applyDeterministicPoiPrefetch(execution, knowledgePrefetch, executionHandle, listener);
         return runPlanningLoop(execution, executionHandle, listener);
     }
@@ -143,6 +159,7 @@ public class AgentExecutionPipelineService {
                 agentConversationStateService.buildPromptContext(conversationState) + buildRuntimeContext(intent),
                 FALLBACK_GUIDE
         );
+
         List<AgentStepResponse> steps = new ArrayList<>();
         steps.add(new AgentStepResponse(
                 "intent_analysis",
@@ -158,9 +175,9 @@ public class AgentExecutionPipelineService {
         ));
         if (!carryoverContext.isBlank()) {
             steps.add(new AgentStepResponse(
-                "context_carryover",
-                "recent_conversation_context",
-                normalizedPrompt,
+                    "context_carryover",
+                    "recent_conversation_context",
+                    normalizedPrompt,
                     carryoverContext
             ));
         }
@@ -170,6 +187,7 @@ public class AgentExecutionPipelineService {
                 intent.summary(),
                 buildPipelineStepOutput(intent)
         ));
+
         Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
 
         emit(listener, new AgentExecutionEvent(
@@ -224,7 +242,17 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
-        return new PreparedExecution(userId, normalizedPrompt, intent, conversationState, instructions, messages, steps, toolExecutionMemoByKey);
+
+        return new PreparedExecution(
+                userId,
+                normalizedPrompt,
+                intent,
+                conversationState,
+                instructions,
+                messages,
+                steps,
+                toolExecutionMemoByKey
+        );
     }
 
     private AgentChatResponse tryCompleteWithInvalidInputPrompt(
@@ -342,7 +370,8 @@ public class AgentExecutionPipelineService {
     ) {
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             checkCancelled(executionHandle);
-            AgentRoundService.AgentRoundOutcome roundOutcome = executePlanningRound(execution, round, executionHandle, listener);
+            AgentRoundService.AgentRoundOutcome roundOutcome =
+                    executePlanningRound(execution, round, executionHandle, listener);
             if (roundOutcome.roundType() == AgentRoundService.RoundType.TOOL_CALLING) {
                 continue;
             }
@@ -561,7 +590,11 @@ public class AgentExecutionPipelineService {
                     }
 
                     @Override
-                    public void onToolResult(LlmToolCall toolCall, AgentToolExecutionService.AgentToolExecutionOutcome outcome, int currentRoundValue) {
+                    public void onToolResult(
+                            LlmToolCall toolCall,
+                            AgentToolExecutionService.AgentToolExecutionOutcome outcome,
+                            int currentRoundValue
+                    ) {
                         emit(listener, new AgentExecutionEvent(
                                 "tool_result",
                                 toolCall.name(),
@@ -644,7 +677,16 @@ public class AgentExecutionPipelineService {
         );
         agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), answer);
         agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
-        emit(listener, new AgentExecutionEvent("complete", "agent", null, answer, round, llmClient.provider(), llmClient.model(), null));
+        emit(listener, new AgentExecutionEvent(
+                "complete",
+                "agent",
+                null,
+                answer,
+                round,
+                llmClient.provider(),
+                llmClient.model(),
+                null
+        ));
         return result;
     }
 
@@ -675,6 +717,7 @@ public class AgentExecutionPipelineService {
                 llmClient.model()
         );
     }
+
     private String normalizeAssistantAnswer(
             String content,
             AgentIntentAnalysisService.AgentIntent intent,
@@ -690,6 +733,7 @@ public class AgentExecutionPipelineService {
                 steps
         );
     }
+
     private String buildRuntimeContext(AgentIntentAnalysisService.AgentIntent intent) {
         return agentIntentAnalysisService.buildPromptContext(intent)
                 + PIPELINE_GUIDE
@@ -791,6 +835,7 @@ public class AgentExecutionPipelineService {
                 “我在杭州，想找一条适合傍晚散步和拍照的 City Walk，1 小时左右。”
                 """.trim();
     }
+
     private boolean shouldPrefetchKnowledge(AgentIntentAnalysisService.AgentIntent intent, String prompt) {
         if (intent == null) {
             return false;
@@ -835,6 +880,7 @@ public class AgentExecutionPipelineService {
         String query = String.join(" ", parts).trim();
         return query.isBlank() ? safeText(prompt, "") : query;
     }
+
     private boolean shouldPrefetchPoi(
             AgentIntentAnalysisService.AgentIntent intent,
             DeterministicPrefetchOutcome knowledgePrefetch
@@ -881,6 +927,7 @@ public class AgentExecutionPipelineService {
         String query = String.join(" ", parts).trim();
         return query.isBlank() ? safeText(prompt, "") : query;
     }
+
     private int countResults(String output) {
         if (output == null || output.isBlank()) {
             return 0;
