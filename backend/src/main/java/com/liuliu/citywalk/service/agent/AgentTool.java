@@ -1,5 +1,7 @@
 package com.liuliu.citywalk.service.agent;
 
+import org.springframework.ai.tool.ToolCallback;
+
 import java.util.Map;
 
 public interface AgentTool {
@@ -27,5 +29,9 @@ public interface AgentTool {
 
     default LlmToolDefinition toDefinition() {
         return new LlmToolDefinition(name(), description(), inputSchema());
+    }
+
+    default ToolCallback toToolCallback() {
+        return SpringAiToolCallbackAdapter.fromDefinition(toDefinition());
     }
 }

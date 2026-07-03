@@ -17,8 +17,6 @@ import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.definition.ToolDefinition;
-import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -127,7 +125,7 @@ public class SpringAiLlmClient implements LlmClient {
             if (response == null) {
                 throw new IllegalStateException("spring_ai_stream_empty");
             }
-            return toLlmResponse(response);
+            return toLlmResponse(response, true);
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
@@ -225,7 +223,7 @@ public class SpringAiLlmClient implements LlmClient {
     }
 
     private LlmResponse callSingleResponse(ChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
-        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)));
+        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)), false);
         if (listener != null && response.content() != null && !response.content().isBlank()) {
             listener.onContentDelta(response.content());
         }
@@ -263,7 +261,9 @@ public class SpringAiLlmClient implements LlmClient {
                 .model(model())
                 .internalToolExecutionEnabled(false)
                 .temperature(request.temperature() == null ? 0.2 : request.temperature());
-        List<ToolCallback> toolCallbacks = buildToolCallbacks(request.tools());
+        List<ToolCallback> toolCallbacks = request.toolCallbacks() == null || request.toolCallbacks().isEmpty()
+                ? buildToolCallbacks(request.tools())
+                : request.toolCallbacks();
         if (!toolCallbacks.isEmpty()) {
             builder.toolCallbacks(toolCallbacks);
         }
@@ -341,7 +341,7 @@ public class SpringAiLlmClient implements LlmClient {
             if (tool == null || tool.name() == null || tool.name().isBlank()) {
                 continue;
             }
-            callbacks.add(new DefinitionOnlyToolCallback(tool, json(tool.inputSchema())));
+            callbacks.add(SpringAiToolCallbackAdapter.fromDefinition(tool));
         }
         return callbacks;
     }
@@ -357,16 +357,17 @@ public class SpringAiLlmClient implements LlmClient {
         }
     }
 
-    private LlmResponse toLlmResponse(ChatResponse response) {
+    private LlmResponse toLlmResponse(ChatResponse response, boolean streaming) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return new LlmResponse("", List.of(), null);
+            return new LlmResponse("", List.of(), null, new LlmResponseMetadata(provider(), model(), streaming, null));
         }
 
         AssistantMessage output = response.getResult().getOutput();
         return new LlmResponse(
                 output.getText() == null ? "" : output.getText(),
                 extractToolCalls(output),
-                json(response)
+                json(response),
+                new LlmResponseMetadata(provider(), model(), streaming, json(response.getMetadata()))
         );
     }
 
@@ -401,7 +402,12 @@ public class SpringAiLlmClient implements LlmClient {
         if (listener != null && content != null && !content.isBlank()) {
             listener.onContentDelta(content);
         }
-        return new LlmResponse(content, List.of(), null);
+        return new LlmResponse(
+                content,
+                List.of(),
+                null,
+                new LlmResponseMetadata(provider(), model(), listener != null, null)
+        );
     }
 
     private AgentExecutionCancelledException cancelled(Throwable cause) {
@@ -444,33 +450,4 @@ public class SpringAiLlmClient implements LlmClient {
         return normalized.substring(0, maxLength) + "...";
     }
 
-    private static final class DefinitionOnlyToolCallback implements ToolCallback {
-
-        private final ToolDefinition toolDefinition;
-        private final ToolMetadata toolMetadata;
-
-        private DefinitionOnlyToolCallback(LlmToolDefinition definition, String inputSchema) {
-            this.toolDefinition = ToolDefinition.builder()
-                    .name(definition.name())
-                    .description(definition.description())
-                    .inputSchema(inputSchema == null || inputSchema.isBlank() ? "{}" : inputSchema)
-                    .build();
-            this.toolMetadata = ToolMetadata.builder().build();
-        }
-
-        @Override
-        public ToolDefinition getToolDefinition() {
-            return toolDefinition;
-        }
-
-        @Override
-        public ToolMetadata getToolMetadata() {
-            return toolMetadata;
-        }
-
-        @Override
-        public String call(String toolInput) {
-            throw new UnsupportedOperationException("tool_execution_managed_by_agent_orchestrator");
-        }
-    }
 }

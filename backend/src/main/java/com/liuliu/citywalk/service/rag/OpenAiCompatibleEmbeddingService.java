@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.config.EmbeddingProperties;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
+import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -23,10 +25,16 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
     private final EmbeddingProperties properties;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final ObjectProvider<EmbeddingModel> embeddingModelProvider;
 
-    public OpenAiCompatibleEmbeddingService(EmbeddingProperties properties, ObjectMapper objectMapper) {
+    public OpenAiCompatibleEmbeddingService(
+            EmbeddingProperties properties,
+            ObjectMapper objectMapper,
+            ObjectProvider<EmbeddingModel> embeddingModelProvider
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.embeddingModelProvider = embeddingModelProvider;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -34,11 +42,17 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
 
     @Override
     public String provider() {
+        if (resolveEmbeddingModel() != null) {
+            return "spring_ai_embedding_model";
+        }
         return "openai_compatible_embeddings";
     }
 
     @Override
     public boolean isConfigured() {
+        if (resolveEmbeddingModel() != null) {
+            return true;
+        }
         return properties.isEnabled()
                 && properties.getApiKey() != null
                 && !properties.getApiKey().isBlank()
@@ -50,6 +64,10 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
 
     @Override
     public List<Float> embed(String text) {
+        EmbeddingModel embeddingModel = resolveEmbeddingModel();
+        if (embeddingModel != null) {
+            return toFloatList(embeddingModel.embed(text == null ? "" : text.trim()));
+        }
         List<List<Float>> embeddings = embedAll(List.of(text));
         return embeddings.isEmpty() ? List.of() : embeddings.getFirst();
     }
@@ -69,6 +87,11 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
                 .toList();
         if (normalizedTexts.isEmpty()) {
             return List.of();
+        }
+
+        EmbeddingModel embeddingModel = resolveEmbeddingModel();
+        if (embeddingModel != null) {
+            return toFloatLists(embeddingModel.embed(normalizedTexts));
         }
 
         try {
@@ -135,5 +158,31 @@ public class OpenAiCompatibleEmbeddingService implements EmbeddingService {
             normalizedPath = "/" + normalizedPath;
         }
         return normalizedBase + normalizedPath;
+    }
+
+    private EmbeddingModel resolveEmbeddingModel() {
+        return embeddingModelProvider.getIfAvailable();
+    }
+
+    private List<List<Float>> toFloatLists(List<float[]> rawEmbeddings) {
+        if (rawEmbeddings == null || rawEmbeddings.isEmpty()) {
+            return List.of();
+        }
+        List<List<Float>> results = new ArrayList<>(rawEmbeddings.size());
+        for (float[] rawEmbedding : rawEmbeddings) {
+            results.add(toFloatList(rawEmbedding));
+        }
+        return results;
+    }
+
+    private List<Float> toFloatList(float[] rawEmbedding) {
+        if (rawEmbedding == null || rawEmbedding.length == 0) {
+            return List.of();
+        }
+        List<Float> result = new ArrayList<>(rawEmbedding.length);
+        for (float value : rawEmbedding) {
+            result.add(value);
+        }
+        return result;
     }
 }

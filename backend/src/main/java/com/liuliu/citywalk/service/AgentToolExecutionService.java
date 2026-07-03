@@ -6,6 +6,7 @@ import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.AgentTool;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
 import com.liuliu.citywalk.service.agent.LlmToolDefinition;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -22,6 +23,7 @@ public class AgentToolExecutionService {
     private final AgentToolFailurePayloadService agentToolFailurePayloadService;
     private final Map<String, AgentTool> toolsByName;
     private final List<LlmToolDefinition> toolDefinitions;
+    private final List<ToolCallback> toolCallbacks;
 
     public AgentToolExecutionService(
             ObjectMapper objectMapper,
@@ -34,14 +36,20 @@ public class AgentToolExecutionService {
         this.agentToolFailurePayloadService = agentToolFailurePayloadService;
         this.toolsByName = new LinkedHashMap<>();
         this.toolDefinitions = new ArrayList<>();
+        this.toolCallbacks = new ArrayList<>();
         for (AgentTool tool : agentTools) {
             this.toolsByName.put(tool.name(), tool);
             this.toolDefinitions.add(tool.toDefinition());
+            this.toolCallbacks.add(tool.toToolCallback());
         }
     }
 
     public List<LlmToolDefinition> toolDefinitions() {
         return toolDefinitions;
+    }
+
+    public List<ToolCallback> toolCallbacks() {
+        return toolCallbacks;
     }
 
     public boolean hasTool(String toolName) {

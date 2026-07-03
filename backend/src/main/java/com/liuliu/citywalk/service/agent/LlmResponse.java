@@ -5,7 +5,8 @@ import java.util.List;
 public record LlmResponse(
         String content,
         List<LlmToolCall> toolCalls,
-        String rawResponse
+        String rawResponse,
+        LlmResponseMetadata metadata
 ) {
 
     public boolean hasToolCalls() {

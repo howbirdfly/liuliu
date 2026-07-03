@@ -2,6 +2,7 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.agent.LlmMessage;
+import com.liuliu.citywalk.service.agent.LlmOptions;
 import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
 import org.springframework.stereotype.Service;
@@ -83,7 +84,8 @@ public class AgentContextWindowService {
                 request.instructions(),
                 buildOverflowMessageWindow(request.messages()),
                 request.tools(),
-                request.temperature()
+                request.toolCallbacks(),
+                request.options() == null ? LlmOptions.ofTemperature(request.temperature()) : request.options()
         );
     }
 

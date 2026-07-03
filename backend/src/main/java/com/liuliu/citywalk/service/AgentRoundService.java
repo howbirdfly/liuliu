@@ -3,6 +3,7 @@ package com.liuliu.citywalk.service;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.LlmClient;
 import com.liuliu.citywalk.service.agent.LlmMessage;
+import com.liuliu.citywalk.service.agent.LlmOptions;
 import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmResponse;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
@@ -43,7 +44,8 @@ public class AgentRoundService {
                         instructions,
                         messages,
                         agentToolExecutionService.toolDefinitions(),
-                        0.2
+                        agentToolExecutionService.toolCallbacks(),
+                        LlmOptions.ofTemperature(0.2)
                 ),
                 delta -> {
                     cancellationCheck.run();
