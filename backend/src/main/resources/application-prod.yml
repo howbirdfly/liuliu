@@ -8,6 +8,7 @@ spring:
       - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration
+      - org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration
       - org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration
   threads:
@@ -18,19 +19,11 @@ spring:
   ai:
     model:
       chat: ${SPRING_AI_CHAT_MODEL:deepseek}
-      embedding: ${SPRING_AI_EMBEDDING_MODEL:none}
     deepseek:
       api-key: ${DEEPSEEK_API_KEY:replace_with_real_key}
       base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
       chat:
         model: ${DEEPSEEK_MODEL:deepseek-chat}
-    openai:
-      api-key: ${SPRING_AI_OPENAI_API_KEY:${SPRING_AI_OPENAI_EMBEDDING_API_KEY:}}
-      base-url: ${SPRING_AI_OPENAI_BASE_URL:${SPRING_AI_OPENAI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
-      embedding:
-        api-key: ${SPRING_AI_OPENAI_EMBEDDING_API_KEY:}
-        model: ${SPRING_AI_OPENAI_EMBEDDING_MODEL:text-embedding-v4}
-        base-url: ${SPRING_AI_OPENAI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
   datasource:
     url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/liuliu_citywalk?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${MYSQL_USERNAME:liuliu}
@@ -79,6 +72,13 @@ jwt:
 
 liuliu:
   ai:
+    embedding:
+      api-key: ${LIULIU_AI_EMBEDDING_API_KEY:}
+      model: ${LIULIU_AI_EMBEDDING_MODEL:text-embedding-v4}
+      base-url: ${LIULIU_AI_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      dimensions: ${LIULIU_AI_EMBEDDING_DIMENSIONS:1024}
+      encoding-format: ${LIULIU_AI_EMBEDDING_ENCODING_FORMAT:float}
+      request-timeout-ms: ${LIULIU_AI_EMBEDDING_REQUEST_TIMEOUT_MS:5000}
     mission-verify:
       api-key: ${MISSION_VERIFY_AI_API_KEY:}
       model: ${MISSION_VERIFY_AI_MODEL:qwen-vl-plus}

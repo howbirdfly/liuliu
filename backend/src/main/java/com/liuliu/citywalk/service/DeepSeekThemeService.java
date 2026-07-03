@@ -20,7 +20,7 @@ import org.springframework.ai.chat.model.MessageAggregator;
 import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -37,23 +37,20 @@ public class DeepSeekThemeService {
             "你是一名擅长中文表达的 City Walk 策划助手。严格按照要求返回内容，不要输出多余解释。";
 
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<ChatModel> chatModelProvider;
-    private final ObjectProvider<StreamingChatModel> streamingChatModelProvider;
+    private final ChatModel chatModel;
     private final MapSearchService mapSearchService;
     private final String configuredModel;
     private final String configuredApiKey;
 
     public DeepSeekThemeService(
             ObjectMapper objectMapper,
-            ObjectProvider<ChatModel> chatModelProvider,
-            ObjectProvider<StreamingChatModel> streamingChatModelProvider,
+            @Qualifier("deepSeekChatModel") ChatModel chatModel,
             MapSearchService mapSearchService,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey
     ) {
         this.objectMapper = objectMapper;
-        this.chatModelProvider = chatModelProvider;
-        this.streamingChatModelProvider = streamingChatModelProvider;
+        this.chatModel = chatModel;
         this.mapSearchService = mapSearchService;
         this.configuredModel = configuredModel == null || configuredModel.isBlank() ? "deepseek-chat" : configuredModel.trim();
         this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
@@ -397,7 +394,7 @@ public class DeepSeekThemeService {
     private boolean isConfigured() {
         return configuredApiKey != null
                 && !configuredApiKey.isBlank()
-                && chatModelProvider.getIfAvailable() != null;
+                && chatModel != null;
     }
 
     private String callDeepSeekStreaming(String prompt, boolean expectJson, ThemeStreamListener listener) {
@@ -423,7 +420,6 @@ public class DeepSeekThemeService {
     }
 
     private ChatModel getChatModel() {
-        ChatModel chatModel = chatModelProvider.getIfAvailable();
         if (chatModel == null) {
             throw new IllegalStateException("ChatModel is not available");
         }
@@ -431,10 +427,6 @@ public class DeepSeekThemeService {
     }
 
     private StreamingChatModel getStreamingChatModel() {
-        StreamingChatModel streamingChatModel = streamingChatModelProvider.getIfAvailable();
-        if (streamingChatModel != null) {
-            return streamingChatModel;
-        }
         ChatModel chatModel = getChatModel();
         if (chatModel instanceof StreamingChatModel compatibleStreamingChatModel) {
             return compatibleStreamingChatModel;

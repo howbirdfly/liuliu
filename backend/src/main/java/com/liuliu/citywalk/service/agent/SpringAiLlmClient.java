@@ -16,7 +16,7 @@ import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -31,8 +31,7 @@ public class SpringAiLlmClient implements LlmClient {
     private static final String DEFAULT_PROVIDER = "deepseek";
 
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<ChatModel> chatModelProvider;
-    private final ObjectProvider<StreamingChatModel> streamingChatModelProvider;
+    private final ChatModel chatModel;
     private final AgentContextWindowService agentContextWindowService;
     private final String configuredProvider;
     private final String configuredModel;
@@ -41,8 +40,7 @@ public class SpringAiLlmClient implements LlmClient {
 
     public SpringAiLlmClient(
             ObjectMapper objectMapper,
-            ObjectProvider<ChatModel> chatModelProvider,
-            ObjectProvider<StreamingChatModel> streamingChatModelProvider,
+            @Qualifier("deepSeekChatModel") ChatModel chatModel,
             AgentContextWindowService agentContextWindowService,
             @Value("${spring.ai.model.chat:deepseek}") String configuredProvider,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
@@ -50,8 +48,7 @@ public class SpringAiLlmClient implements LlmClient {
             @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}") String configuredBaseUrl
     ) {
         this.objectMapper = objectMapper;
-        this.chatModelProvider = chatModelProvider;
-        this.streamingChatModelProvider = streamingChatModelProvider;
+        this.chatModel = chatModel;
         this.agentContextWindowService = agentContextWindowService;
         this.configuredProvider = configuredProvider == null || configuredProvider.isBlank()
                 ? DEFAULT_PROVIDER
@@ -215,7 +212,7 @@ public class SpringAiLlmClient implements LlmClient {
     }
 
     private ChatModel resolveChatModel() {
-        return chatModelProvider.getIfAvailable();
+        return chatModel;
     }
 
     private ChatModel requireChatModel() {
@@ -230,10 +227,6 @@ public class SpringAiLlmClient implements LlmClient {
     }
 
     private StreamingChatModel resolveStreamingChatModel(ChatModel chatModel) {
-        StreamingChatModel streamingChatModel = streamingChatModelProvider.getIfAvailable();
-        if (streamingChatModel != null) {
-            return streamingChatModel;
-        }
         if (chatModel instanceof StreamingChatModel compatibleStreamingModel) {
             return compatibleStreamingModel;
         }
