@@ -15,12 +15,12 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.openai.api.ResponseFormat;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
 import org.springframework.web.client.RestClient;
-import org.springframework.beans.factory.annotation.Value;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -33,18 +33,18 @@ public class MissionVerifyAiService {
 
     private static final Logger log = LoggerFactory.getLogger(MissionVerifyAiService.class);
     private static final String SYSTEM_PROMPT = """
-            你是遛遛小程序的任务核验助手。
-            请采用宽松、鼓励式标准，判断用户是否已经基本完成任务。
-            你只能返回 JSON，对象字段固定为：
+            你是一个负责判断 City Walk 小任务是否完成的图片核验助手。
+            你会结合任务文字、用户备注和多张图片，判断用户是否已经基本完成任务。
+            你只能返回 JSON，并且固定包含以下字段：
             - passed: boolean
             - comment: string
             - confidence: string
-            即使不通过，也要给出简短、温和的反馈。
+            comment 要简短、自然，直接说明判断依据；confidence 只能使用 low、medium、high 之一。
             """;
-    private static final String MISSING_INPUT_COMMENT = "请至少上传一张图片，再让 AI 帮你判断是否完成了任务。";
-    private static final String PASS_COMMENT = "这组记录和任务意图比较贴近，已经为你点亮任务。";
-    private static final String FAIL_COMMENT = "这组记录已经很接近了，可以再补一张更贴近任务主题的图片。";
-    private static final String FALLBACK_COMMENT = "AI 识别暂时较慢，已按宽松标准先为你记录这次打卡。";
+    private static final String MISSING_INPUT_COMMENT = "请至少提供一张图片后再让我帮你判断这次任务是否完成。";
+    private static final String PASS_COMMENT = "这组图片和任务描述基本一致，可以判定这次任务已经完成。";
+    private static final String FAIL_COMMENT = "目前图片和任务目标还不够贴合，建议再补一张更能体现任务内容的照片。";
+    private static final String FALLBACK_COMMENT = "AI 识图暂时不可用，这次先按完成处理；如果你愿意，也可以稍后再补一次更清晰的图片。";
 
     private final ObjectMapper objectMapper;
     private final String apiKey;
@@ -139,7 +139,7 @@ public class MissionVerifyAiService {
 
             visionChatModel = OpenAiChatModel.builder()
                     .openAiApi(openAiApi)
-                .defaultOptions(buildOptions())
+                    .defaultOptions(buildOptions())
                     .build();
             return visionChatModel;
         }
@@ -159,7 +159,10 @@ public class MissionVerifyAiService {
         return """
                 任务内容：%s
                 用户备注：%s
-                请结合这些图片和备注，宽松判断是否已经基本符合任务意图。
+
+                请结合这些图片判断任务是否已经完成。
+                判断时以“是否能从图片中看出与任务目标基本一致的内容”为准，不要过度苛刻。
+                只返回一个 JSON 对象。
                 """.formatted(mission, firstNonBlank(noteText, "无"));
     }
 

@@ -34,7 +34,7 @@ public class DeepSeekThemeService {
     private static final Logger log = LoggerFactory.getLogger(DeepSeekThemeService.class);
     private static final String PROVIDER = "deepseek";
     private static final String SYSTEM_PROMPT =
-            "You are a helpful Chinese City Walk planning assistant. Follow the requested output format exactly.";
+            "你是一名擅长中文表达的 City Walk 策划助手。严格按照要求返回内容，不要输出多余解释。";
 
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ChatModel> chatModelProvider;
@@ -61,207 +61,57 @@ public class DeepSeekThemeService {
 
     public ThemeResponse generateTheme(GenerateThemeRequest request) {
         ThemePayload fallback = new ThemePayload(
-                "城市灵感漫步",
-                "沿着今天的城市氛围慢慢走，去观察那些只在此刻出现的细节。",
+                "此刻城市散步提案",
+                "围绕你当前的心情与地点，安排一条适合边走边看的轻量 City Walk，让沿途的小变化自然成为这次漫步的亮点。",
                 "探索",
-                List.of("找到一个让你停下来的街景", "记录一种今天最明显的颜色或声音", "用一句话总结这段路的气质"),
+                List.of("先选一段最容易进入状态的街区慢慢开走", "沿路记录一个最打动你的街角、气味或光线", "在收尾点留出十分钟坐下来整理这次感受"),
                 "#f59e0b"
         );
-
-        String prompt = """
-                你是一个 City Walk 主题策划助手。请根据下面信息，生成一个适合散步探索的中文主题。
-                心情：%s
-                天气：%s
-                季节：%s
-                偏好：%s
-                地点：%s
-                地点环境：%s
-                漫步模式：%s
-
-                请把“地点”理解为“以这个地址为中心，向周围 3 公里范围扩展”的探索区域，
-                不要只盯着单一门牌或单个点位，要从周边街区、路口、店铺、公园、街景和生活氛围里设计主题与任务。
-
-                请严格输出 JSON，不要输出额外解释。
-                JSON 结构：
-                {
-                  "title": "不超过12个字",
-                  "description": "1段30-60字的中文描述",
-                  "category": "一个短分类词",
-                  "missions": ["任务1", "任务2", "任务3"],
-                  "vibeColor": "#RRGGBB"
-                }
-                """.formatted(
-                request.mood(),
-                request.weather(),
-                request.season(),
-                request.preference(),
-                request.locationName(),
-                request.locationContext(),
-                request.walkMode()
-        );
-        return toThemeResponse(callThemePrompt(prompt, fallback), 1L);
+        return toThemeResponse(callThemePrompt(buildGenerateThemePrompt(request), fallback), 1L);
     }
 
     public ThemeResponse streamGenerateTheme(GenerateThemeRequest request, ThemeStreamListener listener) {
         ThemePayload fallback = new ThemePayload(
-                "城市灵感漫步",
-                "沿着今天的城市氛围慢慢走，去观察那些只在此刻出现的细节。",
+                "此刻城市散步提案",
+                "围绕你当前的心情与地点，安排一条适合边走边看的轻量 City Walk，让沿途的小变化自然成为这次漫步的亮点。",
                 "探索",
-                List.of("找到一个让你停下来的街景", "记录一种今天最明显的颜色或声音", "用一句话总结这段路的气质"),
+                List.of("先选一段最容易进入状态的街区慢慢开走", "沿路记录一个最打动你的街角、气味或光线", "在收尾点留出十分钟坐下来整理这次感受"),
                 "#f59e0b"
         );
-
-        String prompt = """
-                你是一个 City Walk 主题策划助手。请根据下面信息，生成一个适合散步探索的中文主题。
-                心情：%s
-                天气：%s
-                季节：%s
-                偏好：%s
-                地点：%s
-                地点环境：%s
-                漫步模式：%s
-
-                请把“地点”理解为“以这个地址为中心，向周围 3 公里范围扩展”的探索区域，
-                不要只围绕单一地点，要面向周边街区整体氛围来设计主题与任务。
-
-                请严格输出 JSON，不要输出额外解释。
-                JSON 结构：
-                {
-                  "title": "不超过12个字",
-                  "description": "1段30-60字的中文描述",
-                  "category": "一个短分类词",
-                  "missions": ["任务1", "任务2", "任务3"],
-                  "vibeColor": "#RRGGBB"
-                }
-                """.formatted(
-                request.mood(),
-                request.weather(),
-                request.season(),
-                request.preference(),
-                request.locationName(),
-                request.locationContext(),
-                request.walkMode()
-        );
-        return toThemeResponse(callThemePromptStreaming(prompt, fallback, listener), 1L);
+        return toThemeResponse(callThemePromptStreaming(buildGenerateThemePrompt(request), fallback, listener), 1L);
     }
 
     public ThemeResponse generatePreset(GeneratePresetThemeRequest request) {
         ThemePayload fallback = new ThemePayload(
-                request.category() + "主题",
-                "从眼前的街区里选一个角度慢慢走，看见这片地方最有意思的层次。",
+                request.category() + "漫步提案",
+                "从当前位置周边挑选一片和主题气质契合、适合自然展开的步行区域，用轻松的节奏把这次主题感拉出来。",
                 request.category(),
-                List.of("找到一个最符合这个主题的细节", "记录一个容易被忽略的瞬间", "总结这里给你的第一印象"),
+                List.of("先找到最能代表这个主题的第一眼场景", "途中记录一个最符合主题的细节瞬间", "在结尾点给这次散步下一个自己的定义"),
                 "#3b82f6"
         );
-
-        String prompt = """
-                你是一个 City Walk 主题策划助手。请围绕“%s”这个方向，为地点“%s”生成一个中文漫步主题。
-                地点环境：%s
-                漫步模式：%s
-
-                请把“地点”理解为“以这个地址为中心，向周围 3 公里范围扩展”的区域，
-                让主题和任务尽量覆盖周边街区，而不是只围绕一个点。
-
-                请严格输出 JSON，不要输出额外解释。
-                JSON 结构：
-                {
-                  "title": "不超过12个字",
-                  "description": "1段30-60字的中文描述",
-                  "category": "%s",
-                  "missions": ["任务1", "任务2", "任务3"],
-                  "vibeColor": "#RRGGBB"
-                }
-                """.formatted(
-                request.category(),
-                request.locationName(),
-                request.locationContext(),
-                request.walkMode(),
-                request.category()
-        );
-        return toThemeResponse(callThemePrompt(prompt, fallback), 2L);
+        return toThemeResponse(callThemePrompt(buildPresetPrompt(request), fallback), 2L);
     }
 
     public ThemeResponse combineTheme(CombineThemeRequest request) {
         String categoriesText = String.join("、", request.categories());
         ThemePayload fallback = new ThemePayload(
-                "组合漫步",
-                "把两个观察角度叠在一起，让这次散步同时有层次感和惊喜感。",
-                "组合",
-                List.of("找到一个同时符合多个主题的细节", "记录一次意外发现", "总结这段路线的整体气质"),
+                "混搭漫游提案",
+                "把多种主题气质压进一条可执行的城市散步线里，让路线既有变化感，也能保持整体节奏和情绪一致。",
+                "混搭",
+                List.of("先找到最适合作为开场的主题入口", "中段故意安排一次气质切换，制造层次变化", "最后在最容易回味的场景收尾"),
                 "#8b5cf6"
         );
-
-        String prompt = """
-                你是一个 City Walk 主题策划助手。请把这些方向融合成一个新的中文漫步主题：%s。
-                地点：%s
-                地点环境：%s
-                漫步模式：%s
-
-                请把“地点”理解为“以这个地址为中心，向周围 3 公里范围扩展”的探索区域，
-                任务设计要适合在周边多个街区或多个观察点之间步行探索。
-
-                请严格输出 JSON，不要输出额外解释。
-                JSON 结构：
-                {
-                  "title": "不超过12个字",
-                  "description": "1段30-60字的中文描述",
-                  "category": "组合",
-                  "missions": ["任务1", "任务2", "任务3"],
-                  "vibeColor": "#RRGGBB"
-                }
-                """.formatted(
-                categoriesText,
-                request.locationName(),
-                request.locationContext(),
-                request.walkMode()
-        );
-        return toThemeResponse(callThemePrompt(prompt, fallback), 3L);
+        return toThemeResponse(callThemePrompt(buildCombinePrompt(request, categoriesText), fallback), 3L);
     }
 
     public WalkRecordCardTextResponse generateWalkRecordCardText(GenerateWalkRecordCardRequest request) {
         WalkRecordCardPayload fallback = new WalkRecordCardPayload(
-                "今天先把这一刻留给自己。",
-                "小狸66陪你在%s慢慢晃悠，把路上的风、树影和烟火气都轻轻记在了今天的散步里。"
+                "今天这段路，刚好把心情放慢了一点。",
+                "小六六在%s慢慢走着，把一路上的风、光影和细碎感受都收进了今天这张记录卡里。这不是刻意完成任务的一次打卡，更像是城市在某个瞬间给出的温柔回应。"
                         .formatted(request.locationName())
         );
 
-        String prompt = """
-                你是城市漫步吉祥物“小狸66”，正在帮用户写一张陪伴记录卡里的“66 的日记”。
-                请根据下面信息，输出适合放进卡片里的中文 JSON：
-                主题：%s
-                主题描述：%s
-                漫步任务：%s
-                地点：%s
-                地点环境：%s
-                用户备注：%s
-                是否上传照片：%s
-
-                写作要求：
-                1. 必须使用“小狸66”的第一视角，像它一路陪着用户散步。
-                2. story 只能把“用户备注”当作参考线索，不能直接照抄，不要复述成“我听到”“我写下”这种句式。
-                3. 文风要温柔、灵动、天真一点，像小狸在认真碎碎念，可以自然加入少量小动物语气，但不要每句都堆。
-                4. 不要编造夸张剧情，不要出现“AI”“模型”“生成”等词。
-                5. shortNote 写成 1 句短短的话，10 到 24 个中文字符。
-                6. story 写成 1 段 70 到 120 个中文字符，适合放进卡片“66 的记录”区域。
-                7. 优先结合主题、任务、地点环境和用户备注；如果没有备注，也要自然成文。
-                8. 严格输出 JSON，不要输出额外解释。
-
-                JSON 结构：
-                {
-                  "shortNote": "一句短句",
-                  "story": "一段小狸66视角的日记"
-                }
-                """.formatted(
-                request.themeTitle(),
-                safeText(request.themeDescription(), "今天的城市漫步"),
-                request.missionText(),
-                request.locationName(),
-                request.locationContext(),
-                safeText(request.noteText(), "无"),
-                request.hasPhoto() ? "是" : "否"
-        );
-
-        WalkRecordCardPayload payload = callWalkRecordCardPrompt(prompt, fallback);
+        WalkRecordCardPayload payload = callWalkRecordCardPrompt(buildWalkRecordCardPrompt(request), fallback);
         return new WalkRecordCardTextResponse(
                 payload.shortNote(),
                 payload.story(),
@@ -270,31 +120,34 @@ public class DeepSeekThemeService {
     }
 
     public LocationContextResponse locationContext(Double lat, Double lng) {
-        String fallback = "城市街区与日常生活场景混合环境";
+        String fallback = "这里像是一个适合边走边停的城市片区，周边既有可观察的街景，也有适合临时转向的小去处。";
         List<PoiResponse> nearbyPois = mapSearchService.nearbyPois(lat, lng);
         String poiSummary = buildPoiSummary(nearbyPois);
         String placeName = pickPlaceName(nearbyPois, null);
         String prompt = """
-                你是一个地点环境描述助手。请根据经纬度推测这个地点适合 City Walk 的环境氛围。
+                请根据坐标和周边 POI，总结这片区域适合做 City Walk 的环境气质。
                 纬度：%s
                 经度：%s
-                周边可逛点摘要：%s
+                周边 POI 摘要：%s
 
-                请不要只描述单一地点，而是把它理解成“以该位置为中心、周边 3 公里范围”的城市环境。
-                只输出一行中文短句，15 到 30 个字，不要解释。
+                要求：
+                1. 不要只描述单个点位，要概括成一个适合步行展开的片区印象。
+                2. 输出 15 到 30 个中文字符的一小段描述。
+                3. 不要使用列表，不要解释。
                 """.formatted(lat, lng, poiSummary);
         return new LocationContextResponse(callTextPrompt(prompt, fallback), placeName);
     }
 
     public LocationContextResponse searchContext(String query) {
-        String fallback = query + "附近以城市街区和生活场景为主";
+        String fallback = query + "周边像是一个适合随走随看的城市片区。";
         String prompt = """
-                你是一个地点环境描述助手。请根据地点关键词生成一句适合 City Walk 的中文环境描述。
-                地点关键词：%s
+                请根据地点名称，生成一句适合 City Walk 使用的区域氛围描述。
+                地点：%s
 
-                请把这个地点理解成“以该地址为中心、周边 3 公里范围”的区域，
-                描述这片区域整体的街区氛围与漫步感受，不要只写单个建筑。
-                只输出一行中文短句，15 到 30 个字，不要解释。
+                要求：
+                1. 把它描述成一个适合步行探索的片区，而不是只解释这个地点本身。
+                2. 输出 15 到 30 个中文字符。
+                3. 不要使用列表，不要补充额外说明。
                 """.formatted(query);
         return new LocationContextResponse(callTextPrompt(prompt, fallback), safeText(query, null));
     }
@@ -307,6 +160,138 @@ public class DeepSeekThemeService {
         return configuredModel;
     }
 
+    private String buildGenerateThemePrompt(GenerateThemeRequest request) {
+        return """
+                请生成一个 City Walk 主题卡片，结合用户心情、天气、季节、偏好和地点信息，产出一个能直接拿去展示与执行的主题方案。
+
+                用户心情：%s
+                当前天气：%s
+                当前季节：%s
+                用户偏好：%s
+                地点名称：%s
+                地点环境：%s
+                漫步模式：%s
+
+                规划要求：
+                1. 主题要围绕一个可步行展开的片区来设计，不要只围着单个点位打转。
+                2. 默认按步行可承受的 2 到 3 公里范围组织体验。
+                3. missions 必须是 3 条简短、可执行的小任务。
+                4. description 写成一段有画面感但不空泛的中文介绍。
+                5. 只返回一个 JSON 对象。
+
+                JSON 结构：
+                {
+                  "title": "不超过 12 个字",
+                  "description": "30 到 60 字",
+                  "category": "一句话类别",
+                  "missions": ["任务1", "任务2", "任务3"],
+                  "vibeColor": "#RRGGBB"
+                }
+                """.formatted(
+                request.mood(),
+                request.weather(),
+                request.season(),
+                request.preference(),
+                request.locationName(),
+                request.locationContext(),
+                request.walkMode()
+        );
+    }
+
+    private String buildPresetPrompt(GeneratePresetThemeRequest request) {
+        return """
+                请围绕主题“%s”，结合地点“%s”和环境“%s”，生成一个可执行的 City Walk 主题卡片。
+                漫步模式：%s
+
+                规划要求：
+                1. 主题要落在一个适合步行展开的片区，不要只围绕单个店或单个景点。
+                2. 默认按步行可承受的 2 到 3 公里范围组织体验。
+                3. missions 必须是 3 条简短、可执行的小任务。
+                4. category 保持为“%s”或与其非常接近的表达。
+                5. 只返回一个 JSON 对象。
+
+                JSON 结构：
+                {
+                  "title": "不超过 12 个字",
+                  "description": "30 到 60 字",
+                  "category": "%s",
+                  "missions": ["任务1", "任务2", "任务3"],
+                  "vibeColor": "#RRGGBB"
+                }
+                """.formatted(
+                request.category(),
+                request.locationName(),
+                request.locationContext(),
+                request.walkMode(),
+                request.category(),
+                request.category()
+        );
+    }
+
+    private String buildCombinePrompt(CombineThemeRequest request, String categoriesText) {
+        return """
+                请把这些 City Walk 主题融合成一个新的漫步卡片：%s
+                地点名称：%s
+                地点环境：%s
+                漫步模式：%s
+
+                规划要求：
+                1. 组合后的主题要能在同一片步行区域自然展开。
+                2. 默认按步行可承受的 2 到 3 公里范围组织体验。
+                3. 不要机械拼接关键词，要让整体气质统一、可执行。
+                4. missions 必须是 3 条简短、可执行的小任务。
+                5. 只返回一个 JSON 对象。
+
+                JSON 结构：
+                {
+                  "title": "不超过 12 个字",
+                  "description": "30 到 60 字",
+                  "category": "融合后的类别",
+                  "missions": ["任务1", "任务2", "任务3"],
+                  "vibeColor": "#RRGGBB"
+                }
+                """.formatted(
+                categoriesText,
+                request.locationName(),
+                request.locationContext(),
+                request.walkMode()
+        );
+    }
+
+    private String buildWalkRecordCardPrompt(GenerateWalkRecordCardRequest request) {
+        return """
+                请以“小六六”的第一人称视角，为一张 City Walk 记录卡生成文案。
+                主题标题：%s
+                主题描述：%s
+                任务内容：%s
+                地点名称：%s
+                地点环境：%s
+                用户备注：%s
+                是否有照片：%s
+
+                写作要求：
+                1. shortNote 写成一句可直接放在卡片上的短句，10 到 24 个中文字符。
+                2. story 写成一段 70 到 120 字的中文小记录，要像真实散步后的感受，不要像 AI 说明书。
+                3. 语气要自然、轻松、有一点画面感，不要每句都很满。
+                4. 如果用户备注为空，也要根据主题和地点自然补全情绪。
+                5. 只返回一个 JSON 对象。
+
+                JSON 结构：
+                {
+                  "shortNote": "一句短句",
+                  "story": "一段第一人称记录"
+                }
+                """.formatted(
+                request.themeTitle(),
+                safeText(request.themeDescription(), "一次围绕城市步行展开的小主题"),
+                request.missionText(),
+                request.locationName(),
+                request.locationContext(),
+                safeText(request.noteText(), "无"),
+                request.hasPhoto() ? "有" : "没有"
+        );
+    }
+
     private String buildPoiSummary(List<PoiResponse> nearbyPois) {
         List<String> poiTitles = nearbyPois.stream()
                 .map(PoiResponse::title)
@@ -314,7 +299,7 @@ public class DeepSeekThemeService {
                 .limit(6)
                 .collect(Collectors.toList());
         if (poiTitles.isEmpty()) {
-            return "暂无明显 POI，可按普通城市街区理解";
+            return "暂无明确 POI，可按普通城市街区理解。";
         }
         return String.join("、", poiTitles);
     }
@@ -459,7 +444,7 @@ public class DeepSeekThemeService {
 
     private Prompt buildPrompt(String prompt, boolean expectJson) {
         String normalizedPrompt = expectJson
-                ? prompt + "\n\nReturn only one JSON object. Do not include markdown code fences."
+                ? prompt + "\n\n只返回一个 JSON 对象，不要使用 markdown 代码块。"
                 : prompt;
         return new Prompt(
                 List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(normalizedPrompt)),
@@ -545,7 +530,7 @@ public class DeepSeekThemeService {
         try {
             listener.onContentDelta(objectMapper.writeValueAsString(fallback));
         } catch (Exception ignored) {
-            listener.onContentDelta("{\"title\":\"城市灵感漫步\"}");
+            listener.onContentDelta("{\"title\":\"城市漫步提案\"}");
         }
     }
 

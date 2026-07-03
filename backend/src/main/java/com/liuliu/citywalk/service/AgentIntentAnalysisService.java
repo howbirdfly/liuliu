@@ -17,41 +17,42 @@ import java.util.regex.Pattern;
 public class AgentIntentAnalysisService {
 
     private static final List<String> CITY_NAMES = List.of(
-            "上海", "北京", "广州", "深圳", "杭州", "苏州", "南京", "武汉", "成都", "重庆",
-            "西安", "长沙", "青岛", "厦门", "福州", "天津", "珠海", "佛山", "东莞", "宁波",
-            "无锡", "昆明", "大连", "郑州", "济南", "合肥", "南昌", "南宁", "贵阳", "海口",
-            "三亚", "洛阳", "开封", "扬州", "绍兴", "沈阳", "长春", "哈尔滨", "太原", "兰州", "中山"
+            "上海", "北京", "广州", "深圳", "杭州", "成都", "重庆", "武汉", "南京", "苏州",
+            "西安", "长沙", "青岛", "厦门", "天津", "昆明", "珠海", "佛山", "东莞", "宁波",
+            "无锡", "福州", "济南", "郑州", "大连", "沈阳", "哈尔滨", "长春", "合肥", "南昌",
+            "贵阳", "南宁", "兰州", "呼和浩特", "乌鲁木齐", "拉萨", "海口", "三亚", "太原", "石家庄", "唐山"
     );
 
     private static final List<String> STYLE_KEYWORDS = List.of(
-            "拍照", "出片", "夜景", "日落", "海边", "老街", "街区", "校园", "自然", "公园",
-            "咖啡", "书店", "文艺", "安静", "历史", "建筑", "美食", "亲子", "动物", "市集"
+            "拍照", "出片", "夜景", "老街", "文艺", "安静", "自然", "公园", "江边", "河边",
+            "海边", "校园", "历史", "建筑", "美食", "咖啡", "逛展", "市集", "书店", "日落",
+            "复古", "潮流", "松弛", "治愈"
     );
 
     private static final List<String> OBJECTIVE_KEYWORDS = List.of(
-            "散步", "拍照", "看展", "觅食", "打卡", "放空", "约会", "遛娃", "观察", "记录"
+            "散步", "拍照", "放空", "美食", "咖啡", "约会", "探店", "逛展", "打卡", "记录", "骑行"
     );
 
     private static final List<String> AVOID_KEYWORDS = List.of(
-            "人多", "排队", "商业化", "暴走", "爬坡", "太晒", "室内", "吵", "绕路"
+            "人多", "排队", "商业化", "太晒", "暴走", "上坡", "楼梯", "拥挤", "网红店"
     );
 
     private static final List<String> REQUEST_KEYWORDS = List.of(
-            "推荐", "规划", "路线", "route", "city walk", "citywalk", "主题", "散步",
-            "walk", "地点", "去哪", "怎么玩", "附近", "适合", "参考", "攻略", "灵感",
-            "拍照", "夜景", "老街", "咖啡", "书店", "公园", "帮我", "想找", "想去"
+            "规划", "路线", "路书", "线路", "安排", "推荐", "推荐下", "怎么走", "怎么玩", "去哪",
+            "附近逛", "附近走走", "city walk", "citywalk", "walk", "route"
     );
 
     private static final List<String> ACKNOWLEDGEMENT_ONLY_TEXTS = List.of(
-            "好", "好的", "行", "可以", "继续", "嗯", "嗯嗯", "收到", "明白", "知道了",
+            "好", "好的", "行", "可以", "嗯", "恩", "收到", "明白", "知道了", "了解",
             "ok", "okay", "yes", "yep"
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile(
-            "(半个小时|半小时|半天|一天|两天|一小时|一个小时|两小时|两个小时|三小时|三个小时|四小时|四个小时|五小时|五个小时|六小时|六个小时|一个晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:个?小时|h|H))"
+            "(半小时|一个半小时|两小时|三小时|四小时|五小时|一小时|半天|一整天|一晚上|一下午|一上午|周末半天|\\d+(?:\\.\\d+)?\\s*(?:个?小时|小时|h|H))"
     );
+
     private static final Pattern AREA_PATTERN = Pattern.compile(
-            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|公园|商圈|广场|码头|滨江|湖|河|山|巷|里|桥|站|校区|校园|园区|古镇|片区))"
+            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|巷|里|镇|村|公园|商圈|广场|码头|古镇|江边|河边|海边|山|湖|湾|站|校区|校园|园区|片区))"
     );
 
     private final ObjectMapper objectMapper;
@@ -62,6 +63,8 @@ public class AgentIntentAnalysisService {
 
     public AgentIntent analyze(String prompt) {
         String normalizedPrompt = normalize(prompt);
+        String lowerPrompt = normalizedPrompt.toLowerCase(Locale.ROOT);
+
         List<String> cities = extractCities(normalizedPrompt);
         List<String> areas = extractAreas(normalizedPrompt);
         List<String> styles = extractKeywords(normalizedPrompt, STYLE_KEYWORDS, 6);
@@ -71,14 +74,26 @@ public class AgentIntentAnalysisService {
         String timePreference = extractTimePreference(normalizedPrompt);
         String mobilityPreference = extractMobilityPreference(normalizedPrompt);
 
-        boolean useCurrentLocation = containsAny(normalizedPrompt, "当前定位", "当前位置", "我附近", "离我近", "周边", "附近");
-        boolean needsKnowledgeReference = containsAny(normalizedPrompt, "类似", "参考", "别人", "攻略", "社区", "帖子", "同款");
-        boolean needsThemeGeneration = containsAny(normalizedPrompt, "主题", "风格", "玩法", "灵感");
-        boolean needsRoutePlanning = containsAny(normalizedPrompt, "路线", "怎么走", "规划", "串起来", "先去", "安排", "city walk", "citywalk");
+        boolean useCurrentLocation = containsAny(
+                normalizedPrompt,
+                "当前位置", "当前定位", "我附近", "离我近", "附近", "身边", "从这里出发", "就近"
+        );
+        boolean needsKnowledgeReference = containsAny(
+                normalizedPrompt,
+                "历史", "故事", "背景", "文化", "介绍", "典故", "为什么", "攻略"
+        );
+        boolean needsThemeGeneration = containsAny(
+                normalizedPrompt,
+                "主题", "玩法", "灵感", "氛围", "vibe"
+        );
+        boolean needsRoutePlanning = containsAny(
+                lowerPrompt,
+                "路线", "怎么走", "规划", "安排", "线路", "city walk", "citywalk", "walk", "route", "去哪", "逛什么"
+        );
         boolean needsPoiSearch = useCurrentLocation
                 || needsRoutePlanning
-                || containsAny(normalizedPrompt, "地点", "店", "街区", "公园", "附近有什么", "去哪");
-        boolean requestLike = containsAny(normalizedPrompt, REQUEST_KEYWORDS.toArray(String[]::new));
+                || containsAny(normalizedPrompt, "打卡", "附近", "咖啡", "公园", "书店", "店", "去哪里");
+        boolean requestLike = containsAny(lowerPrompt, REQUEST_KEYWORDS.toArray(String[]::new));
         boolean acknowledgementOnly = isAcknowledgementOnly(
                 normalizedPrompt,
                 cities,
@@ -120,17 +135,17 @@ public class AgentIntentAnalysisService {
     }
 
     public String buildPromptContext(AgentIntent intent) {
-        if (intent == null || intent.isEmpty()) {
+        if (intent == null || !intent.hasMeaningfulPlanningSignal()) {
             return "";
         }
 
         List<String> lines = new ArrayList<>();
-        lines.add("以下是本轮用户需求的结构化摘要，如与长期记忆冲突，以本轮需求为准：");
+        lines.add("以下是根据用户输入提炼出的意图摘要。若与用户最新表达冲突，以最新表达为准。");
         if (!intent.cities().isEmpty()) {
             lines.add("- 城市: " + String.join("、", intent.cities()));
         }
         if (!intent.areas().isEmpty()) {
-            lines.add("- 区域/地标: " + String.join("、", intent.areas()));
+            lines.add("- 区域/地点: " + String.join("、", intent.areas()));
         }
         if (!intent.styles().isEmpty()) {
             lines.add("- 风格偏好: " + String.join("、", intent.styles()));
@@ -139,7 +154,7 @@ public class AgentIntentAnalysisService {
             lines.add("- 主要目标: " + String.join("、", intent.objectives()));
         }
         if (!intent.duration().isBlank()) {
-            lines.add("- 期望时长: " + intent.duration());
+            lines.add("- 预计时长: " + intent.duration());
         }
         if (!intent.timePreference().isBlank()) {
             lines.add("- 时间偏好: " + intent.timePreference());
@@ -148,13 +163,13 @@ public class AgentIntentAnalysisService {
             lines.add("- 行走强度: " + intent.mobilityPreference());
         }
         if (!intent.avoidTags().isEmpty()) {
-            lines.add("- 避免内容: " + String.join("、", intent.avoidTags()));
+            lines.add("- 希望避开: " + String.join("、", intent.avoidTags()));
         }
-        lines.add("- 是否优先使用当前定位: " + (intent.useCurrentLocation() ? "是" : "否"));
-        lines.add("- 是否需要真实案例参考: " + (intent.needsKnowledgeReference() ? "是" : "否"));
-        lines.add("- 是否需要地点检索: " + (intent.needsPoiSearch() ? "是" : "否"));
-        lines.add("- 是否需要路线规划: " + (intent.needsRoutePlanning() ? "是" : "否"));
-        lines.add("- 是否需要主题生成: " + (intent.needsThemeGeneration() ? "是" : "否"));
+        lines.add("- 是否使用当前位置: " + yesNo(intent.useCurrentLocation()));
+        lines.add("- 是否需要背景信息: " + yesNo(intent.needsKnowledgeReference()));
+        lines.add("- 是否需要补充 POI: " + yesNo(intent.needsPoiSearch()));
+        lines.add("- 是否需要路线规划: " + yesNo(intent.needsRoutePlanning()));
+        lines.add("- 是否需要主题生成: " + yesNo(intent.needsThemeGeneration()));
         if (!intent.missingSlots().isEmpty()) {
             lines.add("- 当前缺失信息: " + String.join("、", intent.missingSlots()));
         }
@@ -258,7 +273,7 @@ public class AgentIntentAnalysisService {
         if (current == null) {
             return carryover == null ? emptyIntent() : carryover;
         }
-        if (carryover == null || carryover.isEmpty()) {
+        if (carryover == null || !carryover.hasMeaningfulPlanningSignal()) {
             return current;
         }
 
@@ -270,7 +285,8 @@ public class AgentIntentAnalysisService {
         String mergedTimePreference = current.timePreference().isBlank() ? carryover.timePreference() : current.timePreference();
         String mergedMobilityPreference = current.mobilityPreference().isBlank() ? carryover.mobilityPreference() : current.mobilityPreference();
         List<String> mergedAvoidTags = current.avoidTags().isEmpty() ? carryover.avoidTags() : current.avoidTags();
-        boolean mergedUseCurrentLocation = current.useCurrentLocation() || (current.missingLocationContext() && carryover.useCurrentLocation());
+        boolean mergedUseCurrentLocation = current.useCurrentLocation()
+                || (current.missingLocationContext() && carryover.useCurrentLocation());
 
         return new AgentIntent(
                 current.prompt(),
@@ -380,7 +396,7 @@ public class AgentIntentAnalysisService {
         List<String> hits = new ArrayList<>();
         while (matcher.find()) {
             String value = normalizeAreaCandidate(matcher.group(1));
-            if (value.length() < 2 || value.length() > 20) {
+            if (value.length() < 2 || value.length() > 20 || isLikelyNoiseArea(value)) {
                 continue;
             }
             hits.add(value);
@@ -401,8 +417,8 @@ public class AgentIntentAnalysisService {
     private List<String> extractAvoidTags(String text) {
         List<String> hits = new ArrayList<>();
         for (String keyword : AVOID_KEYWORDS) {
-            if ((text.contains("不要" + keyword) || text.contains("不想" + keyword) || text.contains("避开" + keyword))
-                    || (text.contains("不要") && text.contains(keyword))
+            if ((text.contains("不要" + keyword) || text.contains("别" + keyword) || text.contains("避免" + keyword))
+                    || (text.contains("不想") && text.contains(keyword))
                     || (text.contains("避开") && text.contains(keyword))) {
                 hits.add(keyword);
             }
@@ -416,13 +432,13 @@ public class AgentIntentAnalysisService {
     }
 
     private String extractTimePreference(String text) {
-        if (containsAny(text, "早上", "清晨", "上午")) {
-            return "上午";
+        if (containsAny(text, "早上", "上午", "清晨")) {
+            return "早上";
         }
-        if (containsAny(text, "中午", "午后", "下午")) {
+        if (containsAny(text, "下午", "午后")) {
             return "下午";
         }
-        if (containsAny(text, "傍晚", "黄昏", "日落")) {
+        if (containsAny(text, "傍晚", "黄昏", "日落前")) {
             return "傍晚";
         }
         if (containsAny(text, "晚上", "夜景", "夜里")) {
@@ -436,11 +452,11 @@ public class AgentIntentAnalysisService {
 
     private String extractMobilityPreference(String text) {
         String lower = text.toLowerCase(Locale.ROOT);
-        if (containsAny(text, "轻松", "慢慢走", "不想走太多", "低体力") || lower.contains("easy")) {
+        if (containsAny(text, "轻松", "慢慢走", "不要太累", "少走点", "休闲") || lower.contains("easy")) {
             return "轻松";
         }
-        if (containsAny(text, "暴走", "能走", "多逛", "高强度")) {
-            return "高强度";
+        if (containsAny(text, "暴走", "多走点", "走远一点", "强度高", "能走") || lower.contains("intense")) {
+            return "强度高";
         }
         return "";
     }
@@ -458,7 +474,7 @@ public class AgentIntentAnalysisService {
             missing.add("城市或区域");
         }
         if (styles.isEmpty() && objectives.isEmpty()) {
-            missing.add("主题风格或目标");
+            missing.add("风格或目标");
         }
         if (duration.isBlank()) {
             missing.add("预计时长");
@@ -522,9 +538,8 @@ public class AgentIntentAnalysisService {
                 return true;
             }
         }
-        return normalized.matches("^[\\p{IsHan}a-zA-Z0-9\\s!！,.，~～?？]+$")
-                && normalized.length() <= 6
-                && !containsAny(normalized, REQUEST_KEYWORDS.toArray(String[]::new));
+        return normalized.length() <= 6
+                && normalized.matches("^[\\p{IsHan}a-zA-Z0-9\\s!,.?~，。？！]+$");
     }
 
     private List<String> trimList(List<String> values, int limit) {
@@ -550,8 +565,18 @@ public class AgentIntentAnalysisService {
 
     private String normalizeAreaCandidate(String text) {
         String normalized = normalize(text);
-        normalized = normalized.replaceFirst("^(?:我想在|想在|我在|在|去|到)", "");
+        normalized = normalized.replaceFirst("^(?:在|去|想去|想到|想在|从|到)", "");
         return normalize(normalized);
+    }
+
+    private boolean isLikelyNoiseArea(String value) {
+        return containsAny(value, "当前位置", "当前定位", "City Walk", "citywalk", "walk")
+                || value.equals("附近")
+                || value.equals("这里");
+    }
+
+    private String yesNo(boolean value) {
+        return value ? "是" : "否";
     }
 
     public record AgentIntent(
@@ -574,7 +599,7 @@ public class AgentIntentAnalysisService {
             List<String> missingSlots
     ) {
         public boolean isEmpty() {
-            return prompt == null || prompt.isBlank();
+            return (prompt == null || prompt.isBlank()) && !hasMeaningfulPlanningSignal();
         }
 
         public boolean missingLocationContext() {
@@ -643,13 +668,13 @@ public class AgentIntentAnalysisService {
             if (!objectives.isEmpty()) {
                 parts.add("目标=" + String.join("、", objectives));
             }
-            if (!duration.isBlank()) {
+            if (duration != null && !duration.isBlank()) {
                 parts.add("时长=" + duration);
             }
-            if (!timePreference.isBlank()) {
+            if (timePreference != null && !timePreference.isBlank()) {
                 parts.add("时间=" + timePreference);
             }
-            if (!mobilityPreference.isBlank()) {
+            if (mobilityPreference != null && !mobilityPreference.isBlank()) {
                 parts.add("强度=" + mobilityPreference);
             }
             if (!avoidTags.isEmpty()) {
