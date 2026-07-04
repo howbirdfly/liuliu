@@ -2,11 +2,10 @@ package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.LlmMessage;
-import com.liuliu.citywalk.service.agent.LlmOptions;
-import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmResponse;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -39,13 +38,12 @@ public class AgentRoundService {
             ToolEventListener toolEventListener,
             Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
     ) {
+        List<ToolCallback> toolCallbacks = agentToolExecutionService.toolCallbacks();
         LlmResponse response = llmClient.createStreamingResponse(
-                new LlmRequest(
-                        instructions,
-                        messages,
-                        agentToolExecutionService.toolCallbacks(),
-                        LlmOptions.ofTemperature(0.2)
-                ),
+                instructions,
+                messages,
+                toolCallbacks,
+                0.2,
                 delta -> {
                     cancellationCheck.run();
                     deltaListener.onDelta(delta);

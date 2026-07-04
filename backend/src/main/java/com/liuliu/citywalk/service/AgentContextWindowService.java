@@ -2,8 +2,6 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.agent.LlmMessage;
-import com.liuliu.citywalk.service.agent.LlmOptions;
-import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
 import org.springframework.stereotype.Service;
 
@@ -76,16 +74,11 @@ public class AgentContextWindowService {
         return result;
     }
 
-    public LlmRequest compactForContextOverflow(LlmRequest request) {
-        if (request == null) {
-            return null;
+    public List<LlmMessage> compactMessagesForContextOverflow(List<LlmMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
         }
-        return new LlmRequest(
-                request.instructions(),
-                buildOverflowMessageWindow(request.messages()),
-                request.toolCallbacks(),
-                request.options() == null ? LlmOptions.ofTemperature(request.temperature()) : request.options()
-        );
+        return buildOverflowMessageWindow(messages);
     }
 
     public String compactToolOutputForModel(String output) {

@@ -69,23 +69,36 @@ public class SpringAiLlmClient {
         return configuredModel;
     }
 
-    public LlmResponse createResponse(LlmRequest request) {
+    public LlmResponse createResponse(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature
+    ) {
         ChatModel chatModel = requireChatModel();
 
         try {
-            return callSingleResponse(chatModel, request, null);
+            return callSingleResponse(chatModel, instructions, messages, toolCallbacks, temperature, null);
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
-            LlmResponse compactedRetry = tryContextOverflowRetry(chatModel, request, null, error);
+            LlmResponse compactedRetry = tryContextOverflowRetry(
+                    chatModel,
+                    instructions,
+                    messages,
+                    toolCallbacks,
+                    temperature,
+                    null,
+                    error
+            );
             if (compactedRetry != null) {
                 return compactedRetry;
             }
             log.warn(
                     "Spring AI agent call failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(request),
+                    summarizeRequest(messages, toolCallbacks),
                     error.getClass().getName(),
                     error.getMessage(),
                     error
@@ -94,14 +107,20 @@ public class SpringAiLlmClient {
         }
     }
 
-    public LlmResponse createStreamingResponse(LlmRequest request, Consumer<String> listener) {
+    public LlmResponse createStreamingResponse(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
+            Consumer<String> listener
+    ) {
         ChatModel chatModel = requireChatModel();
         StreamingChatModel streamingChatModel = requireStreamingChatModel(chatModel);
 
         try {
             AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
             new MessageAggregator()
-                    .aggregate(streamingChatModel.stream(toPrompt(request)), aggregatedResponse::set)
+                    .aggregate(streamingChatModel.stream(toPrompt(instructions, messages, toolCallbacks, temperature)), aggregatedResponse::set)
                     .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
                     .blockLast();
 
@@ -115,13 +134,21 @@ public class SpringAiLlmClient {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
-            LlmResponse compactedRetry = tryContextOverflowRetry(chatModel, request, listener, error);
+            LlmResponse compactedRetry = tryContextOverflowRetry(
+                    chatModel,
+                    instructions,
+                    messages,
+                    toolCallbacks,
+                    temperature,
+                    listener,
+                    error
+            );
             if (compactedRetry != null) {
                 return compactedRetry;
             }
             log.warn(
                     "Spring AI agent streaming call failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(request),
+                    summarizeRequest(messages, toolCallbacks),
                     error.getClass().getName(),
                     error.getMessage(),
                     error
@@ -132,7 +159,10 @@ public class SpringAiLlmClient {
 
     private LlmResponse tryContextOverflowRetry(
             ChatModel chatModel,
-            LlmRequest request,
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
             Consumer<String> listener,
             Exception error
     ) {
@@ -140,18 +170,18 @@ public class SpringAiLlmClient {
             return null;
         }
 
-        LlmRequest compactedRequest = agentContextWindowService.compactForContextOverflow(request);
-        if (compactedRequest == null || compactedRequest.messages() == null || compactedRequest.messages().isEmpty()) {
+        List<LlmMessage> compactedMessages = agentContextWindowService.compactMessagesForContextOverflow(messages);
+        if (compactedMessages == null || compactedMessages.isEmpty()) {
             return null;
         }
 
         log.info(
                 "Spring AI request exceeded context window. Retrying with compacted context. originalSummary={}, compactedMessages={}",
-                summarizeRequest(request),
-                compactedRequest.messages().size()
+                summarizeRequest(messages, toolCallbacks),
+                compactedMessages.size()
         );
         try {
-            return callSingleResponse(chatModel, compactedRequest, listener);
+            return callSingleResponse(chatModel, instructions, compactedMessages, toolCallbacks, temperature, listener);
         } catch (Exception retryError) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
@@ -159,7 +189,7 @@ public class SpringAiLlmClient {
             }
             log.warn(
                     "Spring AI compacted-context retry failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(compactedRequest),
+                    summarizeRequest(compactedMessages, toolCallbacks),
                     retryError.getClass().getName(),
                     retryError.getMessage(),
                     retryError
@@ -191,8 +221,15 @@ public class SpringAiLlmClient {
         return false;
     }
 
-    private LlmResponse callSingleResponse(ChatModel chatModel, LlmRequest request, Consumer<String> listener) {
-        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)), false);
+    private LlmResponse callSingleResponse(
+            ChatModel chatModel,
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
+            Consumer<String> listener
+    ) {
+        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(instructions, messages, toolCallbacks, temperature)), false);
         if (listener != null && response.content() != null && !response.content().isBlank()) {
             listener.accept(response.content());
         }
@@ -233,32 +270,37 @@ public class SpringAiLlmClient {
         return streamingChatModel;
     }
 
-    private Prompt toPrompt(LlmRequest request) {
-        return new Prompt(buildMessages(request), buildOptions(request));
+    private Prompt toPrompt(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature
+    ) {
+        return new Prompt(buildMessages(instructions, messages), buildOptions(toolCallbacks, temperature));
     }
 
-    private ToolCallingChatOptions buildOptions(LlmRequest request) {
+    private ToolCallingChatOptions buildOptions(List<ToolCallback> toolCallbacks, Double temperature) {
         ToolCallingChatOptions.Builder builder = ToolCallingChatOptions.builder()
                 .model(model())
                 .internalToolExecutionEnabled(false)
-                .temperature(request.temperature() == null ? 0.2 : request.temperature());
-        List<ToolCallback> toolCallbacks = request.toolCallbacks() == null ? List.of() : request.toolCallbacks();
-        if (!toolCallbacks.isEmpty()) {
-            builder.toolCallbacks(toolCallbacks);
+                .temperature(temperature == null ? 0.2 : temperature);
+        List<ToolCallback> normalizedToolCallbacks = toolCallbacks == null ? List.of() : toolCallbacks;
+        if (!normalizedToolCallbacks.isEmpty()) {
+            builder.toolCallbacks(normalizedToolCallbacks);
         }
         return builder.build();
     }
 
-    private List<Message> buildMessages(LlmRequest request) {
+    private List<Message> buildMessages(String instructions, List<LlmMessage> requestMessages) {
         List<Message> messages = new ArrayList<>();
-        if (request.instructions() != null && !request.instructions().isBlank()) {
-            messages.add(new SystemMessage(request.instructions().trim()));
+        if (instructions != null && !instructions.isBlank()) {
+            messages.add(new SystemMessage(instructions.trim()));
         }
-        if (request.messages() == null || request.messages().isEmpty()) {
+        if (requestMessages == null || requestMessages.isEmpty()) {
             return messages;
         }
 
-        for (LlmMessage item : request.messages()) {
+        for (LlmMessage item : requestMessages) {
             Message message = toSpringAiMessage(item);
             if (message != null) {
                 messages.add(message);
@@ -375,16 +417,16 @@ public class SpringAiLlmClient {
         return new IllegalStateException("spring_ai_call_failed", error);
     }
 
-    private String summarizeRequest(LlmRequest request) {
-        if (request == null) {
+    private String summarizeRequest(List<LlmMessage> messages, List<ToolCallback> toolCallbacks) {
+        if (messages == null && toolCallbacks == null) {
             return "null_request";
         }
-        int messageCount = request.messages() == null ? 0 : request.messages().size();
-        int toolCount = request.toolCallbacks() == null ? 0 : request.toolCallbacks().size();
+        int messageCount = messages == null ? 0 : messages.size();
+        int toolCount = toolCallbacks == null ? 0 : toolCallbacks.size();
         String lastUserMessage = "";
-        if (request.messages() != null) {
-            for (int index = request.messages().size() - 1; index >= 0; index--) {
-                LlmMessage message = request.messages().get(index);
+        if (messages != null) {
+            for (int index = messages.size() - 1; index >= 0; index--) {
+                LlmMessage message = messages.get(index);
                 if (message != null && "user".equals(message.role())) {
                     lastUserMessage = previewText(message.content(), 80);
                     break;
