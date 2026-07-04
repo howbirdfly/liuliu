@@ -23,9 +23,10 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 @Service
-public class SpringAiLlmClient implements LlmClient {
+public class SpringAiLlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
@@ -60,22 +61,14 @@ public class SpringAiLlmClient implements LlmClient {
         this.configuredBaseUrl = configuredBaseUrl == null ? "" : configuredBaseUrl.trim();
     }
 
-    @Override
     public String provider() {
         return configuredProvider;
     }
 
-    @Override
     public String model() {
         return configuredModel;
     }
 
-    @Override
-    public boolean supportsNativeToolCalling() {
-        return true;
-    }
-
-    @Override
     public LlmResponse createResponse(LlmRequest request) {
         ChatModel chatModel = requireChatModel();
 
@@ -101,8 +94,7 @@ public class SpringAiLlmClient implements LlmClient {
         }
     }
 
-    @Override
-    public LlmResponse createStreamingResponse(LlmRequest request, LlmStreamListener listener) {
+    public LlmResponse createStreamingResponse(LlmRequest request, Consumer<String> listener) {
         ChatModel chatModel = requireChatModel();
         StreamingChatModel streamingChatModel = requireStreamingChatModel(chatModel);
 
@@ -141,7 +133,7 @@ public class SpringAiLlmClient implements LlmClient {
     private LlmResponse tryContextOverflowRetry(
             ChatModel chatModel,
             LlmRequest request,
-            LlmStreamListener listener,
+            Consumer<String> listener,
             Exception error
     ) {
         if (!isContextOverflowError(error)) {
@@ -199,10 +191,10 @@ public class SpringAiLlmClient implements LlmClient {
         return false;
     }
 
-    private LlmResponse callSingleResponse(ChatModel chatModel, LlmRequest request, LlmStreamListener listener) {
+    private LlmResponse callSingleResponse(ChatModel chatModel, LlmRequest request, Consumer<String> listener) {
         LlmResponse response = toLlmResponse(chatModel.call(toPrompt(request)), false);
         if (listener != null && response.content() != null && !response.content().isBlank()) {
-            listener.onContentDelta(response.content());
+            listener.accept(response.content());
         }
         return response;
     }
@@ -318,14 +310,14 @@ public class SpringAiLlmClient implements LlmClient {
         return result;
     }
 
-    private void emitStreamingDelta(ChatResponse chunk, LlmStreamListener listener) {
+    private void emitStreamingDelta(ChatResponse chunk, Consumer<String> listener) {
         if (listener == null || chunk == null || chunk.getResult() == null || chunk.getResult().getOutput() == null) {
             return;
         }
 
         String delta = chunk.getResult().getOutput().getText();
         if (delta != null && !delta.isEmpty()) {
-            listener.onContentDelta(delta);
+            listener.accept(delta);
         }
     }
 

@@ -1,12 +1,12 @@
 package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
-import com.liuliu.citywalk.service.agent.LlmClient;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.LlmOptions;
 import com.liuliu.citywalk.service.agent.LlmRequest;
 import com.liuliu.citywalk.service.agent.LlmResponse;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
+import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,12 +15,12 @@ import java.util.Map;
 @Service
 public class AgentRoundService {
 
-    private final LlmClient llmClient;
+    private final SpringAiLlmClient llmClient;
     private final AgentToolExecutionService agentToolExecutionService;
     private final AgentToolResultSlicerService agentToolResultSlicerService;
 
     public AgentRoundService(
-            LlmClient llmClient,
+            SpringAiLlmClient llmClient,
             AgentToolExecutionService agentToolExecutionService,
             AgentToolResultSlicerService agentToolResultSlicerService
     ) {

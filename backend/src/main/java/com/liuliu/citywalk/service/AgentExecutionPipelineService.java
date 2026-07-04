@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
-import com.liuliu.citywalk.service.agent.LlmClient;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.LlmToolCall;
+import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -76,7 +76,7 @@ public class AgentExecutionPipelineService {
             - Only treat the turn as a brand-new request when the user clearly starts over or explicitly asks to ignore earlier context.
             """;
 
-    private final LlmClient llmClient;
+    private final SpringAiLlmClient llmClient;
     private final ObjectMapper objectMapper;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
     private final AgentConversationStateService agentConversationStateService;
@@ -87,7 +87,7 @@ public class AgentExecutionPipelineService {
     private final AgentRoundService agentRoundService;
 
     public AgentExecutionPipelineService(
-            LlmClient llmClient,
+            SpringAiLlmClient llmClient,
             ObjectMapper objectMapper,
             AgentIntentAnalysisService agentIntentAnalysisService,
             AgentConversationStateService agentConversationStateService,
