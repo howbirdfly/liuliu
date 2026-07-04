@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.mapper.CommunityMapper;
 import com.liuliu.citywalk.mapper.entity.CommunityWalkQueryRow;
+import org.springframework.ai.document.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,21 +22,18 @@ public class CommunityKnowledgeIngestionService {
     private static final int DEFAULT_CHUNK_OVERLAP = 80;
 
     private final CommunityMapper communityMapper;
-    private final EmbeddingService embeddingService;
-    private final KnowledgeIngestionService knowledgeIngestionService;
+    private final SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
 
     public CommunityKnowledgeIngestionService(
             CommunityMapper communityMapper,
-            EmbeddingService embeddingService,
-            KnowledgeIngestionService knowledgeIngestionService,
+            SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService,
             VectorStore vectorStore,
             ObjectMapper objectMapper
     ) {
         this.communityMapper = communityMapper;
-        this.embeddingService = embeddingService;
-        this.knowledgeIngestionService = knowledgeIngestionService;
+        this.springAiKnowledgeDocumentService = springAiKnowledgeDocumentService;
         this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
     }
@@ -86,25 +84,10 @@ public class CommunityKnowledgeIngestionService {
             return new CommunityKnowledgeIngestionResult(walkIds.size(), 0, walkIds);
         }
 
-        List<List<Float>> embeddings = embeddingService.embedAll(drafts.stream().map(ChunkDraft::content).toList());
-        if (embeddings.size() != drafts.size()) {
-            throw new IllegalStateException("embedding_count_mismatch");
-        }
-
-        List<KnowledgeDocument> documents = new ArrayList<>(drafts.size());
-        for (int index = 0; index < drafts.size(); index++) {
-            ChunkDraft draft = drafts.get(index);
-            documents.add(new KnowledgeDocument(
-                    draft.chunkId(),
-                    draft.sourceId(),
-                    draft.sourceType(),
-                    draft.title(),
-                    draft.content(),
-                    embeddings.get(index),
-                    draft.metadata()
-            ));
-        }
-        knowledgeIngestionService.upsert(documents);
+        List<Document> documents = drafts.stream()
+                .map(this::toSpringAiDocument)
+                .toList();
+        springAiKnowledgeDocumentService.upsert(documents);
         return new CommunityKnowledgeIngestionResult(walkIds.size(), documents.size(), walkIds);
     }
 
@@ -124,25 +107,10 @@ public class CommunityKnowledgeIngestionService {
             return false;
         }
 
-        List<List<Float>> embeddings = embeddingService.embedAll(drafts.stream().map(ChunkDraft::content).toList());
-        if (embeddings.size() != drafts.size()) {
-            throw new IllegalStateException("embedding_count_mismatch");
-        }
-
-        List<KnowledgeDocument> documents = new ArrayList<>(drafts.size());
-        for (int index = 0; index < drafts.size(); index++) {
-            ChunkDraft draft = drafts.get(index);
-            documents.add(new KnowledgeDocument(
-                    draft.chunkId(),
-                    draft.sourceId(),
-                    draft.sourceType(),
-                    draft.title(),
-                    draft.content(),
-                    embeddings.get(index),
-                    draft.metadata()
-            ));
-        }
-        knowledgeIngestionService.upsert(documents);
+        List<Document> documents = drafts.stream()
+                .map(this::toSpringAiDocument)
+                .toList();
+        springAiKnowledgeDocumentService.upsert(documents);
         log.info("Synced public walk into Milvus, walkId={}, chunkCount={}", walkId, documents.size());
         return true;
     }
@@ -151,12 +119,12 @@ public class CommunityKnowledgeIngestionService {
         if (walkId == null || walkId <= 0L || !vectorStore.isEnabled()) {
             return;
         }
-        knowledgeIngestionService.removeBySource("community_walk", String.valueOf(walkId));
+        springAiKnowledgeDocumentService.removeBySource("community_walk", String.valueOf(walkId));
         log.info("Removed public walk knowledge from Milvus, walkId={}", walkId);
     }
 
     public boolean isReady() {
-        return embeddingService.isConfigured() && vectorStore.isEnabled();
+        return springAiKnowledgeDocumentService.isReady();
     }
 
     private List<ChunkDraft> buildChunkDrafts(CommunityWalkQueryRow walk) {
@@ -210,6 +178,19 @@ public class CommunityKnowledgeIngestionService {
             builder.append("\n\n");
         }
         builder.append(label).append("：").append(normalizedContent);
+    }
+
+    private Document toSpringAiDocument(ChunkDraft draft) {
+        Map<String, Object> metadata = new LinkedHashMap<>(draft.metadata());
+        metadata.putIfAbsent("chunk_id", draft.chunkId());
+        metadata.putIfAbsent("source_id", draft.sourceId());
+        metadata.putIfAbsent("source_type", draft.sourceType());
+        metadata.putIfAbsent("title", draft.title());
+        return new Document(
+                draft.chunkId(),
+                draft.content(),
+                metadata
+        );
     }
 
     private List<String> splitIntoChunks(String text, int chunkSize, int overlap) {

@@ -7,11 +7,13 @@ import com.liuliu.citywalk.model.dto.response.RagCompareResponse;
 import com.liuliu.citywalk.model.dto.response.RagHealthResponse;
 import com.liuliu.citywalk.model.dto.response.RagIngestionResponse;
 import com.liuliu.citywalk.model.dto.response.RagSearchResponse;
+import org.springframework.ai.document.Document;
 import com.liuliu.citywalk.service.rag.CommunityKnowledgeIngestionResult;
 import com.liuliu.citywalk.service.rag.CommunityKnowledgeIngestionService;
 import com.liuliu.citywalk.service.rag.EmbeddingService;
 import com.liuliu.citywalk.service.rag.KnowledgeHit;
 import com.liuliu.citywalk.service.rag.KnowledgeSearchService;
+import com.liuliu.citywalk.service.rag.SpringAiKnowledgeDocumentService;
 import com.liuliu.citywalk.service.rag.VectorStore;
 import com.liuliu.citywalk.service.rag.VectorStoreHealth;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,17 +31,20 @@ public class RagController {
     private final EmbeddingService embeddingService;
     private final CommunityKnowledgeIngestionService communityKnowledgeIngestionService;
     private final KnowledgeSearchService knowledgeSearchService;
+    private final SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService;
 
     public RagController(
             VectorStore vectorStore,
             EmbeddingService embeddingService,
             CommunityKnowledgeIngestionService communityKnowledgeIngestionService,
-            KnowledgeSearchService knowledgeSearchService
+            KnowledgeSearchService knowledgeSearchService,
+            SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService
     ) {
         this.vectorStore = vectorStore;
         this.embeddingService = embeddingService;
         this.communityKnowledgeIngestionService = communityKnowledgeIngestionService;
         this.knowledgeSearchService = knowledgeSearchService;
+        this.springAiKnowledgeDocumentService = springAiKnowledgeDocumentService;
     }
 
     @GetMapping("/health")
@@ -85,20 +90,12 @@ public class RagController {
         if (sourceType != null && !sourceType.isBlank()) {
             filters.put("source_type", sourceType.trim());
         }
-        java.util.List<KnowledgeHit> hits = knowledgeSearchService.search(query, topK, filters);
+        java.util.List<Document> hits = springAiKnowledgeDocumentService.search(query, topK, filters);
         return ApiResponse.success(new RagSearchResponse(
                 query,
                 Math.max(1, topK),
                 hits.stream()
-                        .map(item -> new RagSearchResponse.RagSearchHitResponse(
-                                item.chunkId(),
-                                item.sourceId(),
-                                item.sourceType(),
-                                item.title(),
-                                item.content(),
-                                item.score(),
-                                item.metadata()
-                        ))
+                        .map(this::toSearchHit)
                         .toList()
         ));
     }
@@ -136,6 +133,47 @@ public class RagController {
                 item.score(),
                 item.metadata()
         );
+    }
+
+    private RagSearchResponse.RagSearchHitResponse toSearchHit(Document item) {
+        java.util.Map<String, Object> metadata = item.getMetadata() == null
+                ? new java.util.LinkedHashMap<>()
+                : new java.util.LinkedHashMap<>(item.getMetadata());
+        return new RagSearchResponse.RagSearchHitResponse(
+                readString(metadata, "chunk_id", item.getId()),
+                readString(metadata, "source_id", ""),
+                readString(metadata, "source_type", ""),
+                readString(metadata, "title", ""),
+                item.getText() == null ? "" : item.getText(),
+                readDouble(item.getScore(), metadata.get("score")),
+                metadata
+        );
+    }
+
+    private String readString(java.util.Map<String, Object> metadata, String key, String fallback) {
+        Object value = metadata.get(key);
+        if (value == null) {
+            return fallback;
+        }
+        String normalized = String.valueOf(value).trim();
+        return normalized.isBlank() ? fallback : normalized;
+    }
+
+    private double readDouble(Double score, Object fallbackValue) {
+        if (score != null) {
+            return score;
+        }
+        if (fallbackValue instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (fallbackValue instanceof String text) {
+            try {
+                return Double.parseDouble(text);
+            } catch (NumberFormatException ignored) {
+                return 0.0d;
+            }
+        }
+        return 0.0d;
     }
 
     private String extractErrorMessage(Throwable error) {

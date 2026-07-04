@@ -1,6 +1,7 @@
 package com.liuliu.citywalk.service.rag;
 
 import com.liuliu.citywalk.config.RagProperties;
+import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -12,17 +13,20 @@ public class KnowledgeSearchService {
     private final EmbeddingService embeddingService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
     private final RuleBasedKnowledgeReranker ruleBasedKnowledgeReranker;
+    private final SpringAiDocumentMapper springAiDocumentMapper;
     private final RagProperties ragProperties;
 
     public KnowledgeSearchService(
             EmbeddingService embeddingService,
             KnowledgeRetrievalService knowledgeRetrievalService,
             RuleBasedKnowledgeReranker ruleBasedKnowledgeReranker,
+            SpringAiDocumentMapper springAiDocumentMapper,
             RagProperties ragProperties
     ) {
         this.embeddingService = embeddingService;
         this.knowledgeRetrievalService = knowledgeRetrievalService;
         this.ruleBasedKnowledgeReranker = ruleBasedKnowledgeReranker;
+        this.springAiDocumentMapper = springAiDocumentMapper;
         this.ragProperties = ragProperties;
     }
 
@@ -78,6 +82,13 @@ public class KnowledgeSearchService {
                 retrievalTopK,
                 ragProperties.isRerankEnabled()
         );
+    }
+
+    public List<Document> searchDocuments(String queryText, int topK, Map<String, Object> filters) {
+        return search(queryText, topK, filters).stream()
+                .map(springAiDocumentMapper::toDocument)
+                .filter(document -> document != null)
+                .toList();
     }
 
     public boolean isReady() {

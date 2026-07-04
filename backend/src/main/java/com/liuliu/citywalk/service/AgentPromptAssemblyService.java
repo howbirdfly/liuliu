@@ -1,25 +1,30 @@
 package com.liuliu.citywalk.service;
 
 import com.liuliu.citywalk.service.agent.LlmMessage;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
 public class AgentPromptAssemblyService {
 
-    private final AgentMemoryService agentMemoryService;
+    private final ChatMemory chatMemory;
     private final AgentConversationStateService agentConversationStateService;
     private final AgentLongTermMemoryService agentLongTermMemoryService;
     private final AgentContextWindowService agentContextWindowService;
 
     public AgentPromptAssemblyService(
-            AgentMemoryService agentMemoryService,
+            ChatMemory chatMemory,
             AgentConversationStateService agentConversationStateService,
             AgentLongTermMemoryService agentLongTermMemoryService,
             AgentContextWindowService agentContextWindowService
     ) {
-        this.agentMemoryService = agentMemoryService;
+        this.chatMemory = chatMemory;
         this.agentConversationStateService = agentConversationStateService;
         this.agentLongTermMemoryService = agentLongTermMemoryService;
         this.agentContextWindowService = agentContextWindowService;
@@ -52,7 +57,10 @@ public class AgentPromptAssemblyService {
     }
 
     public List<LlmMessage> loadConversationHistory(Long userId) {
-        return agentMemoryService.loadConversation(userId);
+        if (userId == null || userId <= 0) {
+            return List.of();
+        }
+        return toLlmMessages(chatMemory.get(String.valueOf(userId)));
     }
 
     public String buildInstructions(
@@ -70,16 +78,46 @@ public class AgentPromptAssemblyService {
     }
 
     public void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
-        agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
+        appendConversationTurn(userId, userPrompt, assistantAnswer);
         agentLongTermMemoryService.rememberTurn(userId, userPrompt, assistantAnswer);
     }
 
     public void rememberConversationShortTerm(Long userId, String userPrompt, String assistantAnswer) {
-        agentMemoryService.appendTurn(userId, userPrompt, assistantAnswer);
+        appendConversationTurn(userId, userPrompt, assistantAnswer);
     }
 
     public void clearConversation(Long userId) {
-        agentMemoryService.clearConversation(userId);
+        if (userId != null && userId > 0) {
+            chatMemory.clear(String.valueOf(userId));
+        }
         agentConversationStateService.clearState(userId);
+    }
+
+    private void appendConversationTurn(Long userId, String userPrompt, String assistantAnswer) {
+        if (userId == null || userId <= 0) {
+            return;
+        }
+        chatMemory.add(String.valueOf(userId), List.of(
+                new UserMessage(userPrompt == null ? "" : userPrompt.trim()),
+                new AssistantMessage(assistantAnswer == null ? "" : assistantAnswer.trim())
+        ));
+    }
+
+    private List<LlmMessage> toLlmMessages(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+
+        List<LlmMessage> result = new ArrayList<>();
+        for (Message message : messages) {
+            if (message instanceof UserMessage userMessage) {
+                result.add(LlmMessage.user(userMessage.getText()));
+                continue;
+            }
+            if (message instanceof AssistantMessage assistantMessage) {
+                result.add(LlmMessage.assistant(assistantMessage.getText(), assistantMessage.getToolCalls()));
+            }
+        }
+        return result;
     }
 }
