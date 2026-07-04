@@ -56,6 +56,19 @@ public class AgentPromptAssemblyService {
         );
     }
 
+    public List<LlmMessage> buildCurrentTurnMessages(
+            String userPrompt,
+            String carryoverContext,
+            String stateMessage
+    ) {
+        return agentContextWindowService.buildConversationMessages(
+                List.of(),
+                userPrompt,
+                carryoverContext,
+                stateMessage
+        );
+    }
+
     public List<LlmMessage> loadConversationHistory(Long userId) {
         if (userId == null || userId <= 0) {
             return List.of();

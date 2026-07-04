@@ -147,8 +147,7 @@ public class AgentExecutionPipelineService {
         AgentIntentAnalysisService.AgentIntent intent = conversationState.effectiveIntent();
         String carryoverContext = conversationState.carryoverPromptContext();
         String stateMessage = agentConversationStateService.buildStateMessage(conversationState);
-        List<LlmMessage> messages = agentPromptAssemblyService.buildConversationMessages(
-                history,
+        List<LlmMessage> messages = agentPromptAssemblyService.buildCurrentTurnMessages(
                 normalizedPrompt,
                 carryoverContext,
                 stateMessage
@@ -552,7 +551,28 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         final int currentRound = round;
+        String advisorKnowledgeQuery = resolveAdvisorKnowledgeQuery(execution, round);
+        if (!advisorKnowledgeQuery.isBlank()) {
+            execution.steps().add(new AgentStepResponse(
+                    "advisor_retrieval",
+                    "spring_ai_knowledge_advisor",
+                    "round=" + round,
+                    "query=" + advisorKnowledgeQuery + "; topK=3"
+            ));
+            emit(listener, new AgentExecutionEvent(
+                    "advisor_retrieval",
+                    "spring_ai_knowledge_advisor",
+                    advisorKnowledgeQuery,
+                    "topK=3",
+                    round,
+                    llmClient.provider(),
+                    llmClient.model(),
+                    null
+            ));
+        }
         AgentRoundService.AgentRoundOutcome outcome = agentRoundService.executeRound(
+                execution.userId(),
+                advisorKnowledgeQuery,
                 execution.instructions(),
                 execution.messages(),
                 execution.steps(),
@@ -620,6 +640,17 @@ public class AgentExecutionPipelineService {
                 null
         ));
         return outcome;
+    }
+
+    private String resolveAdvisorKnowledgeQuery(PreparedExecution execution, int round) {
+        if (execution == null || round != 1) {
+            return "";
+        }
+        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
+        if (!shouldPrefetchKnowledge(intent, execution.normalizedPrompt())) {
+            return "";
+        }
+        return buildKnowledgePrefetchQuery(intent, execution.normalizedPrompt());
     }
 
     private String buildRoundTypeOutput(AgentRoundService.AgentRoundOutcome outcome) {

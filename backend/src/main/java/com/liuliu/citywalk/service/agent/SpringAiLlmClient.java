@@ -3,15 +3,15 @@ package com.liuliu.citywalk.service.agent;
 import com.liuliu.citywalk.service.AgentContextWindowService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.MessageAggregator;
-import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
@@ -30,7 +30,9 @@ public class SpringAiLlmClient {
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
 
-    private final ChatModel chatModel;
+    private final ChatClient chatClient;
+    private final AgentChatMemoryAdvisor agentChatMemoryAdvisor;
+    private final AgentKnowledgeAdvisor agentKnowledgeAdvisor;
     private final AgentContextWindowService agentContextWindowService;
     private final String configuredProvider;
     private final String configuredModel;
@@ -38,14 +40,18 @@ public class SpringAiLlmClient {
     private final String configuredBaseUrl;
 
     public SpringAiLlmClient(
-            @Qualifier("deepSeekChatModel") ChatModel chatModel,
+            @Qualifier("deepSeekChatClient") ChatClient chatClient,
+            AgentChatMemoryAdvisor agentChatMemoryAdvisor,
+            AgentKnowledgeAdvisor agentKnowledgeAdvisor,
             AgentContextWindowService agentContextWindowService,
             @Value("${spring.ai.model.chat:deepseek}") String configuredProvider,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey,
             @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}") String configuredBaseUrl
     ) {
-        this.chatModel = chatModel;
+        this.chatClient = chatClient;
+        this.agentChatMemoryAdvisor = agentChatMemoryAdvisor;
+        this.agentKnowledgeAdvisor = agentKnowledgeAdvisor;
         this.agentContextWindowService = agentContextWindowService;
         this.configuredProvider = configuredProvider == null || configuredProvider.isBlank()
                 ? DEFAULT_PROVIDER
@@ -71,21 +77,32 @@ public class SpringAiLlmClient {
             List<ToolCallback> toolCallbacks,
             Double temperature
     ) {
-        ChatModel chatModel = requireChatModel();
+        return createResponse(instructions, messages, toolCallbacks, temperature, null);
+    }
+
+    public LlmResponse createResponse(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
+            AgentCallContext callContext
+    ) {
+        ChatClient chatClient = requireChatClient();
 
         try {
-            return callSingleResponse(chatModel, instructions, messages, toolCallbacks, temperature, null);
+            return callSingleResponse(chatClient, instructions, messages, toolCallbacks, temperature, callContext);
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
             LlmResponse compactedRetry = tryContextOverflowRetry(
-                    chatModel,
+                    chatClient,
                     instructions,
                     messages,
                     toolCallbacks,
                     temperature,
+                    callContext,
                     null,
                     error
             );
@@ -93,10 +110,9 @@ public class SpringAiLlmClient {
                 return compactedRetry;
             }
             log.warn(
-                    "Spring AI agent call failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(messages, toolCallbacks),
-                    error.getClass().getName(),
-                    error.getMessage(),
+                    "Spring AI agent call failed. requestSummary=" + summarizeRequest(messages, toolCallbacks)
+                            + ", causeType=" + error.getClass().getName()
+                            + ", causeMessage=" + error.getMessage(),
                     error
             );
             throw propagate(error);
@@ -110,32 +126,33 @@ public class SpringAiLlmClient {
             Double temperature,
             Consumer<String> listener
     ) {
-        ChatModel chatModel = requireChatModel();
-        StreamingChatModel streamingChatModel = requireStreamingChatModel(chatModel);
+        return createStreamingResponse(instructions, messages, toolCallbacks, temperature, null, listener);
+    }
+
+    public LlmResponse createStreamingResponse(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
+            AgentCallContext callContext,
+            Consumer<String> listener
+    ) {
+        ChatClient chatClient = requireChatClient();
 
         try {
-            AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
-            new MessageAggregator()
-                    .aggregate(streamingChatModel.stream(toPrompt(instructions, messages, toolCallbacks, temperature)), aggregatedResponse::set)
-                    .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
-                    .blockLast();
-
-            ChatResponse response = aggregatedResponse.get();
-            if (response == null) {
-                throw new IllegalStateException("spring_ai_stream_empty");
-            }
-            return toLlmResponse(response, true);
+            return callStreamingResponse(chatClient, instructions, messages, toolCallbacks, temperature, callContext, listener);
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(error);
             }
             LlmResponse compactedRetry = tryContextOverflowRetry(
-                    chatModel,
+                    chatClient,
                     instructions,
                     messages,
                     toolCallbacks,
                     temperature,
+                    callContext,
                     listener,
                     error
             );
@@ -143,10 +160,9 @@ public class SpringAiLlmClient {
                 return compactedRetry;
             }
             log.warn(
-                    "Spring AI agent streaming call failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(messages, toolCallbacks),
-                    error.getClass().getName(),
-                    error.getMessage(),
+                    "Spring AI agent streaming call failed. requestSummary=" + summarizeRequest(messages, toolCallbacks)
+                            + ", causeType=" + error.getClass().getName()
+                            + ", causeMessage=" + error.getMessage(),
                     error
             );
             throw propagate(error);
@@ -154,11 +170,12 @@ public class SpringAiLlmClient {
     }
 
     private LlmResponse tryContextOverflowRetry(
-            ChatModel chatModel,
+            ChatClient chatClient,
             String instructions,
             List<LlmMessage> messages,
             List<ToolCallback> toolCallbacks,
             Double temperature,
+            AgentCallContext callContext,
             Consumer<String> listener,
             Exception error
     ) {
@@ -177,17 +194,19 @@ public class SpringAiLlmClient {
                 compactedMessages.size()
         );
         try {
-            return callSingleResponse(chatModel, instructions, compactedMessages, toolCallbacks, temperature, listener);
+            if (listener != null) {
+                return callStreamingResponse(chatClient, instructions, compactedMessages, toolCallbacks, temperature, callContext, listener);
+            }
+            return callSingleResponse(chatClient, instructions, compactedMessages, toolCallbacks, temperature, callContext);
         } catch (Exception retryError) {
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
                 throw cancelled(retryError);
             }
             log.warn(
-                    "Spring AI compacted-context retry failed. requestSummary={}. causeType={}: {}",
-                    summarizeRequest(compactedMessages, toolCallbacks),
-                    retryError.getClass().getName(),
-                    retryError.getMessage(),
+                    "Spring AI compacted-context retry failed. requestSummary=" + summarizeRequest(compactedMessages, toolCallbacks)
+                            + ", causeType=" + retryError.getClass().getName()
+                            + ", causeMessage=" + retryError.getMessage(),
                     retryError
             );
             return null;
@@ -218,73 +237,102 @@ public class SpringAiLlmClient {
     }
 
     private LlmResponse callSingleResponse(
-            ChatModel chatModel,
+            ChatClient chatClient,
             String instructions,
             List<LlmMessage> messages,
             List<ToolCallback> toolCallbacks,
             Double temperature,
+            AgentCallContext callContext
+    ) {
+        ChatResponse response = prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext)
+                .call()
+                .chatResponse();
+        return toLlmResponse(response);
+    }
+
+    private LlmResponse callStreamingResponse(
+            ChatClient chatClient,
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks,
+            Double temperature,
+            AgentCallContext callContext,
             Consumer<String> listener
     ) {
-        LlmResponse response = toLlmResponse(chatModel.call(toPrompt(instructions, messages, toolCallbacks, temperature)), false);
-        if (listener != null && response.content() != null && !response.content().isBlank()) {
-            listener.accept(response.content());
+        AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
+        new MessageAggregator()
+                .aggregate(
+                        prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext)
+                                .stream()
+                                .chatResponse(),
+                        aggregatedResponse::set
+                )
+                .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
+                .blockLast();
+
+        ChatResponse response = aggregatedResponse.get();
+        if (response == null) {
+            throw new IllegalStateException("spring_ai_stream_empty");
         }
-        return response;
+        return toLlmResponse(response);
     }
 
     private boolean isConfigured() {
         return !configuredApiKey.isBlank() && !configuredBaseUrl.isBlank();
     }
 
-    private ChatModel resolveChatModel() {
-        return chatModel;
+    private ChatClient resolveChatClient() {
+        return chatClient;
     }
 
-    private ChatModel requireChatModel() {
+    private ChatClient requireChatClient() {
         if (!isConfigured()) {
             throw new IllegalStateException("spring_ai_chat_not_configured");
         }
-        ChatModel chatModel = resolveChatModel();
-        if (chatModel == null) {
-            throw new IllegalStateException("spring_ai_chat_model_unavailable");
+        ChatClient chatClient = resolveChatClient();
+        if (chatClient == null) {
+            throw new IllegalStateException("spring_ai_chat_client_unavailable");
         }
-        return chatModel;
+        return chatClient;
     }
 
-    private StreamingChatModel resolveStreamingChatModel(ChatModel chatModel) {
-        if (chatModel instanceof StreamingChatModel compatibleStreamingModel) {
-            return compatibleStreamingModel;
-        }
-        return null;
+    private Prompt toPrompt(String instructions, List<LlmMessage> messages) {
+        return new Prompt(buildMessages(instructions, messages));
     }
 
-    private StreamingChatModel requireStreamingChatModel(ChatModel chatModel) {
-        StreamingChatModel streamingChatModel = resolveStreamingChatModel(chatModel);
-        if (streamingChatModel == null) {
-            throw new IllegalStateException("spring_ai_streaming_chat_model_unavailable");
-        }
-        return streamingChatModel;
-    }
-
-    private Prompt toPrompt(
-            String instructions,
-            List<LlmMessage> messages,
+    private ChatClient.ChatClientRequestSpec prepareRequest(
+            ChatClient chatClient,
+            Prompt prompt,
             List<ToolCallback> toolCallbacks,
-            Double temperature
+            Double temperature,
+            AgentCallContext callContext
     ) {
-        return new Prompt(buildMessages(instructions, messages), buildOptions(toolCallbacks, temperature));
-    }
-
-    private ToolCallingChatOptions buildOptions(List<ToolCallback> toolCallbacks, Double temperature) {
-        ToolCallingChatOptions.Builder builder = ToolCallingChatOptions.builder()
-                .model(model())
-                .internalToolExecutionEnabled(false)
-                .temperature(temperature == null ? 0.2 : temperature);
+        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt(prompt)
+                .options(buildOptions(temperature));
         List<ToolCallback> normalizedToolCallbacks = toolCallbacks == null ? List.of() : toolCallbacks;
         if (!normalizedToolCallbacks.isEmpty()) {
-            builder.toolCallbacks(normalizedToolCallbacks);
+            requestSpec = requestSpec.toolCallbacks(normalizedToolCallbacks);
         }
-        return builder.build();
+        if (callContext != null && callContext.hasConversationId()) {
+            requestSpec = requestSpec.advisors(spec -> spec
+                    .advisors(agentChatMemoryAdvisor)
+                    .param(ChatMemory.CONVERSATION_ID, callContext.conversationId()));
+        }
+        if (callContext != null && callContext.hasKnowledgeQuery()) {
+            requestSpec = requestSpec.advisors(spec -> spec
+                    .advisors(agentKnowledgeAdvisor)
+                    .param(AgentKnowledgeAdvisor.RETRIEVAL_QUERY, callContext.knowledgeQuery())
+                    .param(AgentKnowledgeAdvisor.RETRIEVAL_TOP_K, callContext.knowledgeTopK()));
+        }
+        return requestSpec;
+    }
+
+    private ToolCallingChatOptions buildOptions(Double temperature) {
+        return ToolCallingChatOptions.builder()
+                .model(model())
+                .internalToolExecutionEnabled(false)
+                .temperature(temperature == null ? 0.2 : temperature)
+                .build();
     }
 
     private List<Message> buildMessages(String instructions, List<LlmMessage> requestMessages) {
@@ -359,7 +407,7 @@ public class SpringAiLlmClient {
         }
     }
 
-    private LlmResponse toLlmResponse(ChatResponse response, boolean streaming) {
+    private LlmResponse toLlmResponse(ChatResponse response) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
             return new LlmResponse("", List.of());
         }
@@ -436,5 +484,19 @@ public class SpringAiLlmClient {
             return normalized;
         }
         return normalized.substring(0, maxLength) + "...";
+    }
+
+    public record AgentCallContext(String conversationId, String knowledgeQuery, Integer knowledgeTopK) {
+        public AgentCallContext(String conversationId) {
+            this(conversationId, "", null);
+        }
+
+        public boolean hasConversationId() {
+            return conversationId != null && !conversationId.isBlank();
+        }
+
+        public boolean hasKnowledgeQuery() {
+            return knowledgeQuery != null && !knowledgeQuery.isBlank();
+        }
     }
 }

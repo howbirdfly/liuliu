@@ -29,6 +29,8 @@ public class AgentRoundService {
     }
 
     public AgentRoundOutcome executeRound(
+            Long userId,
+            String knowledgeQuery,
             String instructions,
             List<LlmMessage> messages,
             List<AgentStepResponse> steps,
@@ -44,6 +46,11 @@ public class AgentRoundService {
                 messages,
                 toolCallbacks,
                 0.2,
+                new SpringAiLlmClient.AgentCallContext(
+                        userId == null || userId <= 0 ? "" : String.valueOf(userId),
+                        knowledgeQuery == null ? "" : knowledgeQuery.trim(),
+                        3
+                ),
                 delta -> {
                     cancellationCheck.run();
                     deltaListener.onDelta(delta);
