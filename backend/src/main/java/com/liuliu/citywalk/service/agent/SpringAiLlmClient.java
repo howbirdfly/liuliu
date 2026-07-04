@@ -1,6 +1,5 @@
 package com.liuliu.citywalk.service.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.AgentContextWindowService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +30,6 @@ public class SpringAiLlmClient {
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
 
-    private final ObjectMapper objectMapper;
     private final ChatModel chatModel;
     private final AgentContextWindowService agentContextWindowService;
     private final String configuredProvider;
@@ -40,7 +38,6 @@ public class SpringAiLlmClient {
     private final String configuredBaseUrl;
 
     public SpringAiLlmClient(
-            ObjectMapper objectMapper,
             @Qualifier("deepSeekChatModel") ChatModel chatModel,
             AgentContextWindowService agentContextWindowService,
             @Value("${spring.ai.model.chat:deepseek}") String configuredProvider,
@@ -48,7 +45,6 @@ public class SpringAiLlmClient {
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey,
             @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}") String configuredBaseUrl
     ) {
-        this.objectMapper = objectMapper;
         this.chatModel = chatModel;
         this.agentContextWindowService = agentContextWindowService;
         this.configuredProvider = configuredProvider == null || configuredProvider.isBlank()
@@ -319,7 +315,7 @@ public class SpringAiLlmClient {
             case "user" -> new UserMessage(item.content() == null ? "" : item.content());
             case "assistant" -> AssistantMessage.builder()
                     .content(item.content())
-                    .toolCalls(toSpringAiToolCalls(item.toolCalls()))
+                    .toolCalls(normalizeToolCalls(item.toolCalls()))
                     .build();
             case "tool" -> ToolResponseMessage.builder()
                     .responses(List.of(new ToolResponseMessage.ToolResponse(
@@ -332,21 +328,21 @@ public class SpringAiLlmClient {
         };
     }
 
-    private List<AssistantMessage.ToolCall> toSpringAiToolCalls(List<LlmToolCall> toolCalls) {
+    private List<AssistantMessage.ToolCall> normalizeToolCalls(List<AssistantMessage.ToolCall> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) {
             return List.of();
         }
 
         List<AssistantMessage.ToolCall> result = new ArrayList<>(toolCalls.size());
-        for (LlmToolCall toolCall : toolCalls) {
+        for (AssistantMessage.ToolCall toolCall : toolCalls) {
             if (toolCall == null || toolCall.name() == null || toolCall.name().isBlank()) {
                 continue;
             }
             result.add(new AssistantMessage.ToolCall(
                     toolCall.id(),
-                    "function",
+                    toolCall.type() == null || toolCall.type().isBlank() ? "function" : toolCall.type(),
                     toolCall.name(),
-                    toolCall.argumentsJson() == null ? "{}" : toolCall.argumentsJson()
+                    toolCall.arguments() == null ? "{}" : toolCall.arguments()
             ));
         }
         return result;
@@ -365,43 +361,34 @@ public class SpringAiLlmClient {
 
     private LlmResponse toLlmResponse(ChatResponse response, boolean streaming) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return new LlmResponse("", List.of(), null, new LlmResponseMetadata(provider(), model(), streaming, null));
+            return new LlmResponse("", List.of());
         }
 
         AssistantMessage output = response.getResult().getOutput();
         return new LlmResponse(
                 output.getText() == null ? "" : output.getText(),
-                extractToolCalls(output),
-                json(response),
-                new LlmResponseMetadata(provider(), model(), streaming, json(response.getMetadata()))
+                extractToolCalls(output)
         );
     }
 
-    private List<LlmToolCall> extractToolCalls(AssistantMessage message) {
+    private List<AssistantMessage.ToolCall> extractToolCalls(AssistantMessage message) {
         if (message == null || !message.hasToolCalls()) {
             return List.of();
         }
 
-        List<LlmToolCall> toolCalls = new ArrayList<>();
+        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
         for (AssistantMessage.ToolCall toolCall : message.getToolCalls()) {
             if (toolCall == null || toolCall.name() == null || toolCall.name().isBlank()) {
                 continue;
             }
-            toolCalls.add(new LlmToolCall(
+            toolCalls.add(new AssistantMessage.ToolCall(
                     toolCall.id() == null || toolCall.id().isBlank() ? "call_" + toolCalls.size() : toolCall.id(),
+                    toolCall.type() == null || toolCall.type().isBlank() ? "function" : toolCall.type(),
                     toolCall.name(),
                     toolCall.arguments() == null ? "{}" : toolCall.arguments()
             ));
         }
         return toolCalls;
-    }
-
-    private String json(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception error) {
-            return null;
-        }
     }
 
     private AgentExecutionCancelledException cancelled(Throwable cause) {

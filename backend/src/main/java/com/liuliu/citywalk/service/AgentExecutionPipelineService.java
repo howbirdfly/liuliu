@@ -5,8 +5,8 @@ import com.liuliu.citywalk.model.dto.response.AgentChatResponse;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.LlmMessage;
-import com.liuliu.citywalk.service.agent.LlmToolCall;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -404,16 +404,13 @@ public class AgentExecutionPipelineService {
                     "query", query,
                     "topK", 5
             ));
-            LlmToolCall toolCall = new LlmToolCall(
-                    "prefetch-knowledge-" + UUID.randomUUID(),
-                    "search_knowledge_base",
-                    argumentsJson
-            );
+            AssistantMessage.ToolCall toolCall =
+                    toolCall("prefetch-knowledge-" + UUID.randomUUID(), "search_knowledge_base", argumentsJson);
 
             emit(listener, new AgentExecutionEvent(
                     "tool_call",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     null,
                     0,
                     llmClient.provider(),
@@ -422,14 +419,14 @@ public class AgentExecutionPipelineService {
             ));
             AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     () -> checkCancelled(executionHandle),
                     execution.toolExecutionMemoByKey()
             );
             execution.steps().add(new AgentStepResponse(
                     "prefetch_tool",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     outcome.output()
             ));
             execution.messages().add(LlmMessage.assistant(
@@ -444,7 +441,7 @@ public class AgentExecutionPipelineService {
             emit(listener, new AgentExecutionEvent(
                     "tool_result",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     outcome.output(),
                     0,
                     llmClient.provider(),
@@ -492,16 +489,13 @@ public class AgentExecutionPipelineService {
 
         try {
             String argumentsJson = objectMapper.writeValueAsString(Map.of("query", query));
-            LlmToolCall toolCall = new LlmToolCall(
-                    "prefetch-poi-" + UUID.randomUUID(),
-                    "search_poi",
-                    argumentsJson
-            );
+            AssistantMessage.ToolCall toolCall =
+                    toolCall("prefetch-poi-" + UUID.randomUUID(), "search_poi", argumentsJson);
 
             emit(listener, new AgentExecutionEvent(
                     "tool_call",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     null,
                     0,
                     llmClient.provider(),
@@ -510,14 +504,14 @@ public class AgentExecutionPipelineService {
             ));
             AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     () -> checkCancelled(executionHandle),
                     execution.toolExecutionMemoByKey()
             );
             execution.steps().add(new AgentStepResponse(
                     "prefetch_tool",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     outcome.output()
             ));
             execution.messages().add(LlmMessage.assistant(
@@ -532,7 +526,7 @@ public class AgentExecutionPipelineService {
             emit(listener, new AgentExecutionEvent(
                     "tool_result",
                     toolCall.name(),
-                    toolCall.argumentsJson(),
+                    toolCall.arguments(),
                     outcome.output(),
                     0,
                     llmClient.provider(),
@@ -576,11 +570,11 @@ public class AgentExecutionPipelineService {
                 )),
                 new AgentRoundService.ToolEventListener() {
                     @Override
-                    public void onToolCall(LlmToolCall toolCall, int currentRoundValue) {
+                    public void onToolCall(AssistantMessage.ToolCall toolCall, int currentRoundValue) {
                         emit(listener, new AgentExecutionEvent(
                                 "tool_call",
                                 toolCall.name(),
-                                toolCall.argumentsJson(),
+                                toolCall.arguments(),
                                 null,
                                 currentRoundValue,
                                 llmClient.provider(),
@@ -591,14 +585,14 @@ public class AgentExecutionPipelineService {
 
                     @Override
                     public void onToolResult(
-                            LlmToolCall toolCall,
+                            AssistantMessage.ToolCall toolCall,
                             AgentToolExecutionService.AgentToolExecutionOutcome outcome,
                             int currentRoundValue
                     ) {
                         emit(listener, new AgentExecutionEvent(
                                 "tool_result",
                                 toolCall.name(),
-                                toolCall.argumentsJson(),
+                                toolCall.arguments(),
                                 outcome.output(),
                                 currentRoundValue,
                                 llmClient.provider(),
@@ -643,6 +637,15 @@ public class AgentExecutionPipelineService {
         return preview.isBlank()
                 ? "final_text: model returned direct text answer"
                 : "final_text: " + preview;
+    }
+
+    private AssistantMessage.ToolCall toolCall(String id, String name, String argumentsJson) {
+        return new AssistantMessage.ToolCall(
+                id,
+                "function",
+                name,
+                argumentsJson == null || argumentsJson.isBlank() ? "{}" : argumentsJson
+        );
     }
 
     private AgentChatResponse completeSuccessfulExecution(

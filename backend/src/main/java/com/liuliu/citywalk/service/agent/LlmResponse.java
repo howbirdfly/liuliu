@@ -1,12 +1,12 @@
 package com.liuliu.citywalk.service.agent;
 
+import org.springframework.ai.chat.messages.AssistantMessage;
+
 import java.util.List;
 
 public record LlmResponse(
         String content,
-        List<LlmToolCall> toolCalls,
-        String rawResponse,
-        LlmResponseMetadata metadata
+        List<AssistantMessage.ToolCall> toolCalls
 ) {
 
     public boolean hasToolCalls() {

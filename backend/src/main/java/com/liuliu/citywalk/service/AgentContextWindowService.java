@@ -2,7 +2,7 @@ package com.liuliu.citywalk.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.agent.LlmMessage;
-import com.liuliu.citywalk.service.agent.LlmToolCall;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayDeque;
@@ -154,7 +154,7 @@ public class AgentContextWindowService {
         }
 
         String compactedContent = trimText(message.content(), messageLimit);
-        List<LlmToolCall> toolCalls = message.toolCalls() == null ? List.of() : message.toolCalls();
+        List<AssistantMessage.ToolCall> toolCalls = message.toolCalls() == null ? List.of() : message.toolCalls();
         if (compactedContent.isBlank() && toolCalls.isEmpty()) {
             return null;
         }
@@ -180,7 +180,7 @@ public class AgentContextWindowService {
                 case "assistant" -> {
                     rememberNote(assistantNotes, previewText(message.content(), 140));
                     if (message.toolCalls() != null) {
-                        for (LlmToolCall toolCall : message.toolCalls()) {
+                        for (AssistantMessage.ToolCall toolCall : message.toolCalls()) {
                             if (toolCall != null && toolCall.name() != null && !toolCall.name().isBlank()) {
                                 toolNames.add(toolCall.name().trim());
                             }

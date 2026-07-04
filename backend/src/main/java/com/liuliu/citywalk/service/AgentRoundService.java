@@ -3,8 +3,8 @@ package com.liuliu.citywalk.service;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.LlmResponse;
-import com.liuliu.citywalk.service.agent.LlmToolCall;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
@@ -52,9 +52,9 @@ public class AgentRoundService {
         cancellationCheck.run();
 
         if (response.hasToolCalls()) {
-            List<LlmToolCall> toolCalls = response.toolCalls();
+            List<AssistantMessage.ToolCall> toolCalls = response.toolCalls();
             messages.add(LlmMessage.assistant(response.content(), toolCalls));
-            for (LlmToolCall toolCall : toolCalls) {
+            for (AssistantMessage.ToolCall toolCall : toolCalls) {
                 cancellationCheck.run();
                 toolEventListener.onToolCall(toolCall, round);
                 AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.execute(
@@ -62,7 +62,7 @@ public class AgentRoundService {
                         cancellationCheck,
                         toolExecutionMemoByKey
                 );
-                steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.argumentsJson(), outcome.output()));
+                steps.add(new AgentStepResponse("tool_call", toolCall.name(), toolCall.arguments(), outcome.output()));
                 toolEventListener.onToolResult(toolCall, outcome, round);
                 messages.add(LlmMessage.tool(
                         toolCall.id(),
@@ -81,21 +81,21 @@ public class AgentRoundService {
     }
 
     public interface ToolEventListener {
-        void onToolCall(LlmToolCall toolCall, int round);
+        void onToolCall(AssistantMessage.ToolCall toolCall, int round);
 
-        void onToolResult(LlmToolCall toolCall, AgentToolExecutionService.AgentToolExecutionOutcome outcome, int round);
+        void onToolResult(AssistantMessage.ToolCall toolCall, AgentToolExecutionService.AgentToolExecutionOutcome outcome, int round);
     }
 
     public record AgentRoundOutcome(
             RoundType roundType,
             String finalContent,
-            List<LlmToolCall> toolCalls
+            List<AssistantMessage.ToolCall> toolCalls
     ) {
         public boolean continueToNextRound() {
             return roundType == RoundType.TOOL_CALLING;
         }
 
-        public static AgentRoundOutcome toolCalling(List<LlmToolCall> toolCalls) {
+        public static AgentRoundOutcome toolCalling(List<AssistantMessage.ToolCall> toolCalls) {
             return new AgentRoundOutcome(
                     RoundType.TOOL_CALLING,
                     null,

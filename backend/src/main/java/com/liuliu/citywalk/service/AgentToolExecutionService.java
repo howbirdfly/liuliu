@@ -4,7 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.AgentTool;
-import com.liuliu.citywalk.service.agent.LlmToolCall;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
@@ -49,14 +49,14 @@ public class AgentToolExecutionService {
     }
 
     public AgentToolExecutionOutcome execute(
-            LlmToolCall toolCall,
+            AssistantMessage.ToolCall toolCall,
             Runnable cancellationCheck,
             Map<String, ToolExecutionMemo> toolExecutionMemoByKey
     ) {
         cancellationCheck.run();
         return executeInternal(
                 toolCall == null ? null : toolCall.name(),
-                toolCall == null ? null : toolCall.argumentsJson(),
+                toolCall == null ? null : toolCall.arguments(),
                 cancellationCheck,
                 toolExecutionMemoByKey
         );

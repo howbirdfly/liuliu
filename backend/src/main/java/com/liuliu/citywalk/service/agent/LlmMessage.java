@@ -1,5 +1,7 @@
 package com.liuliu.citywalk.service.agent;
 
+import org.springframework.ai.chat.messages.AssistantMessage;
+
 import java.util.List;
 
 public record LlmMessage(
@@ -7,7 +9,7 @@ public record LlmMessage(
         String content,
         String toolCallId,
         String name,
-        List<LlmToolCall> toolCalls
+        List<AssistantMessage.ToolCall> toolCalls
 ) {
 
     public static LlmMessage system(String content) {
@@ -18,7 +20,7 @@ public record LlmMessage(
         return new LlmMessage("user", content, null, null, List.of());
     }
 
-    public static LlmMessage assistant(String content, List<LlmToolCall> toolCalls) {
+    public static LlmMessage assistant(String content, List<AssistantMessage.ToolCall> toolCalls) {
         return new LlmMessage("assistant", content, null, null, toolCalls == null ? List.of() : toolCalls);
     }
 
