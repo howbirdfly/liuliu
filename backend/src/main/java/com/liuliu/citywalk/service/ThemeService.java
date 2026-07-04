@@ -19,17 +19,17 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-public class DeepSeekThemeService {
+public class ThemeService {
 
-    private static final Logger log = LoggerFactory.getLogger(DeepSeekThemeService.class);
+    private static final Logger log = LoggerFactory.getLogger(ThemeService.class);
 
     private final ObjectMapper objectMapper;
-    private final DeepSeekThemeAiClient aiClient;
+    private final ThemeAiClient aiClient;
     private final MapSearchService mapSearchService;
 
-    public DeepSeekThemeService(
+    public ThemeService(
             ObjectMapper objectMapper,
-            DeepSeekThemeAiClient aiClient,
+            ThemeAiClient aiClient,
             MapSearchService mapSearchService
     ) {
         this.objectMapper = objectMapper;

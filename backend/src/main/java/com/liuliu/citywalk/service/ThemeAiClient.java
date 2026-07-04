@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
-public class DeepSeekThemeAiClient {
+public class ThemeAiClient {
 
     private static final String PROVIDER = "deepseek";
     private static final String SYSTEM_PROMPT =
@@ -28,7 +28,7 @@ public class DeepSeekThemeAiClient {
     private final String configuredModel;
     private final String configuredApiKey;
 
-    public DeepSeekThemeAiClient(
+    public ThemeAiClient(
             ObjectMapper objectMapper,
             @Qualifier("deepSeekChatModel") ChatModel chatModel,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
@@ -73,7 +73,7 @@ public class DeepSeekThemeAiClient {
 
         String content = extractText(aggregatedResponse.get());
         if (content == null || content.isBlank()) {
-            throw new IllegalStateException("DeepSeek returned empty streamed content");
+            throw new IllegalStateException("theme_ai_returned_empty_streamed_content");
         }
         return content;
     }
@@ -81,7 +81,7 @@ public class DeepSeekThemeAiClient {
     private String call(String prompt, boolean expectJson) {
         String content = extractText(chatModel.call(buildPrompt(prompt, expectJson)));
         if (content == null || content.isBlank()) {
-            throw new IllegalStateException("DeepSeek returned empty content");
+            throw new IllegalStateException("theme_ai_returned_empty_content");
         }
         return content;
     }
@@ -128,7 +128,7 @@ public class DeepSeekThemeAiClient {
         int start = trimmed.indexOf('{');
         int end = trimmed.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new IllegalArgumentException("No JSON object found in DeepSeek response");
+            throw new IllegalArgumentException("no_json_object_found_in_theme_ai_response");
         }
         return trimmed.substring(start, end + 1);
     }

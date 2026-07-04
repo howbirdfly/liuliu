@@ -11,8 +11,8 @@ import com.liuliu.citywalk.model.dto.response.MissionVerifyResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeResponse;
 import com.liuliu.citywalk.model.dto.response.ThemeStreamEventResponse;
 import com.liuliu.citywalk.model.dto.response.WalkRecordCardTextResponse;
-import com.liuliu.citywalk.service.DeepSeekThemeService;
 import com.liuliu.citywalk.service.MissionVerifyAiService;
+import com.liuliu.citywalk.service.ThemeService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -29,17 +29,17 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RequestMapping("/api/v1/ai")
 public class AiThemeController {
 
-    private final DeepSeekThemeService deepSeekThemeService;
+    private final ThemeService themeService;
     private final MissionVerifyAiService missionVerifyAiService;
 
-    public AiThemeController(DeepSeekThemeService deepSeekThemeService, MissionVerifyAiService missionVerifyAiService) {
-        this.deepSeekThemeService = deepSeekThemeService;
+    public AiThemeController(ThemeService themeService, MissionVerifyAiService missionVerifyAiService) {
+        this.themeService = themeService;
         this.missionVerifyAiService = missionVerifyAiService;
     }
 
     @PostMapping("/themes/generate")
     public ApiResponse<ThemeResponse> generate(@Valid @RequestBody GenerateThemeRequest request) {
-        return ApiResponse.success(deepSeekThemeService.generateTheme(request));
+        return ApiResponse.success(themeService.generateTheme(request));
     }
 
     @GetMapping(value = "/themes/generate/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -69,18 +69,18 @@ public class AiThemeController {
                         "start",
                         null,
                         null,
-                        deepSeekThemeService.provider(),
-                        deepSeekThemeService.model()
+                        themeService.provider(),
+                        themeService.model()
                 ));
 
-                ThemeResponse theme = deepSeekThemeService.streamGenerateTheme(
+                ThemeResponse theme = themeService.streamGenerateTheme(
                         request,
                         delta -> sendThemeEvent(emitter, new ThemeStreamEventResponse(
                                 "content_delta",
                                 delta,
                                 null,
-                                deepSeekThemeService.provider(),
-                                deepSeekThemeService.model()
+                                themeService.provider(),
+                                themeService.model()
                         ))
                 );
 
@@ -88,8 +88,8 @@ public class AiThemeController {
                         "complete",
                         null,
                         theme,
-                        deepSeekThemeService.provider(),
-                        deepSeekThemeService.model()
+                        themeService.provider(),
+                        themeService.model()
                 ));
                 emitter.complete();
             } catch (Exception error) {
@@ -105,27 +105,27 @@ public class AiThemeController {
 
     @PostMapping("/themes/preset")
     public ApiResponse<ThemeResponse> generatePreset(@Valid @RequestBody GeneratePresetThemeRequest request) {
-        return ApiResponse.success(deepSeekThemeService.generatePreset(request));
+        return ApiResponse.success(themeService.generatePreset(request));
     }
 
     @PostMapping("/themes/combine")
     public ApiResponse<ThemeResponse> combine(@Valid @RequestBody CombineThemeRequest request) {
-        return ApiResponse.success(deepSeekThemeService.combineTheme(request));
+        return ApiResponse.success(themeService.combineTheme(request));
     }
 
     @PostMapping("/walk-record-card")
     public ApiResponse<WalkRecordCardTextResponse> generateWalkRecordCard(@Valid @RequestBody GenerateWalkRecordCardRequest request) {
-        return ApiResponse.success(deepSeekThemeService.generateWalkRecordCardText(request));
+        return ApiResponse.success(themeService.generateWalkRecordCardText(request));
     }
 
     @GetMapping("/location/context")
     public ApiResponse<LocationContextResponse> context(@RequestParam Double lat, @RequestParam Double lng) {
-        return ApiResponse.success(deepSeekThemeService.locationContext(lat, lng));
+        return ApiResponse.success(themeService.locationContext(lat, lng));
     }
 
     @GetMapping("/location/search-context")
     public ApiResponse<LocationContextResponse> searchContext(@RequestParam String query) {
-        return ApiResponse.success(deepSeekThemeService.searchContext(query));
+        return ApiResponse.success(themeService.searchContext(query));
     }
 
     @PostMapping("/missions/verify")
