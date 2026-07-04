@@ -1,12 +1,8 @@
 package com.liuliu.citywalk.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.MessageAggregator;
-import org.springframework.ai.chat.model.StreamingChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -14,7 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 @Service
 public class ThemeAiClient {
@@ -23,20 +19,22 @@ public class ThemeAiClient {
     private static final String SYSTEM_PROMPT =
             "你是一名擅长中文表达的 City Walk 策划助手。严格按照要求返回内容，不要输出多余解释。";
 
-    private final ObjectMapper objectMapper;
+    private final SpringAiPromptExecutor promptExecutor;
     private final ChatModel chatModel;
     private final String configuredModel;
     private final String configuredApiKey;
 
     public ThemeAiClient(
-            ObjectMapper objectMapper,
+            SpringAiPromptExecutor promptExecutor,
             @Qualifier("deepSeekChatModel") ChatModel chatModel,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey
     ) {
-        this.objectMapper = objectMapper;
+        this.promptExecutor = promptExecutor;
         this.chatModel = chatModel;
-        this.configuredModel = configuredModel == null || configuredModel.isBlank() ? "deepseek-chat" : configuredModel.trim();
+        this.configuredModel = configuredModel == null || configuredModel.isBlank()
+                ? "deepseek-chat"
+                : configuredModel.trim();
         this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
     }
 
@@ -52,51 +50,27 @@ public class ThemeAiClient {
         return !configuredApiKey.isBlank() && chatModel != null;
     }
 
-    public <T> T callJson(String prompt, Class<T> responseType) throws Exception {
-        return objectMapper.readValue(extractJsonObject(call(prompt, true)), responseType);
+    public <T> T callJson(String prompt, Class<T> responseType) {
+        return promptExecutor.callStructured(chatModel, buildPrompt(prompt, promptExecutor.structuredFormat(responseType)), responseType);
     }
 
-    public <T> T callJsonStreaming(String prompt, ThemeStreamListener listener, Class<T> responseType) throws Exception {
-        return objectMapper.readValue(extractJsonObject(callStreaming(prompt, listener)), responseType);
+    public <T> T callJsonStreaming(String prompt, Consumer<String> listener, Class<T> responseType) {
+        return promptExecutor.callStructuredStreaming(
+                chatModel,
+                buildPrompt(prompt, promptExecutor.structuredFormat(responseType)),
+                listener,
+                responseType
+        );
     }
 
     public String callText(String prompt) {
-        return call(prompt, false).trim();
+        return promptExecutor.callText(chatModel, buildPrompt(prompt, null)).trim();
     }
 
-    private String callStreaming(String prompt, ThemeStreamListener listener) {
-        AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
-        new MessageAggregator()
-                .aggregate(getStreamingChatModel().stream(buildPrompt(prompt, true)), aggregatedResponse::set)
-                .doOnNext(chunk -> emitStreamingDelta(chunk, listener))
-                .blockLast();
-
-        String content = extractText(aggregatedResponse.get());
-        if (content == null || content.isBlank()) {
-            throw new IllegalStateException("theme_ai_returned_empty_streamed_content");
-        }
-        return content;
-    }
-
-    private String call(String prompt, boolean expectJson) {
-        String content = extractText(chatModel.call(buildPrompt(prompt, expectJson)));
-        if (content == null || content.isBlank()) {
-            throw new IllegalStateException("theme_ai_returned_empty_content");
-        }
-        return content;
-    }
-
-    private StreamingChatModel getStreamingChatModel() {
-        if (chatModel instanceof StreamingChatModel compatibleStreamingChatModel) {
-            return compatibleStreamingChatModel;
-        }
-        throw new IllegalStateException("StreamingChatModel is not available");
-    }
-
-    private Prompt buildPrompt(String prompt, boolean expectJson) {
-        String normalizedPrompt = expectJson
-                ? prompt + "\n\n只返回一个 JSON 对象，不要使用 markdown 代码块。"
-                : prompt;
+    private Prompt buildPrompt(String prompt, String outputFormat) {
+        String normalizedPrompt = outputFormat == null || outputFormat.isBlank()
+                ? prompt
+                : prompt + "\n\n" + outputFormat;
         return new Prompt(
                 List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(normalizedPrompt)),
                 ChatOptions.builder()
@@ -104,32 +78,5 @@ public class ThemeAiClient {
                         .temperature(0.8d)
                         .build()
         );
-    }
-
-    private void emitStreamingDelta(ChatResponse chunk, ThemeStreamListener listener) {
-        if (listener == null) {
-            return;
-        }
-        String delta = extractText(chunk);
-        if (delta != null && !delta.isEmpty()) {
-            listener.onContentDelta(delta);
-        }
-    }
-
-    private String extractText(ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return "";
-        }
-        return response.getResult().getOutput().getText();
-    }
-
-    private String extractJsonObject(String raw) {
-        String trimmed = raw == null ? "" : raw.trim();
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        if (start < 0 || end <= start) {
-            throw new IllegalArgumentException("no_json_object_found_in_theme_ai_response");
-        }
-        return trimmed.substring(start, end + 1);
     }
 }

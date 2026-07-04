@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -42,7 +43,7 @@ public class ThemeService {
         return toThemeResponse(callThemePrompt(buildGenerateThemePrompt(request), fallback), 1L);
     }
 
-    public ThemeResponse streamGenerateTheme(GenerateThemeRequest request, ThemeStreamListener listener) {
+    public ThemeResponse streamGenerateTheme(GenerateThemeRequest request, Consumer<String> listener) {
         ThemePayload fallback = defaultThemeFallback();
         return toThemeResponse(callThemePromptStreaming(buildGenerateThemePrompt(request), fallback, listener), 1L);
     }
@@ -295,7 +296,7 @@ public class ThemeService {
         );
     }
 
-    private ThemePayload callThemePromptStreaming(String prompt, ThemePayload fallback, ThemeStreamListener listener) {
+    private ThemePayload callThemePromptStreaming(String prompt, ThemePayload fallback, Consumer<String> listener) {
         return executeStreamingJsonTask(
                 "streaming theme",
                 prompt,
@@ -349,7 +350,7 @@ public class ThemeService {
             String taskName,
             String prompt,
             T fallback,
-            ThemeStreamListener listener,
+            Consumer<String> listener,
             Class<T> responseType,
             Function<T, T> sanitizer,
             Runnable fallbackEmitter
@@ -450,14 +451,14 @@ public class ThemeService {
         );
     }
 
-    private void emitFallbackTheme(ThemeStreamListener listener, ThemePayload fallback) {
+    private void emitFallbackTheme(Consumer<String> listener, ThemePayload fallback) {
         if (listener == null) {
             return;
         }
         try {
-            listener.onContentDelta(objectMapper.writeValueAsString(fallback));
+            listener.accept(objectMapper.writeValueAsString(fallback));
         } catch (Exception ignored) {
-            listener.onContentDelta("{\"title\":\"城市漫步提案\"}");
+            listener.accept("{\"title\":\"城市漫步提案\"}");
         }
     }
 
