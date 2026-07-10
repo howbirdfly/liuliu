@@ -48,7 +48,7 @@ public class AgentIntentAnalysisService {
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile(
-            "(半小时|一个半小时|两小时|三小时|四小时|五小时|一小时|半天|一整天|一晚上|一下午|一上午|周末半天|\\d+(?:\\.\\d+)?\\s*(?:个?小时|小时|h|H))"
+            "(半小时|半个小时|一个半小时|两个半小时|一小时|一个小时|两小时|两个小时|三小时|三个小时|四小时|四个小时|五小时|五个小时|半天|一整天|一晚上|一下午|一上午|周末半天|\\d+(?:\\.\\d+)?\\s*(?:个?小时|小时|h|H))"
     );
 
     private static final Pattern AREA_PATTERN = Pattern.compile(

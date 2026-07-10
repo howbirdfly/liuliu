@@ -11,6 +11,9 @@ function getApiBaseUrl(): string {
   if (rawValue !== undefined) {
     return rawValue.trim().replace(/\/$/, '');
   }
+  if (typeof window !== 'undefined') {
+    return '';
+  }
   return DEFAULT_API_BASE_URL;
 }
 

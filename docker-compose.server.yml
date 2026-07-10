@@ -1,0 +1,118 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: liuliu-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-liuliu_citywalk}
+      MYSQL_USER: ${MYSQL_USERNAME:-liuliu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data-liuliunew:/var/lib/mysql
+      - ./backend/liuliunew.sql:/docker-entrypoint-initdb.d/01-base.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: liuliu-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: liuliu-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      SPRING_AI_CHAT_MODEL: ${SPRING_AI_CHAT_MODEL:-deepseek}
+      MYSQL_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-liuliu_citywalk}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-liuliu}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-123456}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: ${REDIS_DATABASE:-1}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      AMAP_WEB_KEY: ${AMAP_WEB_KEY:-}
+      AMAP_BASE_URL: ${AMAP_BASE_URL:-https://restapi.amap.com}
+      MAIL_HOST: ${MAIL_HOST:-smtp.qq.com}
+      MAIL_PORT: ${MAIL_PORT:-465}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-oss-cn-beijing.aliyuncs.com}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:-}
+      JWT_SECRET: ${JWT_SECRET:-liuliu-citywalk-backend-secret-key-please-change}
+      JWT_ISSUER: ${JWT_ISSUER:-liuliu-backend}
+      JWT_ACCESS_EXPIRE_SECONDS: ${JWT_ACCESS_EXPIRE_SECONDS:-7200}
+      JWT_REFRESH_EXPIRE_SECONDS: ${JWT_REFRESH_EXPIRE_SECONDS:-2592000}
+      LIULIU_RAG_ENABLED: ${LIULIU_RAG_ENABLED:-false}
+      LIULIU_RAG_RERANK_ENABLED: ${LIULIU_RAG_RERANK_ENABLED:-false}
+      MILVUS_ENABLED: ${MILVUS_ENABLED:-false}
+      LIULIU_AI_EMBEDDING_API_KEY: ${LIULIU_AI_EMBEDDING_API_KEY:-}
+      LIULIU_AI_EMBEDDING_MODEL: ${LIULIU_AI_EMBEDDING_MODEL:-text-embedding-v4}
+      LIULIU_AI_EMBEDDING_BASE_URL: ${LIULIU_AI_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LIULIU_AI_EMBEDDING_DIMENSIONS: ${LIULIU_AI_EMBEDDING_DIMENSIONS:-1024}
+      LIULIU_AI_EMBEDDING_ENCODING_FORMAT: ${LIULIU_AI_EMBEDDING_ENCODING_FORMAT:-float}
+      LIULIU_AI_EMBEDDING_REQUEST_TIMEOUT_MS: ${LIULIU_AI_EMBEDDING_REQUEST_TIMEOUT_MS:-5000}
+      LIULIU_AI_MISSION_VERIFY_API_KEY: ${LIULIU_AI_MISSION_VERIFY_API_KEY:-}
+      LIULIU_AI_MISSION_VERIFY_MODEL: ${LIULIU_AI_MISSION_VERIFY_MODEL:-qwen-vl-plus}
+      LIULIU_AI_MISSION_VERIFY_BASE_URL: ${LIULIU_AI_MISSION_VERIFY_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LIULIU_AI_MISSION_VERIFY_REQUEST_TIMEOUT_MS: ${LIULIU_AI_MISSION_VERIFY_REQUEST_TIMEOUT_MS:-2200}
+      CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:-false}
+      AGENT_MEMORY_ENABLED: ${AGENT_MEMORY_ENABLED:-true}
+      AGENT_MEMORY_TTL_SECONDS: ${AGENT_MEMORY_TTL_SECONDS:-21600}
+      AGENT_MEMORY_MAX_TURNS: ${AGENT_MEMORY_MAX_TURNS:-6}
+      AGENT_TOOL_CACHE_ENABLED: ${AGENT_TOOL_CACHE_ENABLED:-false}
+      SINGLE_WALK_SESSION_ENABLED: ${SINGLE_WALK_SESSION_ENABLED:-true}
+      SINGLE_WALK_SESSION_TTL_SECONDS: ${SINGLE_WALK_SESSION_TTL_SECONDS:-21600}
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+    volumes:
+      - backend-uploads:/app/uploads
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_AMAP_JS_KEY: ${VITE_AMAP_JS_KEY:-}
+        VITE_USE_MOCK_LOGIN: ${VITE_USE_MOCK_LOGIN:-false}
+    container_name: liuliu-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  mysql-data-liuliunew:
+  redis-data:
+  backend-uploads:
