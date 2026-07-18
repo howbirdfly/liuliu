@@ -26,7 +26,7 @@ public class ThemeAiClient {
 
     public ThemeAiClient(
             SpringAiPromptExecutor promptExecutor,
-            @Qualifier("deepSeekChatModel") ChatModel chatModel,
+            @Qualifier("liuliuDeepSeekChatModel") ChatModel chatModel,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey
     ) {

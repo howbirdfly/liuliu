@@ -72,6 +72,9 @@ jwt:
 
 liuliu:
   ai:
+    deepseek:
+      connect-timeout-ms: ${LIULIU_AI_DEEPSEEK_CONNECT_TIMEOUT_MS:10000}
+      request-timeout-ms: ${LIULIU_AI_DEEPSEEK_REQUEST_TIMEOUT_MS:60000}
     embedding:
       api-key: ${LIULIU_AI_EMBEDDING_API_KEY:}
       model: ${LIULIU_AI_EMBEDDING_MODEL:text-embedding-v4}

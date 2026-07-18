@@ -5,6 +5,7 @@ import com.liuliu.citywalk.config.AgentMemoryProperties;
 import com.liuliu.citywalk.config.AgentToolCacheProperties;
 import com.liuliu.citywalk.config.CoCreateRoomProperties;
 import com.liuliu.citywalk.config.CommunityCacheProperties;
+import com.liuliu.citywalk.config.DeepSeekAiProperties;
 import com.liuliu.citywalk.config.EmbeddingAiProperties;
 import com.liuliu.citywalk.config.MilvusProperties;
 import com.liuliu.citywalk.config.MissionVerifyAiProperties;
@@ -23,6 +24,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableConfigurationProperties({
         AmapProperties.class,
         MilvusProperties.class,
+        DeepSeekAiProperties.class,
         EmbeddingAiProperties.class,
         MissionVerifyAiProperties.class,
         NotificationCacheProperties.class,

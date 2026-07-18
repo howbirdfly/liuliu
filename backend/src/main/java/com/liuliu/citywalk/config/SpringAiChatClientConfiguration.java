@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration;
 public class SpringAiChatClientConfiguration {
 
     @Bean("deepSeekChatClient")
-    public ChatClient deepSeekChatClient(@Qualifier("deepSeekChatModel") ChatModel chatModel) {
+    public ChatClient deepSeekChatClient(@Qualifier("liuliuDeepSeekChatModel") ChatModel chatModel) {
         return ChatClient.create(chatModel);
     }
 
