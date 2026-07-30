@@ -1,5 +1,7 @@
 package com.liuliu.citywalk.service.agent.hook;
 
+import com.liuliu.citywalk.service.AgentExecutionEvent;
+import com.liuliu.citywalk.service.AgentExecutionListener;
 import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.AgentConversationStateService;
 import com.liuliu.citywalk.service.AgentIntentAnalysisService;
@@ -24,6 +26,9 @@ public final class AgentExecutionHookContext {
     private final List<LlmMessage> messages;
     private final List<AgentStepResponse> steps;
     private final Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey;
+    private AgentExecutionListener executionListener;
+    private String provider;
+    private String model;
     private final Map<String, Object> attributes = new LinkedHashMap<>();
     private int round;
     private String knowledgeQuery;
@@ -90,6 +95,33 @@ public final class AgentExecutionHookContext {
 
     public Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey() {
         return toolExecutionMemoByKey;
+    }
+
+    public AgentExecutionListener executionListener() {
+        return executionListener;
+    }
+
+    public AgentExecutionHookContext withExecutionListener(AgentExecutionListener executionListener) {
+        this.executionListener = executionListener;
+        return this;
+    }
+
+    public String provider() {
+        return provider;
+    }
+
+    public AgentExecutionHookContext withProvider(String provider) {
+        this.provider = provider;
+        return this;
+    }
+
+    public String model() {
+        return model;
+    }
+
+    public AgentExecutionHookContext withModel(String model) {
+        this.model = model;
+        return this;
     }
 
     public Map<String, Object> attributes() {
@@ -166,5 +198,11 @@ public final class AgentExecutionHookContext {
     public AgentExecutionHookContext withFinalAnswer(String finalAnswer) {
         this.finalAnswer = finalAnswer;
         return this;
+    }
+
+    public void emit(AgentExecutionEvent event) {
+        if (executionListener != null && event != null) {
+            executionListener.onEvent(event);
+        }
     }
 }

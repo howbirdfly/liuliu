@@ -132,9 +132,6 @@ public class AgentExecutionPipelineService {
             return clarificationResponse;
         }
 
-        DeterministicPrefetchOutcome knowledgePrefetch =
-                applyDeterministicKnowledgePrefetch(execution, executionHandle, listener);
-        applyDeterministicPoiPrefetch(execution, knowledgePrefetch, executionHandle, listener);
         return runPlanningLoop(execution, executionHandle, listener);
     }
 
@@ -389,19 +386,19 @@ public class AgentExecutionPipelineService {
     ) {
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.BEFORE_AGENT_LOOP,
-                hookContext(AgentExecutionHookPoint.BEFORE_AGENT_LOOP, execution, 0, null, null)
+                hookContext(AgentExecutionHookPoint.BEFORE_AGENT_LOOP, execution, 0, null, null, listener)
         );
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             checkCancelled(executionHandle);
             agentExecutionHookRegistryService.trigger(
                     AgentExecutionHookPoint.BEFORE_ROUND,
-                    hookContext(AgentExecutionHookPoint.BEFORE_ROUND, execution, round, null, () -> checkCancelled(executionHandle))
+                    hookContext(AgentExecutionHookPoint.BEFORE_ROUND, execution, round, null, () -> checkCancelled(executionHandle), listener)
             );
             AgentRoundService.AgentRoundOutcome roundOutcome =
                     executePlanningRound(execution, round, executionHandle, listener);
             agentExecutionHookRegistryService.trigger(
                     AgentExecutionHookPoint.AFTER_ROUND,
-                    hookContext(AgentExecutionHookPoint.AFTER_ROUND, execution, round, roundOutcome, () -> checkCancelled(executionHandle))
+                    hookContext(AgentExecutionHookPoint.AFTER_ROUND, execution, round, roundOutcome, () -> checkCancelled(executionHandle), listener)
             );
             if (roundOutcome.roundType() == AgentRoundService.RoundType.TOOL_CALLING) {
                 continue;
@@ -727,7 +724,8 @@ public class AgentExecutionPipelineService {
                 execution,
                 round,
                 null,
-                () -> checkCancelled(executionHandle)
+                () -> checkCancelled(executionHandle),
+                listener
         ).withFinalAnswer(answer);
         agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_FINAL_ANSWER, finalAnswerContext);
         answer = safeText(finalAnswerContext.finalAnswer(), answer);
@@ -767,7 +765,7 @@ public class AgentExecutionPipelineService {
         ));
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
-                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle))
+                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle), listener)
                         .withFinalAnswer(answer)
         );
         return result;
@@ -784,7 +782,8 @@ public class AgentExecutionPipelineService {
                 execution,
                 MAX_TOOL_ROUNDS,
                 null,
-                null
+                null,
+                listener
         ).withFinalAnswer(fallback);
         agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_FINAL_ANSWER, finalAnswerContext);
         fallback = safeText(finalAnswerContext.finalAnswer(), fallback);
@@ -803,7 +802,7 @@ public class AgentExecutionPipelineService {
         ));
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
-                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, MAX_TOOL_ROUNDS, null, null)
+                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, MAX_TOOL_ROUNDS, null, null, listener)
                         .withFinalAnswer(fallback)
         );
         return new AgentChatResponse(
@@ -1071,7 +1070,8 @@ public class AgentExecutionPipelineService {
             PreparedExecution execution,
             int round,
             AgentRoundService.AgentRoundOutcome roundOutcome,
-            Runnable cancellationCheck
+            Runnable cancellationCheck,
+            AgentExecutionListener listener
     ) {
         AgentExecutionHookContext context = new AgentExecutionHookContext(
                 point,
@@ -1083,7 +1083,11 @@ public class AgentExecutionPipelineService {
                 execution == null ? List.of() : execution.messages(),
                 execution == null ? List.of() : execution.steps(),
                 execution == null ? Map.of() : execution.toolExecutionMemoByKey()
-        ).withRound(round).withRoundOutcome(roundOutcome);
+        ).withRound(round)
+                .withRoundOutcome(roundOutcome)
+                .withExecutionListener(listener)
+                .withProvider(llmClient.provider())
+                .withModel(llmClient.model());
         if (cancellationCheck != null) {
             context.withCancellationCheck(cancellationCheck);
         }
