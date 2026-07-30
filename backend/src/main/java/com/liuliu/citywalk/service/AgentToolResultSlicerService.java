@@ -39,6 +39,7 @@ public class AgentToolResultSlicerService {
                 case "search_community_guides" -> sliceCommunityGuides(payload);
                 case "get_walk_detail" -> sliceWalkDetail(payload);
                 case "search_poi", "nearby_pois" -> slicePoiResults(payload);
+                case "todolist" -> sliceTodoList(payload);
                 default -> sliceGeneric(payload);
             };
             return objectMapper.writeValueAsString(sliced);
@@ -252,6 +253,32 @@ public class AgentToolResultSlicerService {
         result.put("resultCount", slicedResults.size());
         result.put("results", slicedResults);
         result.put("guidance", "Treat these places as candidate stops instead of mandatory stops.");
+        return result;
+    }
+
+    private Map<String, Object> sliceTodoList(Map<String, Object> payload) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", payload.getOrDefault("success", true));
+        appendIfPresent(payload, result, "action");
+        appendIfPresent(payload, result, "message");
+
+        List<Map<String, Object>> slicedItems = new ArrayList<>();
+        for (Object item : toList(payload.get("items"), 8)) {
+            if (!(item instanceof Map<?, ?> raw)) {
+                continue;
+            }
+            Map<String, Object> entry = new LinkedHashMap<>();
+            putIfPresent(entry, "id", raw.get("id"));
+            putIfNotBlank(entry, "content", firstText(raw, "content", "title", "name"));
+            putIfNotBlank(entry, "status", firstText(raw, "status"));
+            putIfNotBlank(entry, "note", trim(firstText(raw, "note", "summary", "description"), 80));
+            if (!entry.isEmpty()) {
+                slicedItems.add(entry);
+            }
+        }
+        result.put("items", slicedItems);
+        appendIfPresent(payload, result, "summary");
+        result.put("guidance", "Use the todo list to track multi-step progress, not as user-facing content.");
         return result;
     }
 

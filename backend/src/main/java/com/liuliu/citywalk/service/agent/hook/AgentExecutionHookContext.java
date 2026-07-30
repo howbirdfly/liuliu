@@ -19,6 +19,7 @@ public final class AgentExecutionHookContext {
 
     private final AgentExecutionHookPoint point;
     private final Long userId;
+    private final String executionId;
     private final String normalizedPrompt;
     private final AgentIntentAnalysisService.AgentIntent intent;
     private final AgentConversationStateService.ResolvedConversationState conversationState;
@@ -42,6 +43,7 @@ public final class AgentExecutionHookContext {
     public AgentExecutionHookContext(
             AgentExecutionHookPoint point,
             Long userId,
+            String executionId,
             String normalizedPrompt,
             AgentIntentAnalysisService.AgentIntent intent,
             AgentConversationStateService.ResolvedConversationState conversationState,
@@ -52,6 +54,7 @@ public final class AgentExecutionHookContext {
     ) {
         this.point = point;
         this.userId = userId;
+        this.executionId = executionId;
         this.normalizedPrompt = normalizedPrompt;
         this.intent = intent;
         this.conversationState = conversationState;
@@ -67,6 +70,10 @@ public final class AgentExecutionHookContext {
 
     public Long userId() {
         return userId;
+    }
+
+    public String executionId() {
+        return executionId;
     }
 
     public String normalizedPrompt() {

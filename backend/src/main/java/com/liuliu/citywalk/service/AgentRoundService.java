@@ -36,6 +36,7 @@ public class AgentRoundService {
 
     public AgentRoundOutcome executeRound(
             Long userId,
+            String executionId,
             String normalizedPrompt,
             AgentIntentAnalysisService.AgentIntent intent,
             AgentConversationStateService.ResolvedConversationState conversationState,
@@ -53,6 +54,7 @@ public class AgentRoundService {
         AgentExecutionHookContext beforeLlmContext = hookContext(
                 AgentExecutionHookPoint.BEFORE_LLM_CALL,
                 userId,
+                executionId,
                 normalizedPrompt,
                 intent,
                 conversationState,
@@ -87,6 +89,7 @@ public class AgentRoundService {
                 hookContext(
                         AgentExecutionHookPoint.AFTER_LLM_RESPONSE,
                         userId,
+                        executionId,
                         normalizedPrompt,
                         intent,
                         conversationState,
@@ -110,6 +113,7 @@ public class AgentRoundService {
                         hookContext(
                                 AgentExecutionHookPoint.BEFORE_TOOL_CALL,
                                 userId,
+                                executionId,
                                 normalizedPrompt,
                                 intent,
                                 conversationState,
@@ -140,6 +144,7 @@ public class AgentRoundService {
                         hookContext(
                                 AgentExecutionHookPoint.AFTER_TOOL_RESULT,
                                 userId,
+                                executionId,
                                 normalizedPrompt,
                                 intent,
                                 conversationState,
@@ -199,6 +204,7 @@ public class AgentRoundService {
     private AgentExecutionHookContext hookContext(
             AgentExecutionHookPoint point,
             Long userId,
+            String executionId,
             String normalizedPrompt,
             AgentIntentAnalysisService.AgentIntent intent,
             AgentConversationStateService.ResolvedConversationState conversationState,
@@ -213,6 +219,7 @@ public class AgentRoundService {
         return new AgentExecutionHookContext(
                 point,
                 userId,
+                executionId,
                 normalizedPrompt,
                 intent,
                 conversationState,

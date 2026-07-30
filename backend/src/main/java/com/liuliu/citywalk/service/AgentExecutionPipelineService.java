@@ -78,6 +78,15 @@ public class AgentExecutionPipelineService {
             - Only treat the turn as a brand-new request when the user clearly starts over or explicitly asks to ignore earlier context.
             """;
 
+    private static final String TODO_TOOL_GUIDE = """
+
+            Todo tool rules:
+            - For requests that require multiple dependent steps, retries, or synthesis across several tools, you may use the todolist tool to track progress.
+            - Prefer a simple pattern: add key subtasks, update_status as work advances, and list before the final answer if you need a quick progress check.
+            - Do not use todolist for trivial one-step answers.
+            - Keep todo items short, concrete, and action-oriented.
+            """;
+
     private final SpringAiLlmClient llmClient;
     private final AgentIntentAnalysisService agentIntentAnalysisService;
     private final AgentConversationStateService agentConversationStateService;
@@ -87,6 +96,7 @@ public class AgentExecutionPipelineService {
     private final AgentToolResultSlicerService agentToolResultSlicerService;
     private final AgentRoundService agentRoundService;
     private final AgentExecutionHookRegistryService agentExecutionHookRegistryService;
+    private final AgentTodoListService agentTodoListService;
 
     public AgentExecutionPipelineService(
             SpringAiLlmClient llmClient,
@@ -97,7 +107,8 @@ public class AgentExecutionPipelineService {
             AgentToolExecutionService agentToolExecutionService,
             AgentToolResultSlicerService agentToolResultSlicerService,
             AgentRoundService agentRoundService,
-            AgentExecutionHookRegistryService agentExecutionHookRegistryService
+            AgentExecutionHookRegistryService agentExecutionHookRegistryService,
+            AgentTodoListService agentTodoListService
     ) {
         this.llmClient = llmClient;
         this.agentIntentAnalysisService = agentIntentAnalysisService;
@@ -108,6 +119,7 @@ public class AgentExecutionPipelineService {
         this.agentToolResultSlicerService = agentToolResultSlicerService;
         this.agentRoundService = agentRoundService;
         this.agentExecutionHookRegistryService = agentExecutionHookRegistryService;
+        this.agentTodoListService = agentTodoListService;
     }
 
     public AgentChatResponse execute(
@@ -117,7 +129,11 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
-        return runPlanningLoop(execution, executionHandle, listener);
+        try {
+            return runPlanningLoop(execution, executionHandle, listener);
+        } finally {
+            agentTodoListService.closeExecutionScope();
+        }
     }
 
     private PreparedExecution prepareExecution(
@@ -156,6 +172,7 @@ public class AgentExecutionPipelineService {
                         "request_pipeline_focus",
                         buildIntentSpecificPipelineGuide(intent)
                 ),
+                AgentPromptAssemblyService.section("todo_tool", TODO_TOOL_GUIDE),
                 AgentPromptAssemblyService.section("final_answer_contract", FINAL_ANSWER_GUIDE),
                 agentPromptAssemblyService.buildLongTermMemorySection(userId, normalizedPrompt, intent),
                 AgentPromptAssemblyService.section("fallback_rules", FALLBACK_GUIDE)
@@ -246,6 +263,7 @@ public class AgentExecutionPipelineService {
 
         return new PreparedExecution(
                 userId,
+                executionHandle == null ? "" : executionHandle.executionId(),
                 normalizedPrompt,
                 intent,
                 conversationState,
@@ -316,6 +334,7 @@ public class AgentExecutionPipelineService {
         }
         AgentRoundService.AgentRoundOutcome outcome = agentRoundService.executeRound(
                 execution.userId(),
+                execution.executionId(),
                 execution.normalizedPrompt(),
                 execution.intent(),
                 execution.conversationState(),
@@ -720,6 +739,7 @@ public class AgentExecutionPipelineService {
         AgentExecutionHookContext context = new AgentExecutionHookContext(
                 point,
                 execution == null ? null : execution.userId(),
+                execution == null ? "" : execution.executionId(),
                 execution == null ? "" : execution.normalizedPrompt(),
                 execution == null ? null : execution.intent(),
                 execution == null ? null : execution.conversationState(),
@@ -740,6 +760,7 @@ public class AgentExecutionPipelineService {
 
     private record PreparedExecution(
             Long userId,
+            String executionId,
             String normalizedPrompt,
             AgentIntentAnalysisService.AgentIntent intent,
             AgentConversationStateService.ResolvedConversationState conversationState,
