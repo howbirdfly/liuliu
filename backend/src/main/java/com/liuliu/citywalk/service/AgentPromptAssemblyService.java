@@ -119,7 +119,6 @@ public class AgentPromptAssemblyService {
 
     public void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
         appendConversationTurn(userId, userPrompt, assistantAnswer);
-        agentLongTermMemoryService.rememberTurn(userId, userPrompt, assistantAnswer);
     }
 
     public void rememberConversationShortTerm(Long userId, String userPrompt, String assistantAnswer) {

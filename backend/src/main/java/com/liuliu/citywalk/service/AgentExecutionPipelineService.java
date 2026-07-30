@@ -5,6 +5,7 @@ import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookAttributes;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookContext;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookPoint;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookResult;
@@ -21,9 +22,6 @@ import java.util.Map;
 public class AgentExecutionPipelineService {
 
     private static final int MAX_TOOL_ROUNDS = 6;
-    private static final String ATTR_REMEMBER_SHORT_TERM_ONLY = "rememberShortTermOnly";
-    private static final String ATTR_COMPLETION_CODE = "completionCode";
-
     private static final String PIPELINE_GUIDE = """
 
             Follow this planning pipeline for every request:
@@ -470,10 +468,10 @@ public class AgentExecutionPipelineService {
                 null
         ));
         agentExecutionHookRegistryService.trigger(
-                AgentExecutionHookPoint.AFTER_AGENT_LOOP,
-                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle), listener)
-                        .withAttribute(ATTR_REMEMBER_SHORT_TERM_ONLY, false)
-                        .withAttribute(ATTR_COMPLETION_CODE, null)
+                        AgentExecutionHookPoint.AFTER_AGENT_LOOP,
+                        hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle), listener)
+                        .withAttribute(AgentExecutionHookAttributes.REMEMBER_SHORT_TERM_ONLY, false)
+                        .withAttribute(AgentExecutionHookAttributes.COMPLETION_CODE, null)
                         .withFinalAnswer(answer)
         );
         return result;
@@ -509,8 +507,8 @@ public class AgentExecutionPipelineService {
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
                 hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, MAX_TOOL_ROUNDS, null, null, listener)
-                        .withAttribute(ATTR_REMEMBER_SHORT_TERM_ONLY, false)
-                        .withAttribute(ATTR_COMPLETION_CODE, "max_round_guard")
+                        .withAttribute(AgentExecutionHookAttributes.REMEMBER_SHORT_TERM_ONLY, false)
+                        .withAttribute(AgentExecutionHookAttributes.COMPLETION_CODE, "max_round_guard")
                         .withFinalAnswer(fallback)
         );
         return new AgentChatResponse(
@@ -561,10 +559,10 @@ public class AgentExecutionPipelineService {
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
                 hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, 0, null, null, listener)
                         .withAttribute(
-                                ATTR_REMEMBER_SHORT_TERM_ONLY,
+                                AgentExecutionHookAttributes.REMEMBER_SHORT_TERM_ONLY,
                                 hookResult != null && hookResult.rememberShortTermOnly()
                         )
-                        .withAttribute(ATTR_COMPLETION_CODE, completionCode)
+                        .withAttribute(AgentExecutionHookAttributes.COMPLETION_CODE, completionCode)
                         .withFinalAnswer(answer)
         );
         return new AgentChatResponse(

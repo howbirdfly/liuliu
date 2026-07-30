@@ -1,23 +1,17 @@
 package com.liuliu.citywalk.service.agent.hook;
 
-import com.liuliu.citywalk.service.AgentConversationStateService;
-import com.liuliu.citywalk.service.AgentPromptAssemblyService;
+import com.liuliu.citywalk.service.AgentLongTermMemoryService;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
 
 @Service
-public class ConversationPersistenceHook implements AgentExecutionHook {
+public class LongTermMemoryPersistenceHook implements AgentExecutionHook {
 
-    private final AgentPromptAssemblyService agentPromptAssemblyService;
-    private final AgentConversationStateService agentConversationStateService;
+    private final AgentLongTermMemoryService agentLongTermMemoryService;
 
-    public ConversationPersistenceHook(
-            AgentPromptAssemblyService agentPromptAssemblyService,
-            AgentConversationStateService agentConversationStateService
-    ) {
-        this.agentPromptAssemblyService = agentPromptAssemblyService;
-        this.agentConversationStateService = agentConversationStateService;
+    public LongTermMemoryPersistenceHook(AgentLongTermMemoryService agentLongTermMemoryService) {
+        this.agentLongTermMemoryService = agentLongTermMemoryService;
     }
 
     @Override
@@ -27,7 +21,7 @@ public class ConversationPersistenceHook implements AgentExecutionHook {
 
     @Override
     public int order() {
-        return 100;
+        return 110;
     }
 
     @Override
@@ -39,12 +33,17 @@ public class ConversationPersistenceHook implements AgentExecutionHook {
         if (finalAnswer == null || finalAnswer.isBlank()) {
             return AgentExecutionHookResult.continueExecution();
         }
-        agentPromptAssemblyService.rememberConversationShortTerm(
+        boolean rememberShortTermOnly = Boolean.TRUE.equals(
+                context.attributes().get(AgentExecutionHookAttributes.REMEMBER_SHORT_TERM_ONLY)
+        );
+        if (rememberShortTermOnly) {
+            return AgentExecutionHookResult.continueExecution();
+        }
+        agentLongTermMemoryService.rememberTurn(
                 context.userId(),
                 context.normalizedPrompt(),
                 finalAnswer
         );
-        agentConversationStateService.rememberState(context.userId(), context.conversationState());
         return AgentExecutionHookResult.continueExecution();
     }
 }
