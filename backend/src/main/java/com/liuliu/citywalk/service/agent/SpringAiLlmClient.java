@@ -14,7 +14,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.MessageAggregator;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +33,12 @@ public class SpringAiLlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(SpringAiLlmClient.class);
     private static final String DEFAULT_PROVIDER = "deepseek";
+    private static final int DEFAULT_MAX_TOKENS = 8000;
+    private static final int ESCALATED_MAX_TOKENS = 64000;
+    private static final int MAX_CONTINUATION_RETRIES = 3;
+    private static final String CONTINUATION_PROMPT = "Output token limit hit. Resume directly - "
+            + "no apology, no recap of what you were doing. Pick up mid-thought if that is where "
+            + "the cut happened. Break remaining work into smaller pieces.";
 
     private final ChatClient chatClient;
     private final AgentChatMemoryAdvisor agentChatMemoryAdvisor;
@@ -157,8 +163,9 @@ public class SpringAiLlmClient {
             Consumer<String> listener
     ) {
         List<LlmMessage> workingMessages = prepareMessagesForAttempt(instructions, messages, toolCallbacks);
-        int transientRetryAttempt = 0;
-        boolean overflowRetryUsed = false;
+        RecoveryState recoveryState = new RecoveryState();
+        int maxTokens = DEFAULT_MAX_TOKENS;
+        StringBuilder accumulatedAssistantContent = new StringBuilder();
 
         while (true) {
             AtomicBoolean emittedAnyDelta = new AtomicBoolean(false);
@@ -168,6 +175,7 @@ public class SpringAiLlmClient {
             }
 
             try {
+                LlmResponse response;
                 if (listener != null) {
                     Consumer<String> guardedListener = delta -> {
                         if (delta != null && !delta.isEmpty()) {
@@ -175,17 +183,77 @@ public class SpringAiLlmClient {
                         }
                         listener.accept(delta);
                     };
-                    return callStreamingResponse(
+                    response = callStreamingResponse(
                             chatClient,
                             instructions,
                             workingMessages,
                             toolCallbacks,
                             temperature,
                             callContext,
+                            maxTokens,
                             guardedListener
                     );
+                } else {
+                    response = callSingleResponse(
+                            chatClient,
+                            instructions,
+                            workingMessages,
+                            toolCallbacks,
+                            temperature,
+                            callContext,
+                            maxTokens
+                    );
                 }
-                return callSingleResponse(chatClient, instructions, workingMessages, toolCallbacks, temperature, callContext);
+
+                boolean responseStarted = emittedAnyDelta.get();
+                if (response.isMaxTokensStop()) {
+                    if (!responseStarted && !recoveryState.hasEscalatedMaxTokens()) {
+                        recoveryState.markEscalatedMaxTokens();
+                        maxTokens = ESCALATED_MAX_TOKENS;
+                        log.warn(
+                                "Spring AI response hit max_tokens. Retrying with escalated maxTokens. requestSummary={}, from={}, to={}",
+                                summarizeRequest(workingMessages, toolCallbacks),
+                                DEFAULT_MAX_TOKENS,
+                                ESCALATED_MAX_TOKENS
+                        );
+                        continue;
+                    }
+
+                    if (!recoveryState.hasEscalatedMaxTokens()) {
+                        recoveryState.markEscalatedMaxTokens();
+                        maxTokens = ESCALATED_MAX_TOKENS;
+                    }
+
+                    accumulatedAssistantContent.append(response.content() == null ? "" : response.content());
+                    workingMessages = appendMessage(
+                            workingMessages,
+                            LlmMessage.assistant(response.content(), response.toolCalls())
+                    );
+                    if (recoveryState.continuationRecoveryCount() < MAX_CONTINUATION_RETRIES) {
+                        recoveryState.incrementContinuationRecoveryCount();
+                        workingMessages = appendMessage(workingMessages, LlmMessage.user(CONTINUATION_PROMPT));
+                        workingMessages = prepareMessagesForAttempt(instructions, workingMessages, toolCallbacks);
+                        log.warn(
+                                "Spring AI response hit max_tokens. Retrying with continuation prompt. requestSummary={}, attempt={}/{}, responseStarted={}, finishReason={}",
+                                summarizeRequest(workingMessages, toolCallbacks),
+                                recoveryState.continuationRecoveryCount(),
+                                MAX_CONTINUATION_RETRIES,
+                                responseStarted,
+                                response.finishReason()
+                        );
+                        continue;
+                    }
+
+                    log.warn(
+                            "Spring AI max_tokens recovery limit reached. requestSummary={}, continuations={}, finishReason={}",
+                            summarizeRequest(workingMessages, toolCallbacks),
+                            recoveryState.continuationRecoveryCount(),
+                            response.finishReason()
+                    );
+                    return new LlmResponse(accumulatedAssistantContent.toString(), List.of(), response.finishReason());
+                }
+
+                return prependAccumulatedContent(response, accumulatedAssistantContent.toString(), true);
             } catch (Exception error) {
                 if (Thread.currentThread().isInterrupted()) {
                     Thread.currentThread().interrupt();
@@ -193,10 +261,10 @@ public class SpringAiLlmClient {
                 }
 
                 boolean responseStarted = emittedAnyDelta.get();
-                if (!responseStarted && !overflowRetryUsed && isContextOverflowError(error)) {
+                if (!responseStarted && !recoveryState.hasAttemptedReactiveCompact() && isContextOverflowError(error)) {
                     List<LlmMessage> compactedMessages = agentContextWindowService.compactMessagesForContextOverflow(workingMessages);
                     if (compactedMessages != null && !compactedMessages.isEmpty()) {
-                        overflowRetryUsed = true;
+                        recoveryState.markAttemptedReactiveCompact();
                         workingMessages = compactedMessages;
                         log.info(
                                 "Spring AI request exceeded context window. Retrying with compacted context. requestSummary={}, compactedMessages={}",
@@ -209,12 +277,12 @@ public class SpringAiLlmClient {
 
                 if (!responseStarted
                         && isRetryableTransientError(error)
-                        && transientRetryAttempt < transientFailureMaxRetries) {
-                    transientRetryAttempt++;
-                    long backoffMs = computeBackoffDelayMs(transientRetryAttempt);
+                        && recoveryState.transientRetryAttempt() < transientFailureMaxRetries) {
+                    recoveryState.incrementTransientRetryAttempt();
+                    long backoffMs = computeBackoffDelayMs(recoveryState.transientRetryAttempt());
                     log.warn(
                             "Spring AI transient failure detected. Retrying attempt {}/{}. requestSummary={}, causeType={}, causeMessage={}, backoffMs={}",
-                            transientRetryAttempt,
+                            recoveryState.transientRetryAttempt(),
                             transientFailureMaxRetries,
                             summarizeRequest(workingMessages, toolCallbacks),
                             error.getClass().getName(),
@@ -388,9 +456,10 @@ public class SpringAiLlmClient {
             List<LlmMessage> messages,
             List<ToolCallback> toolCallbacks,
             Double temperature,
-            AgentCallContext callContext
+            AgentCallContext callContext,
+            Integer maxTokens
     ) {
-        ChatResponse response = prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext)
+        ChatResponse response = prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext, maxTokens)
                 .call()
                 .chatResponse();
         return toLlmResponse(response);
@@ -403,12 +472,13 @@ public class SpringAiLlmClient {
             List<ToolCallback> toolCallbacks,
             Double temperature,
             AgentCallContext callContext,
+            Integer maxTokens,
             Consumer<String> listener
     ) {
         AtomicReference<ChatResponse> aggregatedResponse = new AtomicReference<>();
         new MessageAggregator()
                 .aggregate(
-                        prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext)
+                        prepareRequest(chatClient, toPrompt(instructions, messages), toolCallbacks, temperature, callContext, maxTokens)
                                 .stream()
                                 .chatResponse(),
                         aggregatedResponse::set
@@ -451,10 +521,11 @@ public class SpringAiLlmClient {
             Prompt prompt,
             List<ToolCallback> toolCallbacks,
             Double temperature,
-            AgentCallContext callContext
+            AgentCallContext callContext,
+            Integer maxTokens
     ) {
         ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt(prompt)
-                .options(buildOptions(temperature));
+                .options(buildOptions(temperature, maxTokens));
         List<ToolCallback> normalizedToolCallbacks = toolCallbacks == null ? List.of() : toolCallbacks;
         if (!normalizedToolCallbacks.isEmpty()) {
             requestSpec = requestSpec.toolCallbacks(normalizedToolCallbacks);
@@ -473,11 +544,12 @@ public class SpringAiLlmClient {
         return requestSpec;
     }
 
-    private ToolCallingChatOptions buildOptions(Double temperature) {
-        return ToolCallingChatOptions.builder()
+    private DeepSeekChatOptions buildOptions(Double temperature, Integer maxTokens) {
+        return DeepSeekChatOptions.builder()
                 .model(model())
                 .internalToolExecutionEnabled(false)
                 .temperature(temperature == null ? 0.2 : temperature)
+                .maxTokens(maxTokens == null || maxTokens <= 0 ? DEFAULT_MAX_TOKENS : maxTokens)
                 .build();
     }
 
@@ -555,14 +627,52 @@ public class SpringAiLlmClient {
 
     private LlmResponse toLlmResponse(ChatResponse response) {
         if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return new LlmResponse("", List.of());
+            return new LlmResponse("", List.of(), "");
         }
 
         AssistantMessage output = response.getResult().getOutput();
         return new LlmResponse(
                 output.getText() == null ? "" : output.getText(),
-                extractToolCalls(output)
+                extractToolCalls(output),
+                extractFinishReason(response)
         );
+    }
+
+    private String extractFinishReason(ChatResponse response) {
+        if (response == null || response.getResult() == null || response.getResult().getMetadata() == null) {
+            return "";
+        }
+        String finishReason = response.getResult().getMetadata().getFinishReason();
+        return finishReason == null ? "" : finishReason;
+    }
+
+    private LlmResponse prependAccumulatedContent(
+            LlmResponse response,
+            String accumulatedAssistantContent,
+            boolean preserveToolCalls
+    ) {
+        if (response == null) {
+            return new LlmResponse(accumulatedAssistantContent == null ? "" : accumulatedAssistantContent, List.of(), "");
+        }
+        if (accumulatedAssistantContent == null || accumulatedAssistantContent.isEmpty()) {
+            return response;
+        }
+        return new LlmResponse(
+                accumulatedAssistantContent + (response.content() == null ? "" : response.content()),
+                preserveToolCalls ? response.toolCalls() : List.of(),
+                response.finishReason()
+        );
+    }
+
+    private List<LlmMessage> appendMessage(List<LlmMessage> messages, LlmMessage nextMessage) {
+        List<LlmMessage> result = new ArrayList<>();
+        if (messages != null && !messages.isEmpty()) {
+            result.addAll(messages);
+        }
+        if (nextMessage != null) {
+            result.add(nextMessage);
+        }
+        return result;
     }
 
     private List<AssistantMessage.ToolCall> extractToolCalls(AssistantMessage message) {
@@ -643,6 +753,45 @@ public class SpringAiLlmClient {
 
         public boolean hasKnowledgeQuery() {
             return knowledgeQuery != null && !knowledgeQuery.isBlank();
+        }
+    }
+
+    private static final class RecoveryState {
+        private boolean hasEscalatedMaxTokens;
+        private int continuationRecoveryCount;
+        private int transientRetryAttempt;
+        private boolean hasAttemptedReactiveCompact;
+
+        private boolean hasEscalatedMaxTokens() {
+            return hasEscalatedMaxTokens;
+        }
+
+        private void markEscalatedMaxTokens() {
+            this.hasEscalatedMaxTokens = true;
+        }
+
+        private int continuationRecoveryCount() {
+            return continuationRecoveryCount;
+        }
+
+        private void incrementContinuationRecoveryCount() {
+            this.continuationRecoveryCount++;
+        }
+
+        private int transientRetryAttempt() {
+            return transientRetryAttempt;
+        }
+
+        private void incrementTransientRetryAttempt() {
+            this.transientRetryAttempt++;
+        }
+
+        private boolean hasAttemptedReactiveCompact() {
+            return hasAttemptedReactiveCompact;
+        }
+
+        private void markAttemptedReactiveCompact() {
+            this.hasAttemptedReactiveCompact = true;
         }
     }
 }
