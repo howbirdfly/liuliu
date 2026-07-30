@@ -6,6 +6,7 @@ export type AgentStreamEventType =
   | 'pipeline_strategy'
   | 'tool_call'
   | 'tool_result'
+  | 'progress'
   | 'answer_delta'
   | 'final_answer'
   | 'complete'
@@ -20,6 +21,9 @@ export interface AgentStreamEvent {
   provider?: string | null;
   model?: string | null;
   code?: string | null;
+  operationId?: string | null;
+  phase?: string | null;
+  message?: string | null;
 }
 
 export interface AgentChatStep {

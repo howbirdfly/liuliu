@@ -812,6 +812,9 @@ function formatWalkTime(timestamp = Date.now()) {
 }
 
 function getAgentEventLabel(type: AgentStreamEvent['type']) {
+  if (type === 'progress') {
+    return '进度更新';
+  }
   switch (type) {
     case 'start':
       return '开始规划';
@@ -831,6 +834,21 @@ function getAgentEventLabel(type: AgentStreamEvent['type']) {
       return '规划完成';
     default:
       return 'Agent 事件';
+  }
+}
+
+function getAgentProgressPhaseLabel(phase?: string | null) {
+  switch ((phase || '').trim()) {
+    case 'started':
+      return '进行中';
+    case 'completed':
+      return '已完成';
+    case 'failed':
+      return '已失败';
+    case 'update':
+      return '已更新';
+    default:
+      return '';
   }
 }
 
@@ -862,6 +880,26 @@ function createAgentExecutionId() {
     return crypto.randomUUID();
   }
   return `agent-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function upsertAgentEvent(previous: AgentStreamEvent[], nextEvent: AgentStreamEvent) {
+  if (nextEvent.type === 'progress' && nextEvent.operationId) {
+    const operationId = nextEvent.operationId.trim();
+    const matchedIndex = previous.findIndex(
+      (item) => item.type === 'progress' && item.operationId?.trim() === operationId,
+    );
+    if (matchedIndex >= 0) {
+      const updated = [...previous];
+      updated[matchedIndex] = {
+        ...updated[matchedIndex],
+        ...nextEvent,
+        operationId,
+      };
+      return updated;
+    }
+    return [...previous, { ...nextEvent, operationId }];
+  }
+  return [...previous, nextEvent];
 }
 
 function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
@@ -909,6 +947,9 @@ function pickAgentItemLabel(item: unknown) {
 }
 
 function summarizeAgentInput(event: AgentStreamEvent) {
+  if (event.type === 'progress') {
+    return '';
+  }
   if (event.type === 'intent_analysis') {
     return truncateAgentEventText(event.input, 180) || '根据用户原始需求抽取结构化意图';
   }
@@ -945,6 +986,9 @@ function summarizeAgentInput(event: AgentStreamEvent) {
 }
 
 function summarizeAgentOutput(event: AgentStreamEvent) {
+  if (event.type === 'progress') {
+    return truncateAgentEventText(event.message || event.output, 280);
+  }
   if (event.type === 'intent_analysis') {
     const payload = parseAgentEventJson(event.output);
     if (!payload) {
@@ -4302,7 +4346,7 @@ export default function App() {
         const payload = JSON.parse(messageEvent.data) as AgentStreamEvent;
 
         if (payload.type !== 'complete' && payload.type !== 'answer_delta') {
-          setAgentEvents((prev) => [...prev, payload]);
+          setAgentEvents((prev) => upsertAgentEvent(prev, payload));
         }
 
         if (payload.type === 'start') {
@@ -4317,6 +4361,10 @@ export default function App() {
 
         if (payload.type === 'pipeline_strategy') {
           setAgentStatus('Agent 已确定本轮执行流水线...');
+          return;
+        }
+        if (payload.type === 'progress') {
+          setAgentStatus(payload.message?.trim() || 'Agent 正在更新任务进度...');
           return;
         }
         if (payload.type === 'tool_call') {
@@ -4391,6 +4439,7 @@ export default function App() {
     stream.addEventListener('pipeline_strategy', handleAgentEvent);
     stream.addEventListener('tool_call', handleAgentEvent);
     stream.addEventListener('tool_result', handleAgentEvent);
+    stream.addEventListener('progress', handleAgentEvent);
     stream.addEventListener('answer_delta', handleAgentEvent);
     stream.addEventListener('final_answer', handleAgentEvent);
     stream.addEventListener('agent_error', handleAgentEvent);
@@ -5956,12 +6005,22 @@ export default function App() {
                 {agentEvents.length > 0 ? (
                   <div className="space-y-3">
                     {agentEvents.map((event, index) => (
-                      <div key={`${event.type}-${event.name}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
+                      <div
+                        key={event.operationId ? `op-${event.operationId}` : `${event.type}-${event.name}-${index}`}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4"
+                      >
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-xs font-medium text-slate-700">{getAgentEventLabel(event.type)}</span>
-                          <span className="text-[11px] text-slate-400">
-                            {event.iteration ? `第 ${event.iteration} 轮` : '实时'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {getAgentProgressPhaseLabel(event.phase) ? (
+                              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                                {getAgentProgressPhaseLabel(event.phase)}
+                              </span>
+                            ) : null}
+                            <span className="text-[11px] text-slate-400">
+                              {event.iteration ? `第 ${event.iteration} 轮` : '实时'}
+                            </span>
+                          </div>
                         </div>
                         <div className="mt-1 text-sm font-medium text-slate-900">{event.name || 'agent'}</div>
                         {summarizeAgentInput(event) ? (
