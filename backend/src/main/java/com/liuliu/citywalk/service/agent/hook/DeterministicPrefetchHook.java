@@ -21,6 +21,7 @@ import java.util.UUID;
 public class DeterministicPrefetchHook implements AgentExecutionHook {
 
     private static final String PREFETCH_CODE = "deterministic_prefetch";
+    private static final String PROGRESS_EVENT_TYPE = "progress";
 
     private final ObjectMapper objectMapper;
     private final AgentToolExecutionService agentToolExecutionService;
@@ -69,6 +70,13 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
                     "query", query,
                     "topK", 5
             ));
+            String operationId = "prefetch:search_knowledge_base";
+            context.emit(progressEvent(
+                    context,
+                    operationId,
+                    "started",
+                    "正在检索知识库候选内容..."
+            ));
             AssistantMessage.ToolCall toolCall = toolCall(
                     "prefetch-knowledge-" + UUID.randomUUID(),
                     "search_knowledge_base",
@@ -116,6 +124,14 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
                     context.model(),
                     outcome.code() == null ? PREFETCH_CODE : outcome.code()
             ));
+            context.emit(progressEvent(
+                    context,
+                    operationId,
+                    outcome.code() == null ? "completed" : "failed",
+                    outcome.code() == null
+                            ? "知识库预取完成，命中 " + countResults(outcome.output()) + " 条候选。"
+                            : "知识库预取未拿到稳定结果。"
+            ));
             return PrefetchOutcome.executed(
                     toolCall.name(),
                     outcome.output(),
@@ -125,6 +141,12 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
         } catch (AgentExecutionCancelledException error) {
             throw error;
         } catch (Exception error) {
+            context.emit(progressEvent(
+                    context,
+                    "prefetch:search_knowledge_base",
+                    "failed",
+                    "知识库预取失败，已跳过本次预取。"
+            ));
             context.steps().add(new AgentStepResponse(
                     "prefetch_tool",
                     "search_knowledge_base",
@@ -153,6 +175,13 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
 
         try {
             String argumentsJson = objectMapper.writeValueAsString(Map.of("query", query));
+            String operationId = "prefetch:search_poi";
+            context.emit(progressEvent(
+                    context,
+                    operationId,
+                    "started",
+                    "正在补充检索候选 POI..."
+            ));
             AssistantMessage.ToolCall toolCall = toolCall(
                     "prefetch-poi-" + UUID.randomUUID(),
                     "search_poi",
@@ -200,9 +229,23 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
                     context.model(),
                     outcome.code() == null ? PREFETCH_CODE : outcome.code()
             ));
+            context.emit(progressEvent(
+                    context,
+                    operationId,
+                    outcome.code() == null ? "completed" : "failed",
+                    outcome.code() == null
+                            ? "POI 预取完成，命中 " + countResults(outcome.output()) + " 条候选。"
+                            : "POI 预取未拿到稳定结果。"
+            ));
         } catch (AgentExecutionCancelledException error) {
             throw error;
         } catch (Exception error) {
+            context.emit(progressEvent(
+                    context,
+                    "prefetch:search_poi",
+                    "failed",
+                    "POI 预取失败，已跳过本次预取。"
+            ));
             context.steps().add(new AgentStepResponse(
                     "prefetch_tool",
                     "search_poi",
@@ -332,6 +375,27 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
 
     private String safeText(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private AgentExecutionEvent progressEvent(
+            AgentExecutionHookContext context,
+            String operationId,
+            String phase,
+            String message
+    ) {
+        return new AgentExecutionEvent(
+                PROGRESS_EVENT_TYPE,
+                "prefetch",
+                null,
+                null,
+                0,
+                context == null ? null : context.provider(),
+                context == null ? null : context.model(),
+                PREFETCH_CODE,
+                operationId,
+                phase,
+                message
+        );
     }
 
     private record PrefetchOutcome(

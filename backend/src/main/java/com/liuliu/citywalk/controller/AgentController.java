@@ -168,7 +168,10 @@ public class AgentController {
                     event.iteration(),
                     event.provider(),
                     event.model(),
-                    event.code()
+                    event.code(),
+                    event.operationId(),
+                    event.phase(),
+                    event.message()
             );
             emitter.send(
                     SseEmitter.event()
