@@ -152,12 +152,26 @@ public class AgentExecutionPipelineService {
                 carryoverContext,
                 stateMessage
         );
-        String instructions = agentPromptAssemblyService.buildInstructions(
-                userId,
-                DEFAULT_INSTRUCTIONS + CONVERSATION_STATE_RULES,
-                agentConversationStateService.buildPromptContext(conversationState) + buildRuntimeContext(intent),
-                FALLBACK_GUIDE
-        );
+        String instructions = agentPromptAssemblyService.buildInstructions(List.of(
+                AgentPromptAssemblyService.section("identity", DEFAULT_INSTRUCTIONS),
+                AgentPromptAssemblyService.section("conversation_state_rules", CONVERSATION_STATE_RULES),
+                AgentPromptAssemblyService.section(
+                        "conversation_state_runtime",
+                        agentConversationStateService.buildPromptContext(conversationState)
+                ),
+                AgentPromptAssemblyService.section(
+                        "intent_runtime_context",
+                        agentIntentAnalysisService.buildPromptContext(intent)
+                ),
+                AgentPromptAssemblyService.section("planning_pipeline", PIPELINE_GUIDE),
+                AgentPromptAssemblyService.section(
+                        "request_pipeline_focus",
+                        buildIntentSpecificPipelineGuide(intent)
+                ),
+                AgentPromptAssemblyService.section("final_answer_contract", FINAL_ANSWER_GUIDE),
+                agentPromptAssemblyService.buildLongTermMemorySection(userId),
+                AgentPromptAssemblyService.section("fallback_rules", FALLBACK_GUIDE)
+        ));
 
         List<AgentStepResponse> steps = new ArrayList<>();
         steps.add(new AgentStepResponse(
@@ -766,13 +780,6 @@ public class AgentExecutionPipelineService {
                 intent,
                 steps
         );
-    }
-
-    private String buildRuntimeContext(AgentIntentAnalysisService.AgentIntent intent) {
-        return agentIntentAnalysisService.buildPromptContext(intent)
-                + PIPELINE_GUIDE
-                + buildIntentSpecificPipelineGuide(intent)
-                + FINAL_ANSWER_GUIDE;
     }
 
     private String buildIntentSpecificPipelineGuide(AgentIntentAnalysisService.AgentIntent intent) {

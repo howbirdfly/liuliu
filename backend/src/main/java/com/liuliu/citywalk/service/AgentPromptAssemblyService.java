@@ -8,7 +8,9 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class AgentPromptAssemblyService {
@@ -76,18 +78,32 @@ public class AgentPromptAssemblyService {
         return toLlmMessages(chatMemory.get(String.valueOf(userId)));
     }
 
-    public String buildInstructions(
-            Long userId,
-            String defaultInstructions,
-            String runtimeContext,
-            String fallbackGuide
-    ) {
-        String memoryContext = agentLongTermMemoryService.buildPromptContext(userId);
-        String normalizedRuntimeContext = runtimeContext == null ? "" : runtimeContext;
-        if (memoryContext.isBlank() && normalizedRuntimeContext.isBlank()) {
-            return defaultInstructions + fallbackGuide;
+    public String buildInstructions(List<InstructionSection> sections) {
+        if (sections == null || sections.isEmpty()) {
+            return "";
         }
-        return defaultInstructions + normalizedRuntimeContext + memoryContext + fallbackGuide;
+
+        Map<String, String> orderedSections = new LinkedHashMap<>();
+        for (InstructionSection section : sections) {
+            if (section == null) {
+                continue;
+            }
+            String normalizedKey = normalizeSectionKey(section.key());
+            String normalizedContent = normalizeSectionContent(section.content());
+            if (normalizedContent.isBlank()) {
+                continue;
+            }
+            orderedSections.put(normalizedKey, normalizedContent);
+        }
+        return String.join("\n\n", orderedSections.values());
+    }
+
+    public InstructionSection buildLongTermMemorySection(Long userId) {
+        return section("long_term_memory", agentLongTermMemoryService.buildPromptContext(userId));
+    }
+
+    public static InstructionSection section(String key, String content) {
+        return new InstructionSection(key, content);
     }
 
     public void rememberConversation(Long userId, String userPrompt, String assistantAnswer) {
@@ -132,5 +148,22 @@ public class AgentPromptAssemblyService {
             }
         }
         return result;
+    }
+
+    private String normalizeSectionKey(String key) {
+        if (key == null || key.isBlank()) {
+            return "section_" + System.identityHashCode(key);
+        }
+        return key.trim();
+    }
+
+    private String normalizeSectionContent(String content) {
+        return content == null ? "" : content.trim();
+    }
+
+    public record InstructionSection(
+            String key,
+            String content
+    ) {
     }
 }
