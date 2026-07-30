@@ -42,9 +42,10 @@ public class DeterministicPrefetchHook implements AgentExecutionHook {
     }
 
     @Override
-    public void handle(AgentExecutionHookContext context) {
+    public AgentExecutionHookResult handle(AgentExecutionHookContext context) {
         PrefetchOutcome knowledgePrefetch = prefetchKnowledge(context);
         prefetchPoi(context, knowledgePrefetch);
+        return AgentExecutionHookResult.continueExecution();
     }
 
     private PrefetchOutcome prefetchKnowledge(AgentExecutionHookContext context) {

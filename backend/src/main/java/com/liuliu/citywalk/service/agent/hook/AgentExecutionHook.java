@@ -10,5 +10,5 @@ public interface AgentExecutionHook {
         return 0;
     }
 
-    void handle(AgentExecutionHookContext context);
+    AgentExecutionHookResult handle(AgentExecutionHookContext context);
 }

@@ -34,16 +34,20 @@ public class AgentExecutionHookRegistryService {
         this.hooksByPoint = registry;
     }
 
-    public void trigger(AgentExecutionHookPoint point, AgentExecutionHookContext context) {
+    public AgentExecutionHookResult trigger(AgentExecutionHookPoint point, AgentExecutionHookContext context) {
         if (point == null || context == null) {
-            return;
+            return AgentExecutionHookResult.continueExecution();
         }
         List<AgentExecutionHook> hooks = hooksByPoint.get(point);
         if (hooks == null || hooks.isEmpty()) {
-            return;
+            return AgentExecutionHookResult.continueExecution();
         }
         for (AgentExecutionHook hook : hooks) {
-            hook.handle(context);
+            AgentExecutionHookResult result = hook.handle(context);
+            if (result != null && result.shouldStopHookChain()) {
+                return result;
+            }
         }
+        return AgentExecutionHookResult.continueExecution();
     }
 }

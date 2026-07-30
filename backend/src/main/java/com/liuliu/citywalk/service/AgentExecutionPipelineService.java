@@ -8,6 +8,7 @@ import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookContext;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookPoint;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookResult;
 import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookRegistryService;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,8 @@ import java.util.UUID;
 public class AgentExecutionPipelineService {
 
     private static final int MAX_TOOL_ROUNDS = 6;
+    private static final String ATTR_REMEMBER_SHORT_TERM_ONLY = "rememberShortTermOnly";
+    private static final String ATTR_COMPLETION_CODE = "completionCode";
 
     private static final String PIPELINE_GUIDE = """
 
@@ -121,17 +124,6 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         PreparedExecution execution = prepareExecution(userId, prompt, executionHandle, listener);
-
-        AgentChatResponse invalidInputResponse = tryCompleteWithInvalidInputPrompt(execution, executionHandle, listener);
-        if (invalidInputResponse != null) {
-            return invalidInputResponse;
-        }
-
-        AgentChatResponse clarificationResponse = tryCompleteWithClarification(execution, executionHandle, listener);
-        if (clarificationResponse != null) {
-            return clarificationResponse;
-        }
-
         return runPlanningLoop(execution, executionHandle, listener);
     }
 
@@ -271,123 +263,18 @@ public class AgentExecutionPipelineService {
         );
     }
 
-    private AgentChatResponse tryCompleteWithInvalidInputPrompt(
-            PreparedExecution execution,
-            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
-            AgentExecutionListener listener
-    ) {
-        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
-        if (intent == null || !intent.requiresValidInputPrompt()) {
-            return null;
-        }
-
-        checkCancelled(executionHandle);
-        String response = buildValidInputPrompt(intent);
-        execution.steps().add(new AgentStepResponse(
-                "input_gate",
-                "valid_input_gate",
-                execution.normalizedPrompt(),
-                response
-        ));
-        emit(listener, new AgentExecutionEvent(
-                "final_answer",
-                "assistant",
-                execution.normalizedPrompt(),
-                response,
-                0,
-                llmClient.provider(),
-                llmClient.model(),
-                "valid_input_required"
-        ));
-        emit(listener, new AgentExecutionEvent(
-                "complete",
-                "agent",
-                null,
-                response,
-                0,
-                llmClient.provider(),
-                llmClient.model(),
-                "valid_input_required"
-        ));
-
-        agentPromptAssemblyService.rememberConversationShortTerm(
-                execution.userId(),
-                execution.normalizedPrompt(),
-                response
-        );
-        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
-        return new AgentChatResponse(
-                response,
-                execution.steps(),
-                0,
-                llmClient.provider(),
-                llmClient.model()
-        );
-    }
-
-    private AgentChatResponse tryCompleteWithClarification(
-            PreparedExecution execution,
-            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
-            AgentExecutionListener listener
-    ) {
-        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
-        if (intent == null || !intent.requiresClarification()) {
-            return null;
-        }
-
-        checkCancelled(executionHandle);
-        String clarification = buildClarificationQuestion(intent);
-        execution.steps().add(new AgentStepResponse(
-                "clarification",
-                "clarification_gate",
-                intent.summary(),
-                clarification
-        ));
-        emit(listener, new AgentExecutionEvent(
-                "final_answer",
-                "assistant",
-                intent.summary(),
-                clarification,
-                0,
-                llmClient.provider(),
-                llmClient.model(),
-                "clarification_required"
-        ));
-        emit(listener, new AgentExecutionEvent(
-                "complete",
-                "agent",
-                null,
-                clarification,
-                0,
-                llmClient.provider(),
-                llmClient.model(),
-                "clarification_required"
-        ));
-
-        agentPromptAssemblyService.rememberConversationShortTerm(
-                execution.userId(),
-                execution.normalizedPrompt(),
-                clarification
-        );
-        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
-        return new AgentChatResponse(
-                clarification,
-                execution.steps(),
-                0,
-                llmClient.provider(),
-                llmClient.model()
-        );
-    }
-
     private AgentChatResponse runPlanningLoop(
             PreparedExecution execution,
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener
     ) {
-        agentExecutionHookRegistryService.trigger(
+        AgentExecutionHookResult beforeLoopResult = agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.BEFORE_AGENT_LOOP,
                 hookContext(AgentExecutionHookPoint.BEFORE_AGENT_LOOP, execution, 0, null, null, listener)
         );
+        if (beforeLoopResult.shouldCompleteExecution()) {
+            return completeHookTerminatedExecution(execution, beforeLoopResult, listener);
+        }
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             checkCancelled(executionHandle);
             agentExecutionHookRegistryService.trigger(
@@ -406,171 +293,6 @@ public class AgentExecutionPipelineService {
             return completeSuccessfulExecution(execution, roundOutcome.finalContent(), round, executionHandle, listener);
         }
         return completeMaxRoundExecution(execution, listener);
-    }
-
-    private DeterministicPrefetchOutcome applyDeterministicKnowledgePrefetch(
-            PreparedExecution execution,
-            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
-            AgentExecutionListener listener
-    ) {
-        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
-        if (!shouldPrefetchKnowledge(intent, execution.normalizedPrompt())) {
-            return DeterministicPrefetchOutcome.skipped();
-        }
-        if (!agentToolExecutionService.hasTool("search_knowledge_base")) {
-            return DeterministicPrefetchOutcome.skipped();
-        }
-
-        checkCancelled(executionHandle);
-        String query = buildKnowledgePrefetchQuery(intent, execution.normalizedPrompt());
-        if (query.isBlank()) {
-            return DeterministicPrefetchOutcome.skipped();
-        }
-
-        try {
-            String argumentsJson = objectMapper.writeValueAsString(Map.of(
-                    "query", query,
-                    "topK", 5
-            ));
-            AssistantMessage.ToolCall toolCall =
-                    toolCall("prefetch-knowledge-" + UUID.randomUUID(), "search_knowledge_base", argumentsJson);
-
-            emit(listener, new AgentExecutionEvent(
-                    "tool_call",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    null,
-                    0,
-                    llmClient.provider(),
-                    llmClient.model(),
-                    "deterministic_prefetch"
-            ));
-            AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    () -> checkCancelled(executionHandle),
-                    execution.toolExecutionMemoByKey()
-            );
-            execution.steps().add(new AgentStepResponse(
-                    "prefetch_tool",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    outcome.output()
-            ));
-            execution.messages().add(LlmMessage.assistant(
-                    "System prefetch executed before planning: search_knowledge_base.",
-                    List.of(toolCall)
-            ));
-            execution.messages().add(LlmMessage.tool(
-                    toolCall.id(),
-                    toolCall.name(),
-                    agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
-            ));
-            emit(listener, new AgentExecutionEvent(
-                    "tool_result",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    outcome.output(),
-                    0,
-                    llmClient.provider(),
-                    llmClient.model(),
-                    outcome.code() == null ? "deterministic_prefetch" : outcome.code()
-            ));
-            return DeterministicPrefetchOutcome.executed(
-                    toolCall.name(),
-                    outcome.output(),
-                    countResults(outcome.output()),
-                    outcome.code() == null
-            );
-        } catch (AgentExecutionCancelledException error) {
-            throw error;
-        } catch (Exception error) {
-            execution.steps().add(new AgentStepResponse(
-                    "prefetch_tool",
-                    "search_knowledge_base",
-                    execution.normalizedPrompt(),
-                    "knowledge_prefetch_skipped: " + safeText(error.getMessage(), "unknown_error")
-            ));
-            return DeterministicPrefetchOutcome.skipped();
-        }
-    }
-
-    private void applyDeterministicPoiPrefetch(
-            PreparedExecution execution,
-            DeterministicPrefetchOutcome knowledgePrefetch,
-            AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
-            AgentExecutionListener listener
-    ) {
-        AgentIntentAnalysisService.AgentIntent intent = execution.intent();
-        if (!shouldPrefetchPoi(intent, knowledgePrefetch)) {
-            return;
-        }
-        if (!agentToolExecutionService.hasTool("search_poi")) {
-            return;
-        }
-
-        checkCancelled(executionHandle);
-        String query = buildPoiPrefetchQuery(intent, execution.normalizedPrompt());
-        if (query.isBlank()) {
-            return;
-        }
-
-        try {
-            String argumentsJson = objectMapper.writeValueAsString(Map.of("query", query));
-            AssistantMessage.ToolCall toolCall =
-                    toolCall("prefetch-poi-" + UUID.randomUUID(), "search_poi", argumentsJson);
-
-            emit(listener, new AgentExecutionEvent(
-                    "tool_call",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    null,
-                    0,
-                    llmClient.provider(),
-                    llmClient.model(),
-                    "deterministic_prefetch"
-            ));
-            AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.executePrefetched(
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    () -> checkCancelled(executionHandle),
-                    execution.toolExecutionMemoByKey()
-            );
-            execution.steps().add(new AgentStepResponse(
-                    "prefetch_tool",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    outcome.output()
-            ));
-            execution.messages().add(LlmMessage.assistant(
-                    "System prefetch executed before planning: search_poi.",
-                    List.of(toolCall)
-            ));
-            execution.messages().add(LlmMessage.tool(
-                    toolCall.id(),
-                    toolCall.name(),
-                    agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
-            ));
-            emit(listener, new AgentExecutionEvent(
-                    "tool_result",
-                    toolCall.name(),
-                    toolCall.arguments(),
-                    outcome.output(),
-                    0,
-                    llmClient.provider(),
-                    llmClient.model(),
-                    outcome.code() == null ? "deterministic_prefetch" : outcome.code()
-            ));
-        } catch (AgentExecutionCancelledException error) {
-            throw error;
-        } catch (Exception error) {
-            execution.steps().add(new AgentStepResponse(
-                    "prefetch_tool",
-                    "search_poi",
-                    execution.normalizedPrompt(),
-                    "poi_prefetch_skipped: " + safeText(error.getMessage(), "unknown_error")
-            ));
-        }
     }
 
     private AgentRoundService.AgentRoundOutcome executePlanningRound(
@@ -702,15 +424,6 @@ public class AgentExecutionPipelineService {
                 : "final_text: " + preview;
     }
 
-    private AssistantMessage.ToolCall toolCall(String id, String name, String argumentsJson) {
-        return new AssistantMessage.ToolCall(
-                id,
-                "function",
-                name,
-                argumentsJson == null || argumentsJson.isBlank() ? "{}" : argumentsJson
-        );
-    }
-
     private AgentChatResponse completeSuccessfulExecution(
             PreparedExecution execution,
             String content,
@@ -751,8 +464,6 @@ public class AgentExecutionPipelineService {
                 llmClient.provider(),
                 llmClient.model()
         );
-        agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), answer);
-        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         emit(listener, new AgentExecutionEvent(
                 "complete",
                 "agent",
@@ -766,6 +477,8 @@ public class AgentExecutionPipelineService {
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
                 hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle), listener)
+                        .withAttribute(ATTR_REMEMBER_SHORT_TERM_ONLY, false)
+                        .withAttribute(ATTR_COMPLETION_CODE, null)
                         .withFinalAnswer(answer)
         );
         return result;
@@ -788,8 +501,6 @@ public class AgentExecutionPipelineService {
         agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_FINAL_ANSWER, finalAnswerContext);
         fallback = safeText(finalAnswerContext.finalAnswer(), fallback);
         execution.steps().add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
-        agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), fallback);
-        agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
         emit(listener, new AgentExecutionEvent(
                 "complete",
                 "agent",
@@ -803,12 +514,68 @@ public class AgentExecutionPipelineService {
         agentExecutionHookRegistryService.trigger(
                 AgentExecutionHookPoint.AFTER_AGENT_LOOP,
                 hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, MAX_TOOL_ROUNDS, null, null, listener)
+                        .withAttribute(ATTR_REMEMBER_SHORT_TERM_ONLY, false)
+                        .withAttribute(ATTR_COMPLETION_CODE, "max_round_guard")
                         .withFinalAnswer(fallback)
         );
         return new AgentChatResponse(
                 fallback,
                 execution.steps(),
                 MAX_TOOL_ROUNDS,
+                llmClient.provider(),
+                llmClient.model()
+        );
+    }
+
+    private AgentChatResponse completeHookTerminatedExecution(
+            PreparedExecution execution,
+            AgentExecutionHookResult hookResult,
+            AgentExecutionListener listener
+    ) {
+        String answer = safeText(hookResult == null ? null : hookResult.finalAnswer(), "");
+        String completionCode = safeText(hookResult == null ? null : hookResult.code(), null);
+        if (hookResult != null && hookResult.stepType() != null && hookResult.stepName() != null) {
+            execution.steps().add(new AgentStepResponse(
+                    hookResult.stepType(),
+                    hookResult.stepName(),
+                    hookResult.stepInput(),
+                    answer
+            ));
+        }
+        emit(listener, new AgentExecutionEvent(
+                "final_answer",
+                "assistant",
+                hookResult == null ? null : hookResult.stepInput(),
+                answer,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                completionCode
+        ));
+        emit(listener, new AgentExecutionEvent(
+                "complete",
+                "agent",
+                null,
+                answer,
+                0,
+                llmClient.provider(),
+                llmClient.model(),
+                completionCode
+        ));
+        agentExecutionHookRegistryService.trigger(
+                AgentExecutionHookPoint.AFTER_AGENT_LOOP,
+                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, 0, null, null, listener)
+                        .withAttribute(
+                                ATTR_REMEMBER_SHORT_TERM_ONLY,
+                                hookResult != null && hookResult.rememberShortTermOnly()
+                        )
+                        .withAttribute(ATTR_COMPLETION_CODE, completionCode)
+                        .withFinalAnswer(answer)
+        );
+        return new AgentChatResponse(
+                answer,
+                execution.steps(),
+                0,
                 llmClient.provider(),
                 llmClient.model()
         );

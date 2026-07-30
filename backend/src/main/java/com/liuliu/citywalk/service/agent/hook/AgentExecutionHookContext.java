@@ -128,6 +128,13 @@ public final class AgentExecutionHookContext {
         return attributes;
     }
 
+    public AgentExecutionHookContext withAttribute(String key, Object value) {
+        if (key != null && !key.isBlank()) {
+            attributes.put(key, value);
+        }
+        return this;
+    }
+
     public int round() {
         return round;
     }
