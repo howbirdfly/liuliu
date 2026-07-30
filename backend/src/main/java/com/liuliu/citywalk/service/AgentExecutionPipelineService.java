@@ -159,7 +159,7 @@ public class AgentExecutionPipelineService {
                         buildIntentSpecificPipelineGuide(intent)
                 ),
                 AgentPromptAssemblyService.section("final_answer_contract", FINAL_ANSWER_GUIDE),
-                agentPromptAssemblyService.buildLongTermMemorySection(userId),
+                agentPromptAssemblyService.buildLongTermMemorySection(userId, normalizedPrompt, intent),
                 AgentPromptAssemblyService.section("fallback_rules", FALLBACK_GUIDE)
         ));
 

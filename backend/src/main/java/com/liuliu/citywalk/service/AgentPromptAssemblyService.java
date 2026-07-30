@@ -99,7 +99,18 @@ public class AgentPromptAssemblyService {
     }
 
     public InstructionSection buildLongTermMemorySection(Long userId) {
-        return section("long_term_memory", agentLongTermMemoryService.buildPromptContext(userId));
+        return buildLongTermMemorySection(userId, "", null);
+    }
+
+    public InstructionSection buildLongTermMemorySection(
+            Long userId,
+            String userPrompt,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        return section(
+                "long_term_memory",
+                agentLongTermMemoryService.buildPromptContext(userId, userPrompt, intent)
+        );
     }
 
     public static InstructionSection section(String key, String content) {

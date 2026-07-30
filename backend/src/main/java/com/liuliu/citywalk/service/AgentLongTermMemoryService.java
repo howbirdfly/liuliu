@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -28,7 +27,7 @@ public class AgentLongTermMemoryService {
     );
 
     private static final List<String> AVOID_KEYWORDS = List.of(
-            "人多", "排队", "商业化", "太晒", "暴走", "爬坡", "室内", "吵", "远"
+            "人多", "排队", "商业区", "太晒", "暴走", "爬坡", "室内", "吵", "远"
     );
 
     private static final List<String> AREA_NOISE_KEYWORDS = List.of(
@@ -43,9 +42,12 @@ public class AgentLongTermMemoryService {
     );
 
     private static final Pattern DURATION_PATTERN = Pattern.compile(
-            "(半个小时|半小时|半天|一天|两天|一小时|一个小时|两小时|两个小时|三小时|三个小时|四小时|四个小时|五小时|五个小时|六小时|六个小时|一个晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:个?小时|h|H))"
+            "(半个小时|半小时|半天|一天|两天|一小时|一个小时|两小时|两个小时|三小时|三个小时|四小时|四个小时|五小时|五个小时|六小时|六个小时|一晚上|一整晚|\\d+(?:\\.\\d+)?\\s*(?:个?小时|h|H))"
     );
-    private static final Pattern AREA_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|校区|公园|商圈|古镇|湖|湾|岛|区|镇|村))");
+
+    private static final Pattern AREA_PATTERN = Pattern.compile(
+            "([\\u4e00-\\u9fa5A-Za-z0-9]{2,20}(?:路|街|街区|校区|公园|商圈|古镇|湖|湾|岛|区|镇))"
+    );
 
     private final AgentUserMemoryMapper agentUserMemoryMapper;
     private final ObjectMapper objectMapper;
@@ -56,36 +58,24 @@ public class AgentLongTermMemoryService {
     }
 
     public String buildPromptContext(Long userId) {
+        return buildPromptContext(userId, "", null);
+    }
+
+    public String buildPromptContext(
+            Long userId,
+            String userPrompt,
+            AgentIntentAnalysisService.AgentIntent currentIntent
+    ) {
         AgentLongTermMemoryProfile profile = loadProfile(userId);
         if (profile.isEmpty()) {
             return "";
         }
 
         List<String> lines = new ArrayList<>();
-        lines.add("以下是这个用户的长期偏好记忆，如果和本轮明确新需求冲突，以本轮需求为准：");
-        if (!profile.preferredCities().isEmpty()) {
-            lines.add("- 常去/偏好城市：" + String.join("、", profile.preferredCities()));
-        }
-        if (!profile.preferredAreas().isEmpty()) {
-            lines.add("- 常提及区域：" + String.join("、", profile.preferredAreas()));
-        }
-        if (!profile.walkStyles().isEmpty()) {
-            lines.add("- 偏好风格：" + String.join("、", profile.walkStyles()));
-        }
-        if (!profile.preferredDuration().isBlank()) {
-            lines.add("- 偏好时长：" + profile.preferredDuration());
-        }
-        if (!profile.mobilityLevel().isBlank()) {
-            lines.add("- 体力/节奏偏好：" + profile.mobilityLevel());
-        }
-        if (!profile.avoidTags().isEmpty()) {
-            lines.add("- 避雷点：" + String.join("、", profile.avoidTags()));
-        }
-        if (!profile.recentSuggestedAreas().isEmpty()) {
-            lines.add("- 最近给过的推荐区域：" + String.join("、", profile.recentSuggestedAreas()));
-        }
-        if (!profile.summary().isBlank()) {
-            lines.add("- 记忆摘要：" + profile.summary());
+        lines.add("以下是这个用户的长期偏好记忆；如果和本轮明确新需求冲突，以本轮需求为准：");
+        addRelevantMemoryLines(lines, profile, normalize(userPrompt), currentIntent);
+        if (lines.size() == 1) {
+            return "";
         }
         return "\n\n" + String.join("\n", lines);
     }
@@ -140,21 +130,18 @@ public class AgentLongTermMemoryService {
 
     private AgentLongTermMemoryProfile extractProfile(String userPrompt, String assistantAnswer) {
         String prompt = normalize(userPrompt);
-        String answer = normalize(assistantAnswer);
 
-        List<String> promptAreas = extractAreas(prompt);
-        List<String> recentAreas = extractAreas(answer);
-        List<String> areas = promptAreas.isEmpty() ? trimList(recentAreas, 3) : promptAreas;
+        List<String> areas = extractAreas(prompt);
         List<String> cities = mergeList(
                 extractCities(prompt),
-                mergeList(extractCities(answer), extractCitiesFromAreas(mergeList(promptAreas, recentAreas, 6)), 4),
+                extractCitiesFromAreas(areas),
                 4
         );
         List<String> styles = extractStyles(prompt);
         String duration = extractDuration(prompt);
         String mobility = extractMobilityLevel(prompt);
         List<String> avoidTags = extractAvoidTags(prompt);
-        String summary = buildSummary(cities, areas, styles, duration, mobility, avoidTags, recentAreas);
+        String summary = buildSummary(cities, areas, styles, duration, mobility, avoidTags);
 
         return new AgentLongTermMemoryProfile(
                 cities,
@@ -163,7 +150,7 @@ public class AgentLongTermMemoryService {
                 duration,
                 mobility,
                 avoidTags,
-                trimList(recentAreas, 4),
+                List.of(),
                 summary
         );
     }
@@ -175,15 +162,14 @@ public class AgentLongTermMemoryService {
         String preferredDuration = chooseLatestNonBlank(existing.preferredDuration(), extracted.preferredDuration());
         String mobilityLevel = chooseLatestNonBlank(existing.mobilityLevel(), extracted.mobilityLevel());
         List<String> avoidTags = mergeList(existing.avoidTags(), extracted.avoidTags(), 8);
-        List<String> recentSuggestedAreas = mergeList(extracted.recentSuggestedAreas(), existing.recentSuggestedAreas(), 6);
+        List<String> recentSuggestedAreas = List.of();
         String summary = buildSummary(
                 preferredCities,
                 preferredAreas,
                 walkStyles,
                 preferredDuration,
                 mobilityLevel,
-                avoidTags,
-                recentSuggestedAreas
+                avoidTags
         );
         return new AgentLongTermMemoryProfile(
                 preferredCities,
@@ -195,6 +181,120 @@ public class AgentLongTermMemoryService {
                 recentSuggestedAreas,
                 summary
         );
+    }
+
+    private void addRelevantMemoryLines(
+            List<String> lines,
+            AgentLongTermMemoryProfile profile,
+            String prompt,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        boolean selected = false;
+
+        if (shouldIncludeLocationMemory(profile, prompt, intent)) {
+            if (!profile.preferredCities().isEmpty()) {
+                lines.add("- 常去/偏好城市: " + String.join("、", profile.preferredCities()));
+            }
+            if (!profile.preferredAreas().isEmpty()) {
+                lines.add("- 常提及区域: " + String.join("、", profile.preferredAreas()));
+            }
+            selected = true;
+        }
+        if (shouldIncludeStyleMemory(profile, prompt, intent) && !profile.walkStyles().isEmpty()) {
+            lines.add("- 偏好风格: " + String.join("、", profile.walkStyles()));
+            selected = true;
+        }
+        if (shouldIncludeDurationMemory(profile, intent) && !profile.preferredDuration().isBlank()) {
+            lines.add("- 偏好时长: " + profile.preferredDuration());
+            selected = true;
+        }
+        if (shouldIncludePlanningPreferenceMemory(profile, intent)) {
+            if (!profile.mobilityLevel().isBlank()) {
+                lines.add("- 体力/节奏偏好: " + profile.mobilityLevel());
+                selected = true;
+            }
+            if (!profile.avoidTags().isEmpty()) {
+                lines.add("- 避雷点: " + String.join("、", profile.avoidTags()));
+                selected = true;
+            }
+        }
+        if (!selected && !profile.summary().isBlank()) {
+            lines.add("- 记忆摘要: " + profile.summary());
+        }
+    }
+
+    private boolean shouldIncludeLocationMemory(
+            AgentLongTermMemoryProfile profile,
+            String prompt,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        if (profile == null || intent == null) {
+            return false;
+        }
+        return intent.missingLocationContext()
+                || overlaps(profile.preferredCities(), intent.cities(), prompt)
+                || overlaps(profile.preferredAreas(), intent.areas(), prompt);
+    }
+
+    private boolean shouldIncludeStyleMemory(
+            AgentLongTermMemoryProfile profile,
+            String prompt,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        if (profile == null || profile.walkStyles().isEmpty() || intent == null) {
+            return false;
+        }
+        return intent.missingThemeDirection()
+                || overlaps(profile.walkStyles(), intent.styles(), prompt)
+                || overlaps(profile.walkStyles(), intent.objectives(), prompt);
+    }
+
+    private boolean shouldIncludeDurationMemory(
+            AgentLongTermMemoryProfile profile,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        return profile != null
+                && !profile.preferredDuration().isBlank()
+                && intent != null
+                && intent.missingDuration();
+    }
+
+    private boolean shouldIncludePlanningPreferenceMemory(
+            AgentLongTermMemoryProfile profile,
+            AgentIntentAnalysisService.AgentIntent intent
+    ) {
+        if (profile == null || intent == null) {
+            return false;
+        }
+        if (profile.mobilityLevel().isBlank() && profile.avoidTags().isEmpty()) {
+            return false;
+        }
+        return intent.requestLike()
+                || intent.needsRoutePlanning()
+                || intent.needsPoiSearch()
+                || intent.needsThemeGeneration();
+    }
+
+    private boolean overlaps(List<String> memoryValues, List<String> intentValues, String prompt) {
+        if (memoryValues == null || memoryValues.isEmpty()) {
+            return false;
+        }
+        List<String> normalizedIntentValues = trimList(intentValues, 12);
+        for (String memoryValue : memoryValues) {
+            String normalizedMemoryValue = normalize(memoryValue);
+            if (normalizedMemoryValue.isBlank()) {
+                continue;
+            }
+            if (!prompt.isBlank() && prompt.contains(normalizedMemoryValue)) {
+                return true;
+            }
+            for (String intentValue : normalizedIntentValues) {
+                if (normalizedMemoryValue.contains(intentValue) || intentValue.contains(normalizedMemoryValue)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<String> extractCities(String text) {
@@ -285,30 +385,26 @@ public class AgentLongTermMemoryService {
             List<String> styles,
             String duration,
             String mobility,
-            List<String> avoidTags,
-            List<String> recentAreas
+            List<String> avoidTags
     ) {
         List<String> parts = new ArrayList<>();
         if (!cities.isEmpty()) {
-            parts.add("偏好城市：" + String.join("、", cities));
+            parts.add("偏好城市: " + String.join("、", cities));
         }
         if (!areas.isEmpty()) {
-            parts.add("常提区域：" + String.join("、", areas));
+            parts.add("常提区域: " + String.join("、", areas));
         }
         if (!styles.isEmpty()) {
-            parts.add("路线风格：" + String.join("、", styles));
+            parts.add("路线风格: " + String.join("、", styles));
         }
         if (!duration.isBlank()) {
-            parts.add("时长：" + duration);
+            parts.add("时长: " + duration);
         }
         if (!mobility.isBlank()) {
-            parts.add("体力偏好：" + mobility);
+            parts.add("体力偏好: " + mobility);
         }
         if (!avoidTags.isEmpty()) {
-            parts.add("避雷：" + String.join("、", avoidTags));
-        }
-        if (parts.isEmpty() && recentAreas != null && !recentAreas.isEmpty()) {
-            parts.add("最近关注区域：" + String.join("、", trimList(recentAreas, 3)));
+            parts.add("避雷: " + String.join("、", avoidTags));
         }
         return String.join("；", parts);
     }
@@ -401,7 +497,7 @@ public class AgentLongTermMemoryService {
 
     private String normalizeAreaCandidate(String value) {
         String normalized = normalize(value);
-        normalized = normalized.replaceFirst("^(?:我想在|想在|我在|在|去|到)", "");
+        normalized = normalized.replaceFirst("^(?:我想在|想在|我在|在|去)", "");
         return normalize(normalized);
     }
 
@@ -426,7 +522,6 @@ public class AgentLongTermMemoryService {
                     && preferredDuration.isBlank()
                     && mobilityLevel.isBlank()
                     && avoidTags.isEmpty()
-                    && recentSuggestedAreas.isEmpty()
                     && summary.isBlank();
         }
     }
