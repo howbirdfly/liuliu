@@ -78,21 +78,73 @@ public class AgentContextWindowService {
         if (messages == null || messages.isEmpty()) {
             return List.of();
         }
-        return buildOverflowMessageWindow(messages);
+        return buildCompactedMessageWindow(messages, OVERFLOW_RECENT_MESSAGE_COUNT, true);
+    }
+
+    public List<LlmMessage> autoCompactMessagesForLargePrompt(List<LlmMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        return buildCompactedMessageWindow(messages, NORMAL_RECENT_MESSAGE_COUNT, false);
+    }
+
+    public List<LlmMessage> microCompactCurrentTurnMessages(List<LlmMessage> messages, int keepRecentToolMessages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+
+        int keepCount = Math.max(0, keepRecentToolMessages);
+        List<Integer> toolIndexes = new ArrayList<>();
+        for (int index = 0; index < messages.size(); index++) {
+            LlmMessage message = messages.get(index);
+            if (message != null && "tool".equals(message.role())) {
+                toolIndexes.add(index);
+            }
+        }
+        if (toolIndexes.size() <= keepCount) {
+            return new ArrayList<>(messages);
+        }
+
+        int clearUntil = toolIndexes.size() - keepCount;
+        List<LlmMessage> compacted = new ArrayList<>(messages.size());
+        for (int index = 0; index < messages.size(); index++) {
+            compacted.add(messages.get(index));
+        }
+
+        for (int toolIndexPosition = 0; toolIndexPosition < clearUntil; toolIndexPosition++) {
+            int messageIndex = toolIndexes.get(toolIndexPosition);
+            LlmMessage original = compacted.get(messageIndex);
+            if (original == null) {
+                continue;
+            }
+            String replacement = buildMicroCompactToolMessage(original);
+            compacted.set(messageIndex, new LlmMessage(
+                    original.role(),
+                    replacement,
+                    original.toolCallId(),
+                    original.name(),
+                    List.of()
+            ));
+        }
+        return compacted;
     }
 
     public String compactToolOutputForModel(String output) {
         return compactToolOutput(output, false);
     }
 
-    private List<LlmMessage> buildOverflowMessageWindow(List<LlmMessage> messages) {
-        List<LlmMessage> source = sanitizeHistory(messages, true);
+    private List<LlmMessage> buildCompactedMessageWindow(
+            List<LlmMessage> messages,
+            int recentMessageCount,
+            boolean overflowMode
+    ) {
+        List<LlmMessage> source = sanitizeHistory(messages, overflowMode);
         if (source.isEmpty()) {
             return List.of();
         }
 
         int lastUserIndex = findLastUserIndex(source);
-        int recentStart = Math.max(0, source.size() - OVERFLOW_RECENT_MESSAGE_COUNT);
+        int recentStart = Math.max(0, source.size() - Math.max(1, recentMessageCount));
         LinkedHashSet<Integer> keptIndexes = new LinkedHashSet<>();
         if (lastUserIndex >= 0 && lastUserIndex < recentStart) {
             keptIndexes.add(lastUserIndex);
@@ -240,6 +292,17 @@ public class AgentContextWindowService {
             }
         }
         return -1;
+    }
+
+    private String buildMicroCompactToolMessage(LlmMessage message) {
+        String summarized = compactToolOutput(message.content(), true);
+        String toolName = message.name() == null || message.name().isBlank()
+                ? "tool"
+                : message.name().trim();
+        if (summarized.isBlank()) {
+            return "[cleared]";
+        }
+        return "[Earlier: used " + toolName + "]";
     }
 
     private String compactToolOutput(String output, boolean overflowMode) {

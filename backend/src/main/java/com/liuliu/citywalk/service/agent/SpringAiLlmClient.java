@@ -1,5 +1,6 @@
 package com.liuliu.citywalk.service.agent;
 
+import com.liuliu.citywalk.config.DeepSeekAiProperties;
 import com.liuliu.citywalk.service.AgentContextWindowService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -38,12 +42,18 @@ public class SpringAiLlmClient {
     private final String configuredModel;
     private final String configuredApiKey;
     private final String configuredBaseUrl;
+    private final int transientFailureMaxRetries;
+    private final long transientFailureInitialBackoffMs;
+    private final long transientFailureMaxBackoffMs;
+    private final int promptAutoCompactTokenThreshold;
+    private final int promptMicroCompactKeepToolMessages;
 
     public SpringAiLlmClient(
             @Qualifier("deepSeekChatClient") ChatClient chatClient,
             AgentChatMemoryAdvisor agentChatMemoryAdvisor,
             AgentKnowledgeAdvisor agentKnowledgeAdvisor,
             AgentContextWindowService agentContextWindowService,
+            DeepSeekAiProperties deepSeekAiProperties,
             @Value("${spring.ai.model.chat:deepseek}") String configuredProvider,
             @Value("${spring.ai.deepseek.chat.model:deepseek-chat}") String configuredModel,
             @Value("${spring.ai.deepseek.api-key:}") String configuredApiKey,
@@ -61,6 +71,14 @@ public class SpringAiLlmClient {
                 : configuredModel.trim();
         this.configuredApiKey = configuredApiKey == null ? "" : configuredApiKey.trim();
         this.configuredBaseUrl = configuredBaseUrl == null ? "" : configuredBaseUrl.trim();
+        this.transientFailureMaxRetries = Math.max(0, deepSeekAiProperties.getTransientFailureMaxRetries());
+        this.transientFailureInitialBackoffMs = Math.max(0L, deepSeekAiProperties.getTransientFailureInitialBackoffMs());
+        this.transientFailureMaxBackoffMs = Math.max(
+                this.transientFailureInitialBackoffMs,
+                deepSeekAiProperties.getTransientFailureMaxBackoffMs()
+        );
+        this.promptAutoCompactTokenThreshold = Math.max(0, deepSeekAiProperties.getPromptAutoCompactTokenThreshold());
+        this.promptMicroCompactKeepToolMessages = Math.max(0, deepSeekAiProperties.getPromptMicroCompactKeepToolMessages());
     }
 
     public String provider() {
@@ -88,35 +106,15 @@ public class SpringAiLlmClient {
             AgentCallContext callContext
     ) {
         ChatClient chatClient = requireChatClient();
-
-        try {
-            return callSingleResponse(chatClient, instructions, messages, toolCallbacks, temperature, callContext);
-        } catch (Exception error) {
-            if (Thread.currentThread().isInterrupted()) {
-                Thread.currentThread().interrupt();
-                throw cancelled(error);
-            }
-            LlmResponse compactedRetry = tryContextOverflowRetry(
-                    chatClient,
-                    instructions,
-                    messages,
-                    toolCallbacks,
-                    temperature,
-                    callContext,
-                    null,
-                    error
-            );
-            if (compactedRetry != null) {
-                return compactedRetry;
-            }
-            log.warn(
-                    "Spring AI agent call failed. requestSummary=" + summarizeRequest(messages, toolCallbacks)
-                            + ", causeType=" + error.getClass().getName()
-                            + ", causeMessage=" + error.getMessage(),
-                    error
-            );
-            throw propagate(error);
-        }
+        return executeWithRecovery(
+                chatClient,
+                instructions,
+                messages,
+                toolCallbacks,
+                temperature,
+                callContext,
+                null
+        );
     }
 
     public LlmResponse createStreamingResponse(
@@ -138,78 +136,105 @@ public class SpringAiLlmClient {
             Consumer<String> listener
     ) {
         ChatClient chatClient = requireChatClient();
-
-        try {
-            return callStreamingResponse(chatClient, instructions, messages, toolCallbacks, temperature, callContext, listener);
-        } catch (Exception error) {
-            if (Thread.currentThread().isInterrupted()) {
-                Thread.currentThread().interrupt();
-                throw cancelled(error);
-            }
-            LlmResponse compactedRetry = tryContextOverflowRetry(
-                    chatClient,
-                    instructions,
-                    messages,
-                    toolCallbacks,
-                    temperature,
-                    callContext,
-                    listener,
-                    error
-            );
-            if (compactedRetry != null) {
-                return compactedRetry;
-            }
-            log.warn(
-                    "Spring AI agent streaming call failed. requestSummary=" + summarizeRequest(messages, toolCallbacks)
-                            + ", causeType=" + error.getClass().getName()
-                            + ", causeMessage=" + error.getMessage(),
-                    error
-            );
-            throw propagate(error);
-        }
+        return executeWithRecovery(
+                chatClient,
+                instructions,
+                messages,
+                toolCallbacks,
+                temperature,
+                callContext,
+                listener
+        );
     }
 
-    private LlmResponse tryContextOverflowRetry(
+    private LlmResponse executeWithRecovery(
             ChatClient chatClient,
             String instructions,
             List<LlmMessage> messages,
             List<ToolCallback> toolCallbacks,
             Double temperature,
             AgentCallContext callContext,
-            Consumer<String> listener,
-            Exception error
+            Consumer<String> listener
     ) {
-        if (!isContextOverflowError(error)) {
-            return null;
-        }
+        List<LlmMessage> workingMessages = prepareMessagesForAttempt(instructions, messages, toolCallbacks);
+        int transientRetryAttempt = 0;
+        boolean overflowRetryUsed = false;
 
-        List<LlmMessage> compactedMessages = agentContextWindowService.compactMessagesForContextOverflow(messages);
-        if (compactedMessages == null || compactedMessages.isEmpty()) {
-            return null;
-        }
-
-        log.info(
-                "Spring AI request exceeded context window. Retrying with compacted context. originalSummary={}, compactedMessages={}",
-                summarizeRequest(messages, toolCallbacks),
-                compactedMessages.size()
-        );
-        try {
-            if (listener != null) {
-                return callStreamingResponse(chatClient, instructions, compactedMessages, toolCallbacks, temperature, callContext, listener);
-            }
-            return callSingleResponse(chatClient, instructions, compactedMessages, toolCallbacks, temperature, callContext);
-        } catch (Exception retryError) {
+        while (true) {
+            AtomicBoolean emittedAnyDelta = new AtomicBoolean(false);
             if (Thread.currentThread().isInterrupted()) {
                 Thread.currentThread().interrupt();
-                throw cancelled(retryError);
+                throw cancelled(null);
             }
-            log.warn(
-                    "Spring AI compacted-context retry failed. requestSummary=" + summarizeRequest(compactedMessages, toolCallbacks)
-                            + ", causeType=" + retryError.getClass().getName()
-                            + ", causeMessage=" + retryError.getMessage(),
-                    retryError
-            );
-            return null;
+
+            try {
+                if (listener != null) {
+                    Consumer<String> guardedListener = delta -> {
+                        if (delta != null && !delta.isEmpty()) {
+                            emittedAnyDelta.set(true);
+                        }
+                        listener.accept(delta);
+                    };
+                    return callStreamingResponse(
+                            chatClient,
+                            instructions,
+                            workingMessages,
+                            toolCallbacks,
+                            temperature,
+                            callContext,
+                            guardedListener
+                    );
+                }
+                return callSingleResponse(chatClient, instructions, workingMessages, toolCallbacks, temperature, callContext);
+            } catch (Exception error) {
+                if (Thread.currentThread().isInterrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw cancelled(error);
+                }
+
+                boolean responseStarted = emittedAnyDelta.get();
+                if (!responseStarted && !overflowRetryUsed && isContextOverflowError(error)) {
+                    List<LlmMessage> compactedMessages = agentContextWindowService.compactMessagesForContextOverflow(workingMessages);
+                    if (compactedMessages != null && !compactedMessages.isEmpty()) {
+                        overflowRetryUsed = true;
+                        workingMessages = compactedMessages;
+                        log.info(
+                                "Spring AI request exceeded context window. Retrying with compacted context. requestSummary={}, compactedMessages={}",
+                                summarizeRequest(workingMessages, toolCallbacks),
+                                compactedMessages.size()
+                        );
+                        continue;
+                    }
+                }
+
+                if (!responseStarted
+                        && isRetryableTransientError(error)
+                        && transientRetryAttempt < transientFailureMaxRetries) {
+                    transientRetryAttempt++;
+                    long backoffMs = computeBackoffDelayMs(transientRetryAttempt);
+                    log.warn(
+                            "Spring AI transient failure detected. Retrying attempt {}/{}. requestSummary={}, causeType={}, causeMessage={}, backoffMs={}",
+                            transientRetryAttempt,
+                            transientFailureMaxRetries,
+                            summarizeRequest(workingMessages, toolCallbacks),
+                            error.getClass().getName(),
+                            error.getMessage(),
+                            backoffMs
+                    );
+                    sleepBackoff(backoffMs);
+                    continue;
+                }
+
+                log.warn(
+                        "Spring AI call failed. requestSummary={}, causeType={}, causeMessage={}, responseStarted={}",
+                        summarizeRequest(workingMessages, toolCallbacks),
+                        error.getClass().getName(),
+                        error.getMessage(),
+                        responseStarted,
+                        error
+                );
+                throw propagate(error);
+            }
         }
     }
 
@@ -234,6 +259,127 @@ public class SpringAiLlmClient {
             current = current.getCause();
         }
         return false;
+    }
+
+    private boolean isRetryableTransientError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof TimeoutException) {
+                return true;
+            }
+
+            String className = current.getClass().getName().toLowerCase();
+            String message = current.getMessage() == null ? "" : current.getMessage().toLowerCase();
+            if (className.contains("sockettimeoutexception")
+                    || className.contains("httptimeoutexception")
+                    || className.contains("connectexception")
+                    || className.contains("resourceaccessexception")) {
+                return true;
+            }
+            if (message.contains("429")
+                    || message.contains("529")
+                    || message.contains("too many requests")
+                    || message.contains("rate limit")
+                    || message.contains("overloaded")
+                    || message.contains("timed out")
+                    || message.contains("timeout")
+                    || message.contains("connection reset")
+                    || message.contains("connection refused")
+                    || message.contains("remote host terminated")
+                    || message.contains("temporarily unavailable")
+                    || message.contains("service unavailable")
+                    || message.contains("bad gateway")
+                    || message.contains("gateway timeout")
+                    || message.contains("502")
+                    || message.contains("503")
+                    || message.contains("504")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private List<LlmMessage> prepareMessagesForAttempt(
+            String instructions,
+            List<LlmMessage> messages,
+            List<ToolCallback> toolCallbacks
+    ) {
+        List<LlmMessage> workingMessages = agentContextWindowService.microCompactCurrentTurnMessages(
+                messages,
+                promptMicroCompactKeepToolMessages
+        );
+        if (!shouldAutoCompactPrompt(instructions, workingMessages)) {
+            return workingMessages;
+        }
+
+        List<LlmMessage> compactedMessages = agentContextWindowService.autoCompactMessagesForLargePrompt(workingMessages);
+        if (compactedMessages == null || compactedMessages.isEmpty()) {
+            return workingMessages;
+        }
+        log.info(
+                "Spring AI request auto-compacted before model call. requestSummary={}, estimatedTokens={}, compactedMessages={}",
+                summarizeRequest(workingMessages, toolCallbacks),
+                estimatePromptTokens(instructions, workingMessages),
+                compactedMessages.size()
+        );
+        return compactedMessages;
+    }
+
+    private boolean shouldAutoCompactPrompt(String instructions, List<LlmMessage> messages) {
+        if (promptAutoCompactTokenThreshold <= 0) {
+            return false;
+        }
+        return estimatePromptTokens(instructions, messages) >= promptAutoCompactTokenThreshold;
+    }
+
+    private int estimatePromptTokens(String instructions, List<LlmMessage> messages) {
+        long totalChars = instructions == null ? 0L : instructions.length();
+        if (messages != null) {
+            for (LlmMessage message : messages) {
+                if (message == null) {
+                    continue;
+                }
+                totalChars += message.role() == null ? 0L : message.role().length();
+                totalChars += message.content() == null ? 0L : message.content().length();
+                totalChars += message.name() == null ? 0L : message.name().length();
+                totalChars += message.toolCallId() == null ? 0L : message.toolCallId().length();
+                if (message.toolCalls() != null) {
+                    for (AssistantMessage.ToolCall toolCall : message.toolCalls()) {
+                        if (toolCall == null) {
+                            continue;
+                        }
+                        totalChars += toolCall.name() == null ? 0L : toolCall.name().length();
+                        totalChars += toolCall.arguments() == null ? 0L : toolCall.arguments().length();
+                    }
+                }
+            }
+        }
+        return (int) Math.max(1L, totalChars / 4L);
+    }
+
+    private long computeBackoffDelayMs(int retryAttempt) {
+        if (retryAttempt <= 0 || transientFailureInitialBackoffMs <= 0) {
+            return 0L;
+        }
+        long multiplier = 1L << Math.max(0, retryAttempt - 1);
+        long delay = transientFailureInitialBackoffMs * multiplier;
+        long cappedDelay = Math.min(delay, transientFailureMaxBackoffMs);
+        long jitterBound = Math.max(1L, Math.round(cappedDelay * 0.25d));
+        long jitter = ThreadLocalRandom.current().nextLong(jitterBound);
+        return cappedDelay + jitter;
+    }
+
+    private void sleepBackoff(long backoffMs) {
+        if (backoffMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(backoffMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw cancelled(interruptedException);
+        }
     }
 
     private LlmResponse callSingleResponse(

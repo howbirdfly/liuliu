@@ -75,6 +75,11 @@ liuliu:
     deepseek:
       connect-timeout-ms: ${LIULIU_AI_DEEPSEEK_CONNECT_TIMEOUT_MS:10000}
       request-timeout-ms: ${LIULIU_AI_DEEPSEEK_REQUEST_TIMEOUT_MS:60000}
+      transient-failure-max-retries: ${LIULIU_AI_DEEPSEEK_TRANSIENT_FAILURE_MAX_RETRIES:2}
+      transient-failure-initial-backoff-ms: ${LIULIU_AI_DEEPSEEK_TRANSIENT_FAILURE_INITIAL_BACKOFF_MS:800}
+      transient-failure-max-backoff-ms: ${LIULIU_AI_DEEPSEEK_TRANSIENT_FAILURE_MAX_BACKOFF_MS:2500}
+      prompt-auto-compact-token-threshold: ${LIULIU_AI_DEEPSEEK_PROMPT_AUTO_COMPACT_TOKEN_THRESHOLD:18000}
+      prompt-micro-compact-keep-tool-messages: ${LIULIU_AI_DEEPSEEK_PROMPT_MICRO_COMPACT_KEEP_TOOL_MESSAGES:4}
     embedding:
       api-key: ${LIULIU_AI_EMBEDDING_API_KEY:}
       model: ${LIULIU_AI_EMBEDDING_MODEL:text-embedding-v4}
