@@ -1,0 +1,170 @@
+package com.liuliu.citywalk.service.agent.hook;
+
+import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
+import com.liuliu.citywalk.service.AgentConversationStateService;
+import com.liuliu.citywalk.service.AgentIntentAnalysisService;
+import com.liuliu.citywalk.service.AgentRoundService;
+import com.liuliu.citywalk.service.AgentToolExecutionService;
+import com.liuliu.citywalk.service.agent.LlmMessage;
+import com.liuliu.citywalk.service.agent.LlmResponse;
+import org.springframework.ai.chat.messages.AssistantMessage;
+
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+public final class AgentExecutionHookContext {
+
+    private final AgentExecutionHookPoint point;
+    private final Long userId;
+    private final String normalizedPrompt;
+    private final AgentIntentAnalysisService.AgentIntent intent;
+    private final AgentConversationStateService.ResolvedConversationState conversationState;
+    private final String instructions;
+    private final List<LlmMessage> messages;
+    private final List<AgentStepResponse> steps;
+    private final Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey;
+    private final Map<String, Object> attributes = new LinkedHashMap<>();
+    private int round;
+    private String knowledgeQuery;
+    private Runnable cancellationCheck;
+    private AssistantMessage.ToolCall toolCall;
+    private AgentToolExecutionService.AgentToolExecutionOutcome toolOutcome;
+    private LlmResponse llmResponse;
+    private AgentRoundService.AgentRoundOutcome roundOutcome;
+    private String finalAnswer;
+
+    public AgentExecutionHookContext(
+            AgentExecutionHookPoint point,
+            Long userId,
+            String normalizedPrompt,
+            AgentIntentAnalysisService.AgentIntent intent,
+            AgentConversationStateService.ResolvedConversationState conversationState,
+            String instructions,
+            List<LlmMessage> messages,
+            List<AgentStepResponse> steps,
+            Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
+    ) {
+        this.point = point;
+        this.userId = userId;
+        this.normalizedPrompt = normalizedPrompt;
+        this.intent = intent;
+        this.conversationState = conversationState;
+        this.instructions = instructions;
+        this.messages = messages;
+        this.steps = steps;
+        this.toolExecutionMemoByKey = toolExecutionMemoByKey;
+    }
+
+    public AgentExecutionHookPoint point() {
+        return point;
+    }
+
+    public Long userId() {
+        return userId;
+    }
+
+    public String normalizedPrompt() {
+        return normalizedPrompt;
+    }
+
+    public AgentIntentAnalysisService.AgentIntent intent() {
+        return intent;
+    }
+
+    public AgentConversationStateService.ResolvedConversationState conversationState() {
+        return conversationState;
+    }
+
+    public String instructions() {
+        return instructions;
+    }
+
+    public List<LlmMessage> messages() {
+        return messages;
+    }
+
+    public List<AgentStepResponse> steps() {
+        return steps;
+    }
+
+    public Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey() {
+        return toolExecutionMemoByKey;
+    }
+
+    public Map<String, Object> attributes() {
+        return attributes;
+    }
+
+    public int round() {
+        return round;
+    }
+
+    public AgentExecutionHookContext withRound(int round) {
+        this.round = round;
+        return this;
+    }
+
+    public String knowledgeQuery() {
+        return knowledgeQuery;
+    }
+
+    public AgentExecutionHookContext withKnowledgeQuery(String knowledgeQuery) {
+        this.knowledgeQuery = knowledgeQuery;
+        return this;
+    }
+
+    public Runnable cancellationCheck() {
+        return cancellationCheck;
+    }
+
+    public AgentExecutionHookContext withCancellationCheck(Runnable cancellationCheck) {
+        this.cancellationCheck = cancellationCheck;
+        return this;
+    }
+
+    public AssistantMessage.ToolCall toolCall() {
+        return toolCall;
+    }
+
+    public AgentExecutionHookContext withToolCall(AssistantMessage.ToolCall toolCall) {
+        this.toolCall = toolCall;
+        return this;
+    }
+
+    public AgentToolExecutionService.AgentToolExecutionOutcome toolOutcome() {
+        return toolOutcome;
+    }
+
+    public AgentExecutionHookContext withToolOutcome(AgentToolExecutionService.AgentToolExecutionOutcome toolOutcome) {
+        this.toolOutcome = toolOutcome;
+        return this;
+    }
+
+    public LlmResponse llmResponse() {
+        return llmResponse;
+    }
+
+    public AgentExecutionHookContext withLlmResponse(LlmResponse llmResponse) {
+        this.llmResponse = llmResponse;
+        return this;
+    }
+
+    public AgentRoundService.AgentRoundOutcome roundOutcome() {
+        return roundOutcome;
+    }
+
+    public AgentExecutionHookContext withRoundOutcome(AgentRoundService.AgentRoundOutcome roundOutcome) {
+        this.roundOutcome = roundOutcome;
+        return this;
+    }
+
+    public String finalAnswer() {
+        return finalAnswer;
+    }
+
+    public AgentExecutionHookContext withFinalAnswer(String finalAnswer) {
+        this.finalAnswer = finalAnswer;
+        return this;
+    }
+}

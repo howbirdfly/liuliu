@@ -6,6 +6,9 @@ import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.AgentExecutionCancelledException;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookContext;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookPoint;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookRegistryService;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 
@@ -85,6 +88,7 @@ public class AgentExecutionPipelineService {
     private final AgentToolExecutionService agentToolExecutionService;
     private final AgentToolResultSlicerService agentToolResultSlicerService;
     private final AgentRoundService agentRoundService;
+    private final AgentExecutionHookRegistryService agentExecutionHookRegistryService;
 
     public AgentExecutionPipelineService(
             SpringAiLlmClient llmClient,
@@ -95,7 +99,8 @@ public class AgentExecutionPipelineService {
             AgentAnswerFormatterService agentAnswerFormatterService,
             AgentToolExecutionService agentToolExecutionService,
             AgentToolResultSlicerService agentToolResultSlicerService,
-            AgentRoundService agentRoundService
+            AgentRoundService agentRoundService,
+            AgentExecutionHookRegistryService agentExecutionHookRegistryService
     ) {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
@@ -106,6 +111,7 @@ public class AgentExecutionPipelineService {
         this.agentToolExecutionService = agentToolExecutionService;
         this.agentToolResultSlicerService = agentToolResultSlicerService;
         this.agentRoundService = agentRoundService;
+        this.agentExecutionHookRegistryService = agentExecutionHookRegistryService;
     }
 
     public AgentChatResponse execute(
@@ -381,10 +387,22 @@ public class AgentExecutionPipelineService {
             AgentExecutionRegistryService.AgentExecutionHandle executionHandle,
             AgentExecutionListener listener
     ) {
+        agentExecutionHookRegistryService.trigger(
+                AgentExecutionHookPoint.BEFORE_AGENT_LOOP,
+                hookContext(AgentExecutionHookPoint.BEFORE_AGENT_LOOP, execution, 0, null, null)
+        );
         for (int round = 1; round <= MAX_TOOL_ROUNDS; round++) {
             checkCancelled(executionHandle);
+            agentExecutionHookRegistryService.trigger(
+                    AgentExecutionHookPoint.BEFORE_ROUND,
+                    hookContext(AgentExecutionHookPoint.BEFORE_ROUND, execution, round, null, () -> checkCancelled(executionHandle))
+            );
             AgentRoundService.AgentRoundOutcome roundOutcome =
                     executePlanningRound(execution, round, executionHandle, listener);
+            agentExecutionHookRegistryService.trigger(
+                    AgentExecutionHookPoint.AFTER_ROUND,
+                    hookContext(AgentExecutionHookPoint.AFTER_ROUND, execution, round, roundOutcome, () -> checkCancelled(executionHandle))
+            );
             if (roundOutcome.roundType() == AgentRoundService.RoundType.TOOL_CALLING) {
                 continue;
             }
@@ -586,6 +604,9 @@ public class AgentExecutionPipelineService {
         }
         AgentRoundService.AgentRoundOutcome outcome = agentRoundService.executeRound(
                 execution.userId(),
+                execution.normalizedPrompt(),
+                execution.intent(),
+                execution.conversationState(),
                 advisorKnowledgeQuery,
                 execution.instructions(),
                 execution.messages(),
@@ -701,6 +722,15 @@ public class AgentExecutionPipelineService {
             AgentExecutionListener listener
     ) {
         String answer = normalizeAssistantAnswer(content, execution.intent(), execution.steps());
+        AgentExecutionHookContext finalAnswerContext = hookContext(
+                AgentExecutionHookPoint.BEFORE_FINAL_ANSWER,
+                execution,
+                round,
+                null,
+                () -> checkCancelled(executionHandle)
+        ).withFinalAnswer(answer);
+        agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_FINAL_ANSWER, finalAnswerContext);
+        answer = safeText(finalAnswerContext.finalAnswer(), answer);
         checkCancelled(executionHandle);
         if (!answer.isBlank()) {
             execution.steps().add(new AgentStepResponse("assistant", "final_answer", null, answer));
@@ -735,6 +765,11 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
+        agentExecutionHookRegistryService.trigger(
+                AgentExecutionHookPoint.AFTER_AGENT_LOOP,
+                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, round, null, () -> checkCancelled(executionHandle))
+                        .withFinalAnswer(answer)
+        );
         return result;
     }
 
@@ -744,6 +779,15 @@ public class AgentExecutionPipelineService {
                 execution.intent(),
                 execution.steps()
         );
+        AgentExecutionHookContext finalAnswerContext = hookContext(
+                AgentExecutionHookPoint.BEFORE_FINAL_ANSWER,
+                execution,
+                MAX_TOOL_ROUNDS,
+                null,
+                null
+        ).withFinalAnswer(fallback);
+        agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_FINAL_ANSWER, finalAnswerContext);
+        fallback = safeText(finalAnswerContext.finalAnswer(), fallback);
         execution.steps().add(new AgentStepResponse("assistant", "max_round_guard", null, fallback));
         agentPromptAssemblyService.rememberConversation(execution.userId(), execution.normalizedPrompt(), fallback);
         agentConversationStateService.rememberState(execution.userId(), execution.conversationState());
@@ -757,6 +801,11 @@ public class AgentExecutionPipelineService {
                 llmClient.model(),
                 null
         ));
+        agentExecutionHookRegistryService.trigger(
+                AgentExecutionHookPoint.AFTER_AGENT_LOOP,
+                hookContext(AgentExecutionHookPoint.AFTER_AGENT_LOOP, execution, MAX_TOOL_ROUNDS, null, null)
+                        .withFinalAnswer(fallback)
+        );
         return new AgentChatResponse(
                 fallback,
                 execution.steps(),
@@ -1015,6 +1064,30 @@ public class AgentExecutionPipelineService {
             return;
         }
         executionHandle.checkCancelled();
+    }
+
+    private AgentExecutionHookContext hookContext(
+            AgentExecutionHookPoint point,
+            PreparedExecution execution,
+            int round,
+            AgentRoundService.AgentRoundOutcome roundOutcome,
+            Runnable cancellationCheck
+    ) {
+        AgentExecutionHookContext context = new AgentExecutionHookContext(
+                point,
+                execution == null ? null : execution.userId(),
+                execution == null ? "" : execution.normalizedPrompt(),
+                execution == null ? null : execution.intent(),
+                execution == null ? null : execution.conversationState(),
+                execution == null ? "" : execution.instructions(),
+                execution == null ? List.of() : execution.messages(),
+                execution == null ? List.of() : execution.steps(),
+                execution == null ? Map.of() : execution.toolExecutionMemoByKey()
+        ).withRound(round).withRoundOutcome(roundOutcome);
+        if (cancellationCheck != null) {
+            context.withCancellationCheck(cancellationCheck);
+        }
+        return context;
     }
 
     private record PreparedExecution(

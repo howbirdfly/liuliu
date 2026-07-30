@@ -4,6 +4,9 @@ import com.liuliu.citywalk.model.dto.response.AgentStepResponse;
 import com.liuliu.citywalk.service.agent.LlmMessage;
 import com.liuliu.citywalk.service.agent.LlmResponse;
 import com.liuliu.citywalk.service.agent.SpringAiLlmClient;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookContext;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookPoint;
+import com.liuliu.citywalk.service.agent.hook.AgentExecutionHookRegistryService;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
@@ -17,19 +20,25 @@ public class AgentRoundService {
     private final SpringAiLlmClient llmClient;
     private final AgentToolExecutionService agentToolExecutionService;
     private final AgentToolResultSlicerService agentToolResultSlicerService;
+    private final AgentExecutionHookRegistryService agentExecutionHookRegistryService;
 
     public AgentRoundService(
             SpringAiLlmClient llmClient,
             AgentToolExecutionService agentToolExecutionService,
-            AgentToolResultSlicerService agentToolResultSlicerService
+            AgentToolResultSlicerService agentToolResultSlicerService,
+            AgentExecutionHookRegistryService agentExecutionHookRegistryService
     ) {
         this.llmClient = llmClient;
         this.agentToolExecutionService = agentToolExecutionService;
         this.agentToolResultSlicerService = agentToolResultSlicerService;
+        this.agentExecutionHookRegistryService = agentExecutionHookRegistryService;
     }
 
     public AgentRoundOutcome executeRound(
             Long userId,
+            String normalizedPrompt,
+            AgentIntentAnalysisService.AgentIntent intent,
+            AgentConversationStateService.ResolvedConversationState conversationState,
             String knowledgeQuery,
             String instructions,
             List<LlmMessage> messages,
@@ -41,6 +50,22 @@ public class AgentRoundService {
             Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
     ) {
         List<ToolCallback> toolCallbacks = agentToolExecutionService.toolCallbacks();
+        AgentExecutionHookContext beforeLlmContext = hookContext(
+                AgentExecutionHookPoint.BEFORE_LLM_CALL,
+                userId,
+                normalizedPrompt,
+                intent,
+                conversationState,
+                knowledgeQuery,
+                instructions,
+                messages,
+                steps,
+                round,
+                cancellationCheck,
+                toolExecutionMemoByKey
+        );
+        agentExecutionHookRegistryService.trigger(AgentExecutionHookPoint.BEFORE_LLM_CALL, beforeLlmContext);
+
         LlmResponse response = llmClient.createStreamingResponse(
                 instructions,
                 messages,
@@ -57,12 +82,46 @@ public class AgentRoundService {
                 }
         );
         cancellationCheck.run();
+        agentExecutionHookRegistryService.trigger(
+                AgentExecutionHookPoint.AFTER_LLM_RESPONSE,
+                hookContext(
+                        AgentExecutionHookPoint.AFTER_LLM_RESPONSE,
+                        userId,
+                        normalizedPrompt,
+                        intent,
+                        conversationState,
+                        knowledgeQuery,
+                        instructions,
+                        messages,
+                        steps,
+                        round,
+                        cancellationCheck,
+                        toolExecutionMemoByKey
+                ).withLlmResponse(response)
+        );
 
         if (response.hasToolCalls()) {
             List<AssistantMessage.ToolCall> toolCalls = response.toolCalls();
             messages.add(LlmMessage.assistant(response.content(), toolCalls));
             for (AssistantMessage.ToolCall toolCall : toolCalls) {
                 cancellationCheck.run();
+                agentExecutionHookRegistryService.trigger(
+                        AgentExecutionHookPoint.BEFORE_TOOL_CALL,
+                        hookContext(
+                                AgentExecutionHookPoint.BEFORE_TOOL_CALL,
+                                userId,
+                                normalizedPrompt,
+                                intent,
+                                conversationState,
+                                knowledgeQuery,
+                                instructions,
+                                messages,
+                                steps,
+                                round,
+                                cancellationCheck,
+                                toolExecutionMemoByKey
+                        ).withToolCall(toolCall)
+                );
                 toolEventListener.onToolCall(toolCall, round);
                 AgentToolExecutionService.AgentToolExecutionOutcome outcome = agentToolExecutionService.execute(
                         toolCall,
@@ -76,6 +135,23 @@ public class AgentRoundService {
                         toolCall.name(),
                         agentToolResultSlicerService.sliceForModel(toolCall.name(), outcome.output())
                 ));
+                agentExecutionHookRegistryService.trigger(
+                        AgentExecutionHookPoint.AFTER_TOOL_RESULT,
+                        hookContext(
+                                AgentExecutionHookPoint.AFTER_TOOL_RESULT,
+                                userId,
+                                normalizedPrompt,
+                                intent,
+                                conversationState,
+                                knowledgeQuery,
+                                instructions,
+                                messages,
+                                steps,
+                                round,
+                                cancellationCheck,
+                                toolExecutionMemoByKey
+                        ).withToolCall(toolCall).withToolOutcome(outcome)
+                );
             }
             return AgentRoundOutcome.toolCalling(toolCalls);
         }
@@ -118,5 +194,34 @@ public class AgentRoundService {
     public enum RoundType {
         TOOL_CALLING,
         FINAL_TEXT
+    }
+
+    private AgentExecutionHookContext hookContext(
+            AgentExecutionHookPoint point,
+            Long userId,
+            String normalizedPrompt,
+            AgentIntentAnalysisService.AgentIntent intent,
+            AgentConversationStateService.ResolvedConversationState conversationState,
+            String knowledgeQuery,
+            String instructions,
+            List<LlmMessage> messages,
+            List<AgentStepResponse> steps,
+            int round,
+            Runnable cancellationCheck,
+            Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey
+    ) {
+        return new AgentExecutionHookContext(
+                point,
+                userId,
+                normalizedPrompt,
+                intent,
+                conversationState,
+                instructions,
+                messages,
+                steps,
+                toolExecutionMemoByKey
+        ).withRound(round)
+                .withKnowledgeQuery(knowledgeQuery)
+                .withCancellationCheck(cancellationCheck);
     }
 }
