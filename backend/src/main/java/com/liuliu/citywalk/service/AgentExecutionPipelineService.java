@@ -14,6 +14,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,6 +98,7 @@ public class AgentExecutionPipelineService {
     private final AgentRoundService agentRoundService;
     private final AgentExecutionHookRegistryService agentExecutionHookRegistryService;
     private final AgentTodoListService agentTodoListService;
+    private final AgentAsyncPrefetchService agentAsyncPrefetchService;
 
     public AgentExecutionPipelineService(
             SpringAiLlmClient llmClient,
@@ -108,7 +110,8 @@ public class AgentExecutionPipelineService {
             AgentToolResultSlicerService agentToolResultSlicerService,
             AgentRoundService agentRoundService,
             AgentExecutionHookRegistryService agentExecutionHookRegistryService,
-            AgentTodoListService agentTodoListService
+            AgentTodoListService agentTodoListService,
+            AgentAsyncPrefetchService agentAsyncPrefetchService
     ) {
         this.llmClient = llmClient;
         this.agentIntentAnalysisService = agentIntentAnalysisService;
@@ -120,6 +123,7 @@ public class AgentExecutionPipelineService {
         this.agentRoundService = agentRoundService;
         this.agentExecutionHookRegistryService = agentExecutionHookRegistryService;
         this.agentTodoListService = agentTodoListService;
+        this.agentAsyncPrefetchService = agentAsyncPrefetchService;
     }
 
     public AgentChatResponse execute(
@@ -133,6 +137,7 @@ public class AgentExecutionPipelineService {
             return runPlanningLoop(execution, executionHandle, listener);
         } finally {
             agentTodoListService.closeExecutionScope();
+            agentAsyncPrefetchService.clearExecution(execution.executionId());
         }
     }
 
@@ -206,7 +211,7 @@ public class AgentExecutionPipelineService {
                 buildPipelineStepOutput(intent)
         ));
 
-        Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new LinkedHashMap<>();
+        Map<String, AgentToolExecutionService.ToolExecutionMemo> toolExecutionMemoByKey = new ConcurrentHashMap<>();
 
         emit(listener, new AgentExecutionEvent(
                 "start",
