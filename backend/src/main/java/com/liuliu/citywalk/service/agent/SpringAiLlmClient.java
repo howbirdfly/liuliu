@@ -123,6 +123,26 @@ public class SpringAiLlmClient {
         );
     }
 
+    public LlmResponse createConstrainedResponse(
+            String instructions,
+            List<LlmMessage> messages,
+            Double temperature,
+            int maxTokens
+    ) {
+        ChatClient client = requireChatClient();
+        int constrainedMaxTokens = Math.max(64, Math.min(maxTokens, DEFAULT_MAX_TOKENS));
+        List<LlmMessage> preparedMessages = prepareMessagesForAttempt(instructions, messages, List.of());
+        return callSingleResponse(
+                client,
+                instructions,
+                preparedMessages,
+                List.of(),
+                temperature,
+                null,
+                constrainedMaxTokens
+        );
+    }
+
     public LlmResponse createStreamingResponse(
             String instructions,
             List<LlmMessage> messages,

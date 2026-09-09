@@ -12,21 +12,26 @@ import java.util.List;
 public class AgentConversationStateService {
 
     private final AgentIntentAnalysisService agentIntentAnalysisService;
+    private final AgentStructuredIntentExtractionService agentStructuredIntentExtractionService;
     private final AgentConversationStateStore agentConversationStateStore;
     private final ObjectMapper objectMapper;
 
     public AgentConversationStateService(
             AgentIntentAnalysisService agentIntentAnalysisService,
+            AgentStructuredIntentExtractionService agentStructuredIntentExtractionService,
             AgentConversationStateStore agentConversationStateStore,
             ObjectMapper objectMapper
     ) {
         this.agentIntentAnalysisService = agentIntentAnalysisService;
+        this.agentStructuredIntentExtractionService = agentStructuredIntentExtractionService;
         this.agentConversationStateStore = agentConversationStateStore;
         this.objectMapper = objectMapper;
     }
 
     public ResolvedConversationState resolve(Long userId, List<LlmMessage> history, String userPrompt) {
-        AgentIntentAnalysisService.AgentIntent currentIntent = agentIntentAnalysisService.analyze(userPrompt);
+        AgentStructuredIntentExtractionService.ExtractionResult extractionResult =
+                agentStructuredIntentExtractionService.extractCurrentInstruction(userPrompt);
+        AgentIntentAnalysisService.AgentIntent currentIntent = extractionResult.intent();
         AgentIntentAnalysisService.AgentIntent sessionStateIntent = toIntent(agentConversationStateStore.loadState(userId));
         AgentIntentAnalysisService.AgentIntent carryoverIntent = agentIntentAnalysisService.deriveCarryoverIntent(history);
         AgentIntentAnalysisService.AgentIntent mergedCarryoverIntent = agentIntentAnalysisService.mergeWithCarryover(
@@ -45,7 +50,9 @@ public class AgentConversationStateService {
                 resolveLocationSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
                 resolveThemeSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
                 resolveDurationSlot(currentIntent, sessionStateIntent, carryoverIntent, effectiveIntent),
-                agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, mergedCarryoverIntent, effectiveIntent)
+                agentIntentAnalysisService.buildCarryoverPromptContext(currentIntent, mergedCarryoverIntent, effectiveIntent),
+                extractionResult.source(),
+                extractionResult.errorCode()
         );
     }
 
@@ -268,7 +275,9 @@ public class AgentConversationStateService {
             SlotResolution locationSlot,
             SlotResolution themeSlot,
             SlotResolution durationSlot,
-            String carryoverPromptContext
+            String carryoverPromptContext,
+            String currentIntentSource,
+            String currentIntentErrorCode
     ) {
     }
 

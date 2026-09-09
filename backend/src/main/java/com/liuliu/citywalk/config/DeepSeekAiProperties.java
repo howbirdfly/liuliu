@@ -12,6 +12,8 @@ public class DeepSeekAiProperties {
     private long transientFailureMaxBackoffMs = 2500L;
     private int promptAutoCompactTokenThreshold = 18000;
     private int promptMicroCompactKeepToolMessages = 4;
+    private boolean structuredIntentExtractionEnabled = true;
+    private int structuredIntentExtractionMaxTokens = 384;
 
     public int getConnectTimeoutMs() {
         return connectTimeoutMs;
@@ -67,5 +69,21 @@ public class DeepSeekAiProperties {
 
     public void setPromptMicroCompactKeepToolMessages(int promptMicroCompactKeepToolMessages) {
         this.promptMicroCompactKeepToolMessages = promptMicroCompactKeepToolMessages;
+    }
+
+    public boolean isStructuredIntentExtractionEnabled() {
+        return structuredIntentExtractionEnabled;
+    }
+
+    public void setStructuredIntentExtractionEnabled(boolean structuredIntentExtractionEnabled) {
+        this.structuredIntentExtractionEnabled = structuredIntentExtractionEnabled;
+    }
+
+    public int getStructuredIntentExtractionMaxTokens() {
+        return structuredIntentExtractionMaxTokens;
+    }
+
+    public void setStructuredIntentExtractionMaxTokens(int structuredIntentExtractionMaxTokens) {
+        this.structuredIntentExtractionMaxTokens = structuredIntentExtractionMaxTokens;
     }
 }

@@ -12,6 +12,7 @@ public class RagProperties {
     private boolean hybridKeywordRecallEnabled = true;
     private int hybridKeywordPerVariantLimit = 3;
     private int hybridKeywordMaxVariants = 8;
+    private int hybridRrfK = 60;
 
     public boolean isEnabled() {
         return enabled;
@@ -67,5 +68,13 @@ public class RagProperties {
 
     public void setHybridKeywordMaxVariants(int hybridKeywordMaxVariants) {
         this.hybridKeywordMaxVariants = hybridKeywordMaxVariants;
+    }
+
+    public int getHybridRrfK() {
+        return hybridRrfK;
+    }
+
+    public void setHybridRrfK(int hybridRrfK) {
+        this.hybridRrfK = hybridRrfK;
     }
 }

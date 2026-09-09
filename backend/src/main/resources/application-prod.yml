@@ -80,6 +80,8 @@ liuliu:
       transient-failure-max-backoff-ms: ${LIULIU_AI_DEEPSEEK_TRANSIENT_FAILURE_MAX_BACKOFF_MS:2500}
       prompt-auto-compact-token-threshold: ${LIULIU_AI_DEEPSEEK_PROMPT_AUTO_COMPACT_TOKEN_THRESHOLD:18000}
       prompt-micro-compact-keep-tool-messages: ${LIULIU_AI_DEEPSEEK_PROMPT_MICRO_COMPACT_KEEP_TOOL_MESSAGES:4}
+      structured-intent-extraction-enabled: ${LIULIU_AI_STRUCTURED_INTENT_EXTRACTION_ENABLED:true}
+      structured-intent-extraction-max-tokens: ${LIULIU_AI_STRUCTURED_INTENT_EXTRACTION_MAX_TOKENS:384}
     embedding:
       api-key: ${LIULIU_AI_EMBEDDING_API_KEY:}
       model: ${LIULIU_AI_EMBEDDING_MODEL:text-embedding-v4}
@@ -100,6 +102,7 @@ liuliu:
     hybrid-keyword-recall-enabled: ${LIULIU_RAG_HYBRID_KEYWORD_RECALL_ENABLED:true}
     hybrid-keyword-per-variant-limit: ${LIULIU_RAG_HYBRID_KEYWORD_PER_VARIANT_LIMIT:3}
     hybrid-keyword-max-variants: ${LIULIU_RAG_HYBRID_KEYWORD_MAX_VARIANTS:8}
+    hybrid-rrf-k: ${LIULIU_RAG_HYBRID_RRF_K:60}
   co-create-room:
     member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
     cluster-broadcast-enabled: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:true}
