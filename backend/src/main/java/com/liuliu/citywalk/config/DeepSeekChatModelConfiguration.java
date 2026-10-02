@@ -7,6 +7,7 @@ import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.deepseek.api.DeepSeekApi;
 import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatProperties;
 import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekConnectionProperties;
+import org.springframework.ai.model.tool.DefaultToolExecutionEligibilityPredicate;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionEligibilityPredicate;
 import org.springframework.beans.factory.ObjectProvider;
@@ -59,11 +60,16 @@ public class DeepSeekChatModelConfiguration {
                 ? DeepSeekChatOptions.builder().model("deepseek-chat").build()
                 : chatProperties.getOptions();
 
+        // 容器里没有注册 ToolExecutionEligibilityPredicate 时必须给默认实现,
+        // 否则 getIfUnique() 返回 null,builder 会直接抛 "toolExecutionEligibilityPredicate cannot be null"。
+        ToolExecutionEligibilityPredicate toolExecutionEligibilityPredicate =
+                toolExecutionEligibilityPredicateProvider.getIfUnique(DefaultToolExecutionEligibilityPredicate::new);
+
         DeepSeekChatModel chatModel = DeepSeekChatModel.builder()
                 .deepSeekApi(deepSeekApi)
                 .defaultOptions(defaultOptions)
                 .toolCallingManager(toolCallingManager)
-                .toolExecutionEligibilityPredicate(toolExecutionEligibilityPredicateProvider.getIfUnique())
+                .toolExecutionEligibilityPredicate(toolExecutionEligibilityPredicate)
                 .retryTemplate(retryTemplate)
                 .observationRegistry(observationRegistryProvider.getIfUnique(() -> ObservationRegistry.NOOP))
                 .build();

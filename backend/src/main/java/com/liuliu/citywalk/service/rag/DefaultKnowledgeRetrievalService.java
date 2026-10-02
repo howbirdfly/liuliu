@@ -126,10 +126,20 @@ public class DefaultKnowledgeRetrievalService implements KnowledgeRetrievalServi
         metadata.put("keyword_weight", ragProperties.getHybridKeywordWeight());
         metadata.put("rrf_raw_score", rawRrfScore);
         metadata.put("rrf_normalized_score", normalizedRrfScore);
-        metadata.put("vector_rank", vector == null ? null : vector.rank());
-        metadata.put("vector_score", vectorHit == null ? null : vectorHit.score());
-        metadata.put("keyword_rank", keyword == null ? null : keyword.rank());
-        metadata.put("keyword_score", keywordHit == null ? null : keywordHit.score());
+        // 注意:不能写入 null。Spring AI 的 Document metadata 不允许 null 值,
+        // 某一路没有命中时该字段直接省略,而不是塞 null。
+        if (vector != null) {
+            metadata.put("vector_rank", vector.rank());
+        }
+        if (vectorHit != null) {
+            metadata.put("vector_score", vectorHit.score());
+        }
+        if (keyword != null) {
+            metadata.put("keyword_rank", keyword.rank());
+        }
+        if (keywordHit != null) {
+            metadata.put("keyword_score", keywordHit.score());
+        }
 
         return new KnowledgeHit(
                 primaryHit.chunkId(),

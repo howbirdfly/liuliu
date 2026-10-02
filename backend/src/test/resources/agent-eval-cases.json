@@ -1,0 +1,212 @@
+[
+  {
+    "id": "kb-01",
+    "category": "知识库检索",
+    "prompt": "帮我规划一条上海武康路的半日 citywalk 路线,喜欢拍照和咖啡",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-02",
+    "category": "知识库检索",
+    "prompt": "广州永庆坊有什么值得走的路线?想拍骑楼老街",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-03",
+    "category": "知识库检索",
+    "prompt": "成都望平街晚上适合散步吗?想找条沿河的路线",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-04",
+    "category": "知识库检索",
+    "prompt": "广州东山口有没有适合喝咖啡、看小洋楼的安静路线",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-05",
+    "category": "知识库检索",
+    "prompt": "上海外滩想看夜景,顺便喝杯咖啡,怎么走比较顺",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-06",
+    "category": "知识库检索",
+    "prompt": "珠江新城花城广场适合约会散步吗?想要有夜景的路线",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-07",
+    "category": "知识库检索",
+    "prompt": "海珠国家湿地公园想找条自然一点、人少一点的路线",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "kb-08",
+    "category": "知识库检索",
+    "prompt": "中山大学珠海校区校园里有什么适合傍晚散步的路线",
+    "expectedTools": ["search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-01",
+    "category": "地图POI",
+    "prompt": "武康路附近有哪些适合拍照的咖啡馆",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-02",
+    "category": "地图POI",
+    "prompt": "外滩附近哪里看日落比较好",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-03",
+    "category": "地图POI",
+    "prompt": "广州永庆坊周边有什么好吃的",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-04",
+    "category": "地图POI",
+    "prompt": "成都望平街附近有推荐的书店或咖啡店吗",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-05",
+    "category": "地图POI",
+    "prompt": "东山口附近适合拍照的小洋楼在哪",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "poi-06",
+    "category": "地图POI",
+    "prompt": "珠海情侣路附近有什么适合看夜景的地方",
+    "expectedTools": ["search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "detail-01",
+    "category": "路线详情",
+    "prompt": "永庆坊半日散步实录这条路线具体怎么走?想知道途经点",
+    "expectedTools": ["get_walk_detail", "search_community_guides"],
+    "expectNoTools": false
+  },
+  {
+    "id": "detail-02",
+    "category": "路线详情",
+    "prompt": "我看到有篇写望平街夜游的帖子,能说说里面的路线细节吗",
+    "expectedTools": ["get_walk_detail", "search_community_guides"],
+    "expectNoTools": false
+  },
+  {
+    "id": "detail-03",
+    "category": "路线详情",
+    "prompt": "广州东山口的公开路线里,有哪些是适合傍晚走的",
+    "expectedTools": ["search_community_guides", "search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "detail-04",
+    "category": "路线详情",
+    "prompt": "帮我找一条上海外滩的公开 walk 记录,看看别人怎么走的",
+    "expectedTools": ["search_community_guides", "search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "alias-01",
+    "category": "别名简称",
+    "prompt": "中珠附近有什么适合看日落的路线",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "alias-02",
+    "category": "别名简称",
+    "prompt": "日月贝周边海钓或者看海的路线有吗",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "alias-03",
+    "category": "别名简称",
+    "prompt": "海珠湿地想找个发呆的地方",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "alias-04",
+    "category": "别名简称",
+    "prompt": "珠城晚上哪里适合散步看夜景",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "alias-05",
+    "category": "别名简称",
+    "prompt": "鸡山市集附近有什么咖啡店",
+    "expectedTools": ["search_poi", "nearby_pois", "search_knowledge_base"],
+    "expectNoTools": false
+  },
+  {
+    "id": "multi-01",
+    "category": "多约束",
+    "prompt": "想在上海找一个安静、有咖啡、能拍照的地方,两个小时左右",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "multi-02",
+    "category": "多约束",
+    "prompt": "广州两天行程,想逛老街和骑楼,不要太商业化",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "multi-03",
+    "category": "多约束",
+    "prompt": "成都周末想找个能带小孩、又不用暴走的地方",
+    "expectedTools": ["search_knowledge_base", "search_poi", "nearby_pois"],
+    "expectNoTools": false
+  },
+  {
+    "id": "chat-01",
+    "category": "闲聊",
+    "prompt": "你好",
+    "expectedTools": [],
+    "expectNoTools": true
+  },
+  {
+    "id": "chat-02",
+    "category": "闲聊",
+    "prompt": "谢谢,我先看看",
+    "expectedTools": [],
+    "expectNoTools": true
+  },
+  {
+    "id": "chat-03",
+    "category": "闲聊",
+    "prompt": "今天天气不错",
+    "expectedTools": [],
+    "expectNoTools": true
+  },
+  {
+    "id": "chat-04",
+    "category": "闲聊",
+    "prompt": "你是谁?能做什么",
+    "expectedTools": [],
+    "expectNoTools": true
+  }
+]

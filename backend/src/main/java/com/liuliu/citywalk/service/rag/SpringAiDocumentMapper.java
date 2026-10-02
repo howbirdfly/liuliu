@@ -17,7 +17,12 @@ public class SpringAiDocumentMapper {
 
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (hit.metadata() != null && !hit.metadata().isEmpty()) {
-            metadata.putAll(hit.metadata());
+            // Spring AI 的 Document metadata 不允许 null 值,这里统一过滤掉,避免上游元数据缺失时直接抛异常。
+            hit.metadata().forEach((key, value) -> {
+                if (key != null && value != null) {
+                    metadata.put(key, value);
+                }
+            });
         }
         metadata.putIfAbsent("chunk_id", hit.chunkId());
         metadata.putIfAbsent("source_id", hit.sourceId());
