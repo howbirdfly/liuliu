@@ -134,6 +134,66 @@ public class MapSearchService {
         }
     }
 
+    /**
+     * 把地名/地址解析成经纬度。用于 nearby_pois 在模型没有坐标时先做地理编码。
+     */
+    public AgentMapSearchResult<LocationSearchResponse> geocodeForAgent(String address) {
+        String normalized = address == null ? "" : address.trim();
+        if (normalized.isBlank()) {
+            return new AgentMapSearchResult<>(true, null, null, List.of());
+        }
+
+        if (!isConfigured()) {
+            return new AgentMapSearchResult<>(
+                    false,
+                    "map_search_unavailable",
+                    "map_service_not_configured",
+                    List.of()
+            );
+        }
+
+        try {
+            String url = amapProperties.getBaseUrl()
+                    + "/v3/geocode/geo?address=" + encode(normalized)
+                    + "&key=" + encode(amapProperties.getWebKey());
+            JsonNode root = sendGet(url);
+            JsonNode geocodes = root.path("geocodes");
+            if (!geocodes.isArray() || geocodes.isEmpty()) {
+                return new AgentMapSearchResult<>(true, null, null, List.of());
+            }
+
+            List<LocationSearchResponse> results = new ArrayList<>();
+            for (JsonNode geocode : geocodes) {
+                double[] location = parseLocation(geocode.path("location").asText());
+                if (location == null) {
+                    continue;
+                }
+                String name = geocode.path("formatted_address").asText("");
+                results.add(new LocationSearchResponse(
+                        name == null || name.isBlank() ? normalized : name,
+                        location[1],
+                        location[0]
+                ));
+                if (results.size() >= MAX_SEARCH_RESULTS) {
+                    break;
+                }
+            }
+            return new AgentMapSearchResult<>(true, null, null, results);
+        } catch (Exception error) {
+            if (error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
+                Thread.currentThread().interrupt();
+                throw new AgentExecutionCancelledException("agent_execution_cancelled", error);
+            }
+            log.warn("Agent geocode failed for address={}: {}", normalized, error.getMessage());
+            return new AgentMapSearchResult<>(
+                    false,
+                    "map_geocode_failed",
+                    error.getMessage() == null || error.getMessage().isBlank() ? "unknown_error" : error.getMessage(),
+                    List.of()
+            );
+        }
+    }
+
     public List<PoiResponse> nearbyPois(Double lat, Double lng) {
         if (lat == null || lng == null) {
             return List.of();
