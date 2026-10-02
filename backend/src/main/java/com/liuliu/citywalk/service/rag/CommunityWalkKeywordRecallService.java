@@ -25,14 +25,37 @@ import java.util.Set;
 public class CommunityWalkKeywordRecallService {
 
     private static final String COMMUNITY_WALK_SOURCE_TYPE = "community_walk";
+    private static final int MAX_GRAMS_PER_LENGTH = 4;
+    /** 疑问词、助词、口语连接词等,含有这些字符的 n-gram 直接丢弃,避免生成噪音词项。 */
+    private static final Set<Character> QUERY_STOP_CHARS = Set.of(
+            '的', '了', '在', '想', '去', '找', '有', '吗', '呢', '吧', '和', '与', '或',
+            '是', '我', '你', '他', '她', '它', '这', '那', '么', '怎', '请', '帮', '推',
+            '荐', '附', '近', '周', '末', '一', '下', '个', '条', '走', '逛', '适', '合',
+            '可', '以', '要', '还', '都', '就', '能', '会', '给', '把', '被', '让', '从',
+            '到', '对', '为', '于', '及', '并', '但', '而', '什', '哪', '里', '多', '少'
+    );
     private static final Set<String> GENERIC_QUERY_TERMS = Set.of(
             "citywalk", "拍照", "出片", "摄影", "散步", "漫步", "晚霞", "日落", "夕阳",
             "夜景", "海边", "海滨", "海风", "打卡", "咖啡"
     );
 
     private static final Map<String, List<String>> QUERY_SYNONYMS = Map.ofEntries(
+            // 校园/校区类简称
             Map.entry("中珠", List.of("中山大学珠海校区", "中大珠海")),
             Map.entry("中大珠海", List.of("中山大学珠海校区", "中珠")),
+            // 景点/商圈类简称
+            Map.entry("海珠湿地", List.of("海珠国家湿地公园")),
+            Map.entry("珠城", List.of("珠江新城")),
+            Map.entry("花城广场", List.of("珠江新城花城广场", "珠江新城")),
+            Map.entry("日月贝", List.of("珠海日月贝游艇海钓出海中心")),
+            Map.entry("鸡山市集", List.of("下一站咖啡(鸡山市集)")),
+            Map.entry("深圳行政服务大厅", List.of("深圳市行政服务大厅")),
+            // 「城市 + 地点」的口语写法,用户常这么搜,但库里存的是不带城市前缀的地点名
+            Map.entry("上海外滩", List.of("外滩")),
+            Map.entry("广州永庆坊", List.of("永庆坊")),
+            Map.entry("广州东山口", List.of("东山口")),
+            Map.entry("成都望平街", List.of("望平街")),
+            // 风格/场景类同义词
             Map.entry("晚霞", List.of("日落", "夕阳")),
             Map.entry("拍照", List.of("出片", "摄影")),
             Map.entry("散步", List.of("漫步", "citywalk")),
@@ -193,7 +216,8 @@ public class CommunityWalkKeywordRecallService {
         }
         for (String anchor : anchorVariants) {
             String normalizedAnchor = normalizeText(anchor);
-            if (normalizedAnchor.isBlank()) {
+            // 锚点至少 3 个字,避免 "附近/散步" 这类短词把不相关帖子也放进来。
+            if (normalizedAnchor.length() < 3) {
                 continue;
             }
             if (location.contains(normalizedAnchor)) {
@@ -253,57 +277,80 @@ public class CommunityWalkKeywordRecallService {
     }
 
     private List<String> buildVariants(String queryText, int maxVariants) {
+        return extractQueryTerms(queryText, maxVariants);
+    }
+
+    private List<String> buildAnchorVariants(String queryText, int maxVariants) {
+        return extractQueryTerms(queryText, maxVariants);
+    }
+
+    /**
+     * 从 query 里抽取关键词项。
+     *
+     * <p>中文 query 通常没有空格,直接按空格切分会把整句话当成一个关键词去做 LIKE 匹配,永远命中不了。
+     * 所以这里在按空格/标点切段之后,再对中文片段做 4→3→2 字 n-gram 抽取(从尾部往前,优先保留更像地点/主题的后缀词),
+     * 并过滤掉含疑问词、助词、口语连接词的噪音词项。
+     */
+    private List<String> extractQueryTerms(String queryText, int maxVariants) {
         String normalizedQuery = defaultText(queryText, "").trim();
         if (normalizedQuery.isBlank()) {
             return List.of();
         }
 
-        Set<String> variants = new LinkedHashSet<>();
-        for (String segment : normalizedQuery.split("\\s+")) {
-            addVariant(variants, segment);
-            for (String synonym : QUERY_SYNONYMS.getOrDefault(segment.trim().toLowerCase(Locale.ROOT), List.of())) {
-                addVariant(variants, synonym);
-            }
-        }
+        Set<String> terms = new LinkedHashSet<>();
 
-        String compact = normalizedQuery.replaceAll("\\s+", "");
-        if (!compact.equals(normalizedQuery)) {
-            addVariant(variants, compact);
-        }
-
+        // 已知同义词优先级最高,例如 中珠 / 中大珠海 / 中山大学珠海校区。
         for (Map.Entry<String, List<String>> entry : QUERY_SYNONYMS.entrySet()) {
             if (normalizedQuery.contains(entry.getKey())) {
-                addVariant(variants, entry.getKey());
+                addVariant(terms, entry.getKey());
                 for (String synonym : entry.getValue()) {
-                    addVariant(variants, synonym);
+                    addVariant(terms, synonym);
                 }
             }
         }
 
-        return variants.stream()
+        String cleaned = normalizedQuery.replaceAll("[\\p{Punct}\\p{IsPunctuation}\\s]+", " ").trim();
+        for (String segment : cleaned.split("\\s+")) {
+            addVariant(terms, segment);
+            for (String gram : extractNgrams(segment)) {
+                addVariant(terms, gram);
+            }
+        }
+
+        return terms.stream()
                 .limit(Math.max(1, maxVariants))
                 .toList();
     }
 
-    private List<String> buildAnchorVariants(String queryText, int maxVariants) {
-        String normalizedQuery = defaultText(queryText, "").trim();
-        if (normalizedQuery.isBlank()) {
-            return List.of();
+    private List<String> extractNgrams(String segment) {
+        List<String> grams = new ArrayList<>();
+        String normalized = defaultText(segment, "").trim();
+        if (normalized.length() < 2 || !containsCjk(normalized)) {
+            return grams;
         }
-        Set<String> anchors = new LinkedHashSet<>();
-        for (String segment : normalizedQuery.split("\\s+")) {
-            String normalizedSegment = segment.trim().toLowerCase(Locale.ROOT);
-            if (normalizedSegment.length() < 2 || GENERIC_QUERY_TERMS.contains(normalizedSegment)) {
-                continue;
-            }
-            addVariant(anchors, segment);
-            for (String synonym : QUERY_SYNONYMS.getOrDefault(normalizedSegment, List.of())) {
-                addVariant(anchors, synonym);
+        // 只做 4 字 / 3 字切片:2 字切片(likely 通用词)命中率低、噪音大,反而会污染 RRF 融合。
+        for (int length = 4; length >= 3; length--) {
+            int added = 0;
+            for (int end = normalized.length(); end - length >= 0 && added < MAX_GRAMS_PER_LENGTH; end--) {
+                String gram = normalized.substring(end - length, end);
+                if (!isUsefulTerm(gram)) {
+                    continue;
+                }
+                grams.add(gram);
+                added++;
             }
         }
-        return anchors.stream()
-                .limit(Math.max(1, maxVariants))
-                .toList();
+        return grams;
+    }
+
+    private boolean containsCjk(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char ch = value.charAt(index);
+            if (ch >= '\u4e00' && ch <= '\u9fff') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean matchesAnyAnchor(CommunityWalkQueryRow row, List<String> anchorVariants) {
@@ -313,18 +360,15 @@ public class CommunityWalkKeywordRecallService {
         String title = normalizeText(row.getThemeTitle());
         String location = normalizeText(row.getLocationName());
         String tags = normalizeText(row.getTags());
-        String note = normalizeText(row.getNoteText());
-        String themeDescription = normalizeText(extractThemeField(row.getThemeSnapshot(), "description"));
         for (String anchor : anchorVariants) {
             String normalizedAnchor = normalizeText(anchor);
-            if (normalizedAnchor.isBlank()) {
+            if (normalizedAnchor.length() < 2) {
                 continue;
             }
+            // 锚点只认标题/地点/标签这类强字段:备注、主题描述里出现某个词往往只是顺带提及,用来做召回会放大噪音。
             if (title.contains(normalizedAnchor)
                     || location.contains(normalizedAnchor)
-                    || tags.contains(normalizedAnchor)
-                    || note.contains(normalizedAnchor)
-                    || themeDescription.contains(normalizedAnchor)) {
+                    || tags.contains(normalizedAnchor)) {
                 return true;
             }
         }
@@ -333,10 +377,25 @@ public class CommunityWalkKeywordRecallService {
 
     private void addVariant(Set<String> variants, String candidate) {
         String normalized = defaultText(candidate, "").trim();
-        if (normalized.length() < 2) {
-            return;
+        if (isUsefulTerm(normalized)) {
+            variants.add(normalized);
         }
-        variants.add(normalized);
+    }
+
+    private boolean isUsefulTerm(String term) {
+        String normalized = defaultText(term, "").trim();
+        if (normalized.length() < 2 || normalized.length() > 8) {
+            return false;
+        }
+        if (GENERIC_QUERY_TERMS.contains(normalized.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        for (int index = 0; index < normalized.length(); index++) {
+            if (QUERY_STOP_CHARS.contains(normalized.charAt(index))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String buildSearchContent(CommunityWalkQueryRow row) {

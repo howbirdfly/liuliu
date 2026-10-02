@@ -40,6 +40,33 @@ public class SpringAiKnowledgeDocumentService {
             return;
         }
 
+        List<KnowledgeDocument> knowledgeDocuments = embed(normalizedDocuments);
+        if (!knowledgeDocuments.isEmpty()) {
+            knowledgeIngestionService.upsert(knowledgeDocuments);
+        }
+    }
+
+    /**
+     * 用新分片整体替换某个来源的旧分片。
+     *
+     * <p>先算 embedding 再删旧数据：这样向量化失败时旧分片仍然可用，不会出现“删了旧的又没写进新的”的空窗。
+     * 分片算法、chunkSize 变化后，同一个来源的分片数量会变，只靠 upsert 会残留旧 chunkId，所以这里必须先删。
+     */
+    public void replaceBySource(String sourceType, String sourceId, List<Document> documents) {
+        List<Document> normalizedDocuments = normalize(documents);
+        if (normalizedDocuments.isEmpty()) {
+            removeBySource(sourceType, sourceId);
+            return;
+        }
+
+        List<KnowledgeDocument> knowledgeDocuments = embed(normalizedDocuments);
+        removeBySource(sourceType, sourceId);
+        if (!knowledgeDocuments.isEmpty()) {
+            knowledgeIngestionService.upsert(knowledgeDocuments);
+        }
+    }
+
+    private List<KnowledgeDocument> embed(List<Document> normalizedDocuments) {
         List<List<Float>> embeddings = embeddingService.embedAll(
                 normalizedDocuments.stream()
                         .map(Document::getText)
@@ -57,9 +84,7 @@ public class SpringAiKnowledgeDocumentService {
                 knowledgeDocuments.add(knowledgeDocument);
             }
         }
-        if (!knowledgeDocuments.isEmpty()) {
-            knowledgeIngestionService.upsert(knowledgeDocuments);
-        }
+        return knowledgeDocuments;
     }
 
     public void removeBySource(String sourceType, String sourceId) {

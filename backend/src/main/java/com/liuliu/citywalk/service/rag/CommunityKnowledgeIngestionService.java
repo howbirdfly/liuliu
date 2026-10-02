@@ -18,24 +18,25 @@ import java.util.Map;
 public class CommunityKnowledgeIngestionService {
 
     private static final Logger log = LoggerFactory.getLogger(CommunityKnowledgeIngestionService.class);
-    private static final int DEFAULT_CHUNK_SIZE = 520;
-    private static final int DEFAULT_CHUNK_OVERLAP = 80;
 
     private final CommunityMapper communityMapper;
     private final SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService;
     private final VectorStore vectorStore;
     private final ObjectMapper objectMapper;
+    private final KnowledgeTextChunker knowledgeTextChunker;
 
     public CommunityKnowledgeIngestionService(
             CommunityMapper communityMapper,
             SpringAiKnowledgeDocumentService springAiKnowledgeDocumentService,
             VectorStore vectorStore,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            KnowledgeTextChunker knowledgeTextChunker
     ) {
         this.communityMapper = communityMapper;
         this.springAiKnowledgeDocumentService = springAiKnowledgeDocumentService;
         this.vectorStore = vectorStore;
         this.objectMapper = objectMapper;
+        this.knowledgeTextChunker = knowledgeTextChunker;
     }
 
     public CommunityKnowledgeIngestionResult ingestLatestPublicWalks(int limit, int offset) {
@@ -49,7 +50,7 @@ public class CommunityKnowledgeIngestionService {
             return new CommunityKnowledgeIngestionResult(0, 0, List.of());
         }
 
-        List<ChunkDraft> drafts = new ArrayList<>();
+        Map<Long, List<ChunkDraft>> draftsByWalkId = new LinkedHashMap<>();
         List<Long> walkIds = new ArrayList<>();
         for (CommunityWalkQueryRow walk : walks) {
             if (walk == null || walk.getId() == null) {
@@ -60,35 +61,30 @@ public class CommunityKnowledgeIngestionService {
                 continue;
             }
             walkIds.add(walk.getId());
-            List<String> chunks = splitIntoChunks(knowledgeText, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
-            for (int index = 0; index < chunks.size(); index++) {
-                String chunk = chunks.get(index);
-                Map<String, Object> metadata = new LinkedHashMap<>();
-                metadata.put("chunk_index", index);
-                metadata.put("location_name", walk.getLocationName());
-                metadata.put("author_nickname", walk.getAuthorNickname());
-                metadata.put("tags", walk.getTags());
-                metadata.put("created_at", walk.getCreatedAt() == null ? null : walk.getCreatedAt().toInstant().toString());
-                drafts.add(new ChunkDraft(
-                        "community:" + walk.getId() + ":" + index,
-                        String.valueOf(walk.getId()),
-                        "community_walk",
-                        defaultText(walk.getThemeTitle(), "City Walk 公开路线"),
-                        chunk,
-                        metadata
-                ));
-            }
+            draftsByWalkId.put(walk.getId(), toChunkDrafts(walk, knowledgeTextChunker.split(knowledgeText)));
         }
 
-        if (drafts.isEmpty()) {
+        if (draftsByWalkId.isEmpty()) {
             return new CommunityKnowledgeIngestionResult(walkIds.size(), 0, walkIds);
         }
 
-        List<Document> documents = drafts.stream()
-                .map(this::toSpringAiDocument)
-                .toList();
-        springAiKnowledgeDocumentService.upsert(documents);
-        return new CommunityKnowledgeIngestionResult(walkIds.size(), documents.size(), walkIds);
+        int chunkCount = 0;
+        for (Map.Entry<Long, List<ChunkDraft>> entry : draftsByWalkId.entrySet()) {
+            List<Document> documents = entry.getValue().stream()
+                    .map(this::toSpringAiDocument)
+                    .toList();
+            if (documents.isEmpty()) {
+                continue;
+            }
+            // 分片规则变化后 chunk 数量会变，upsert 覆盖不到已经不存在的旧 chunkId，所以先按来源整体替换。
+            springAiKnowledgeDocumentService.replaceBySource(
+                    "community_walk",
+                    String.valueOf(entry.getKey()),
+                    documents
+            );
+            chunkCount += documents.size();
+        }
+        return new CommunityKnowledgeIngestionResult(walkIds.size(), chunkCount, walkIds);
     }
 
     public boolean syncPublicWalkById(Long walkId) {
@@ -110,7 +106,8 @@ public class CommunityKnowledgeIngestionService {
         List<Document> documents = drafts.stream()
                 .map(this::toSpringAiDocument)
                 .toList();
-        springAiKnowledgeDocumentService.upsert(documents);
+        // 先删同来源旧分片再写入：chunk 数量变少时，upsert 覆盖不到已经不存在的旧 index。
+        springAiKnowledgeDocumentService.replaceBySource("community_walk", String.valueOf(walkId), documents);
         log.info("Synced public walk into Milvus, walkId={}, chunkCount={}", walkId, documents.size());
         return true;
     }
@@ -135,26 +132,39 @@ public class CommunityKnowledgeIngestionService {
         if (knowledgeText.isBlank()) {
             return List.of();
         }
-        List<String> chunks = splitIntoChunks(knowledgeText, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP);
+        return toChunkDrafts(walk, knowledgeTextChunker.split(knowledgeText));
+    }
+
+    private List<ChunkDraft> toChunkDrafts(CommunityWalkQueryRow walk, List<String> chunks) {
         List<ChunkDraft> drafts = new ArrayList<>(chunks.size());
         for (int index = 0; index < chunks.size(); index++) {
             String chunk = chunks.get(index);
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("chunk_index", index);
-            metadata.put("location_name", walk.getLocationName());
-            metadata.put("author_nickname", walk.getAuthorNickname());
-            metadata.put("tags", walk.getTags());
-            metadata.put("created_at", walk.getCreatedAt() == null ? null : walk.getCreatedAt().toInstant().toString());
+            metadata.put("chunk_count", chunks.size());
+            // Spring AI 的 metadata 不允许 null 值,字段缺失时直接跳过。
+            putIfNotNull(metadata, "location_name", walk.getLocationName());
+            putIfNotNull(metadata, "author_nickname", walk.getAuthorNickname());
+            putIfNotNull(metadata, "tags", walk.getTags());
+            if (walk.getCreatedAt() != null) {
+                metadata.put("created_at", walk.getCreatedAt().toInstant().toString());
+            }
             drafts.add(new ChunkDraft(
                     "community:" + walk.getId() + ":" + index,
                     String.valueOf(walk.getId()),
                     "community_walk",
-                    defaultText(walk.getThemeTitle(), "City Walk 鍏紑璺嚎"),
+                    defaultText(walk.getThemeTitle(), "City Walk 公开路线"),
                     chunk,
                     metadata
             ));
         }
         return drafts;
+    }
+
+    private void putIfNotNull(Map<String, Object> target, String key, Object value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private String buildWalkKnowledgeText(CommunityWalkQueryRow walk) {
@@ -191,29 +201,6 @@ public class CommunityKnowledgeIngestionService {
                 draft.content(),
                 metadata
         );
-    }
-
-    private List<String> splitIntoChunks(String text, int chunkSize, int overlap) {
-        String normalizedText = defaultText(text, "").trim();
-        if (normalizedText.isBlank()) {
-            return List.of();
-        }
-        if (normalizedText.length() <= chunkSize) {
-            return List.of(normalizedText);
-        }
-
-        List<String> chunks = new ArrayList<>();
-        int safeOverlap = Math.max(0, Math.min(overlap, chunkSize / 2));
-        int start = 0;
-        while (start < normalizedText.length()) {
-            int end = Math.min(normalizedText.length(), start + chunkSize);
-            chunks.add(normalizedText.substring(start, end).trim());
-            if (end >= normalizedText.length()) {
-                break;
-            }
-            start = Math.max(end - safeOverlap, start + 1);
-        }
-        return chunks;
     }
 
     private String defaultText(String text, String fallback) {

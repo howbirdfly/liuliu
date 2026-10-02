@@ -101,8 +101,11 @@ liuliu:
     rerank-candidate-max-top-k: ${LIULIU_RAG_RERANK_CANDIDATE_MAX_TOP_K:20}
     hybrid-keyword-recall-enabled: ${LIULIU_RAG_HYBRID_KEYWORD_RECALL_ENABLED:true}
     hybrid-keyword-per-variant-limit: ${LIULIU_RAG_HYBRID_KEYWORD_PER_VARIANT_LIMIT:3}
-    hybrid-keyword-max-variants: ${LIULIU_RAG_HYBRID_KEYWORD_MAX_VARIANTS:8}
+    hybrid-keyword-max-variants: ${LIULIU_RAG_HYBRID_KEYWORD_MAX_VARIANTS:16}
     hybrid-rrf-k: ${LIULIU_RAG_HYBRID_RRF_K:60}
+    hybrid-keyword-weight: ${LIULIU_RAG_HYBRID_KEYWORD_WEIGHT:1.0}
+    chunk-size: ${LIULIU_RAG_CHUNK_SIZE:520}
+    chunk-overlap: ${LIULIU_RAG_CHUNK_OVERLAP:80}
   co-create-room:
     member-inactive-timeout-millis: ${CO_CREATE_ROOM_MEMBER_INACTIVE_TIMEOUT_MILLIS:14400000}
     cluster-broadcast-enabled: ${CO_CREATE_ROOM_CLUSTER_BROADCAST_ENABLED:true}

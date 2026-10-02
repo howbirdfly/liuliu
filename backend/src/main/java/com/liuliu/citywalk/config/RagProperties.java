@@ -11,8 +11,12 @@ public class RagProperties {
     private int rerankCandidateMaxTopK = 20;
     private boolean hybridKeywordRecallEnabled = true;
     private int hybridKeywordPerVariantLimit = 3;
-    private int hybridKeywordMaxVariants = 8;
+    private int hybridKeywordMaxVariants = 16;
     private int hybridRrfK = 60;
+    /** 关键词通道在 RRF 融合里的权重,1.0 表示与向量通道等权(保持原有行为)。 */
+    private double hybridKeywordWeight = 1.0D;
+    private int chunkSize = 520;
+    private int chunkOverlap = 80;
 
     public boolean isEnabled() {
         return enabled;
@@ -76,5 +80,29 @@ public class RagProperties {
 
     public void setHybridRrfK(int hybridRrfK) {
         this.hybridRrfK = hybridRrfK;
+    }
+
+    public double getHybridKeywordWeight() {
+        return hybridKeywordWeight;
+    }
+
+    public void setHybridKeywordWeight(double hybridKeywordWeight) {
+        this.hybridKeywordWeight = hybridKeywordWeight;
+    }
+
+    public int getChunkSize() {
+        return chunkSize;
+    }
+
+    public void setChunkSize(int chunkSize) {
+        this.chunkSize = chunkSize;
+    }
+
+    public int getChunkOverlap() {
+        return chunkOverlap;
+    }
+
+    public void setChunkOverlap(int chunkOverlap) {
+        this.chunkOverlap = chunkOverlap;
     }
 }

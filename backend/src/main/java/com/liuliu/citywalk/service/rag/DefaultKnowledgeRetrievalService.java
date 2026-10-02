@@ -65,12 +65,14 @@ public class DefaultKnowledgeRetrievalService implements KnowledgeRetrievalServi
         keywordBySource.keySet().forEach(key -> sourceKeys.put(key, true));
 
         int rrfK = Math.max(1, ragProperties.getHybridRrfK());
-        double maximumTwoChannelScore = 2D / (rrfK + 1D);
+        double keywordWeight = Math.max(0D, ragProperties.getHybridKeywordWeight());
+        double maximumTwoChannelScore = (1D + keywordWeight) / (rrfK + 1D);
         List<KnowledgeHit> fused = new ArrayList<>(sourceKeys.size());
         for (String sourceKey : sourceKeys.keySet()) {
             RankedHit vector = vectorBySource.get(sourceKey);
             RankedHit keyword = keywordBySource.get(sourceKey);
-            double rawRrfScore = reciprocalRank(vector, rrfK) + reciprocalRank(keyword, rrfK);
+            // 关键词通道精度低于向量语义召回,做加权降权,避免少量 LIKE 命中靠名次把正确结果挤下去。
+            double rawRrfScore = reciprocalRank(vector, rrfK) + keywordWeight * reciprocalRank(keyword, rrfK);
             double normalizedRrfScore = Math.min(1D, rawRrfScore / maximumTwoChannelScore);
             fused.add(buildFusedHit(vector, keyword, rawRrfScore, normalizedRrfScore, rrfK));
         }
@@ -121,6 +123,7 @@ public class DefaultKnowledgeRetrievalService implements KnowledgeRetrievalServi
         }
         metadata.put("fusion_method", "rrf");
         metadata.put("rrf_k", rrfK);
+        metadata.put("keyword_weight", ragProperties.getHybridKeywordWeight());
         metadata.put("rrf_raw_score", rawRrfScore);
         metadata.put("rrf_normalized_score", normalizedRrfScore);
         metadata.put("vector_rank", vector == null ? null : vector.rank());
